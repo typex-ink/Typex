@@ -1,6 +1,8 @@
 //! AudioService：start/stop/cancel，输出 Recording（07 §4 audio/）。
+pub mod chime;
 pub mod pipeline;
 pub mod recorder;
+pub mod vad;
 
 use crate::error::{ErrorCode, Result, TypexError};
 use std::sync::Mutex;

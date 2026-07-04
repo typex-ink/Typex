@@ -1,0 +1,61 @@
+{
+  "error": {
+    "auth_error": "API 密钥无效（401）",
+    "network_error": "无法连接 API，请检查网络",
+    "timeout": "服务响应超时",
+    "rate_limited": "请求过于频繁（429），稍后自动重试",
+    "server_error": "服务端错误（5xx）",
+    "invalid_request": "请求被拒绝",
+    "no_speech": "没有听到声音",
+    "no_focus": "当前没有输入焦点，结果已复制",
+    "permission_missing": "缺少辅助功能权限，无法输入文字",
+    "audio_device": "麦克风不可用",
+    "not_configured": "尚未配置模型服务",
+    "internal": "内部错误"
+  },
+  "hud": {
+    "mode_dictation": "听写",
+    "mode_dictation_verbatim": "听写 · 原样",
+    "mode_assistant": "助手",
+    "transcribing": "正在转写…",
+    "polishing": "正在整理…",
+    "translating": "正在翻译…",
+    "thinking": "正在思考…",
+    "injecting": "正在输入…",
+    "injected": "已输入",
+    "unpolished": "未整理",
+    "no_sound": "没有听到声音",
+    "retry": "重试",
+    "copy_transcript": "复制原文",
+    "inject_original": "注入原文",
+    "busy": "正在处理上一条…",
+    "stage_transcribing": "转写",
+    "stage_processing": "处理",
+    "stage_injecting": "输入",
+    "stage_recording": "录音"
+  },
+  "actions": {
+    "open_model_settings": "打开模型设置",
+    "select_microphone": "选择麦克风",
+    "grant_permission": "去授权",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "copy": "复制",
+    "test": "测试",
+    "edit": "编辑",
+    "switch": "切换",
+    "restore_default": "恢复默认"
+  },
+  "settings": {
+    "nav_general": "通用",
+    "nav_dictation": "听写",
+    "nav_translation": "翻译",
+    "nav_assistant": "助手",
+    "nav_providers": "模型服务",
+    "nav_hotkeys": "快捷键",
+    "nav_history": "历史",
+    "nav_diagnostics": "诊断",
+    "nav_about": "关于"
+  }
+}

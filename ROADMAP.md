@@ -42,7 +42,7 @@
   720×520 左导航 9 页框架；组件库（Button/Input/SecretInput/Select/Toggle/Kbd/ProviderCard/Callout/HotkeyRecorder…全部对照 mockup §7 组件全态）；通用页 / 听写页（整理开关+提示词模板编辑器+注入方式+麦克风选择+电平预览）/ 模型服务页（ProviderCard+编辑子页+预设模板+测试连接+切换▾多档案）/ 快捷键页（HotkeyRecorder+冲突警告）；深浅双主题。
 - [x] **CP-1.8 Onboarding 5 步**（2026-07-05）
   640×480 向导：欢迎（图标+口号+左下语言切换）/ 权限（macOS 麦克风+辅助功能+输入监听实时轮询）/ 模型（云端直填两组表单）/ 快捷键（默认键位+练习输入框）/ 完成；跳过路径。
-- [ ] **CP-1.9 VAD + 长录音 + 提示音**
+- [x] **CP-1.9 VAD + 长录音 + 提示音**（2026-07-05）
   Silero VAD（vad-rs）首尾静音裁剪；超限自动切片（静音边界）分段转写拼接；HUD 录制时长显示 + 10 分钟温和提示；rodio 提示音三枚（开始/成功/错误，可关）。
 - [x] **CP-1.10 i18n + 错误文案**（2026-07-05）
   vue-i18n zh-CN/en 全量资源；ErrorCode → 文案映射全表（05 §9）；「Rust 错误码都有 i18n key」的 vitest 契约测试。

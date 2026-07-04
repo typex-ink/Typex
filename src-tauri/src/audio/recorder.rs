@@ -13,7 +13,6 @@ pub struct ActiveRecording {
     // Stream 不是 Send；持有 stop 信号，流本体活在专属线程
     stop_tx: std_mpsc::Sender<()>,
     result_rx: std_mpsc::Receiver<Result<Recording>>,
-    started_at: Instant,
 }
 
 impl ActiveRecording {
@@ -35,17 +34,15 @@ impl ActiveRecording {
             .recv()
             .map_err(|_| TypexError::new(ErrorCode::AudioDevice, "音频线程异常退出"))??;
 
-        Ok(Self { stop_tx, result_rx, started_at: Instant::now() })
+        Ok(Self { stop_tx, result_rx })
     }
 
     pub fn finish(self) -> Result<Recording> {
         let _ = self.stop_tx.send(());
-        let mut rec = self
-            .result_rx
+        // duration 以 VAD 裁剪后的有效时长为准（pipeline::finalize_recording）
+        self.result_rx
             .recv()
-            .map_err(|_| TypexError::new(ErrorCode::AudioDevice, "音频线程异常退出"))??;
-        rec.duration_ms = self.started_at.elapsed().as_millis() as u64;
-        Ok(rec)
+            .map_err(|_| TypexError::new(ErrorCode::AudioDevice, "音频线程异常退出"))?
     }
 }
 
@@ -135,9 +132,6 @@ fn run_stream(
     }
     drop(stream);
 
-    let result = pipeline::to_wav_16k_mono(&mono, sample_rate);
-    let _ = result_tx.send(result.map(|wav| Recording {
-        duration_ms: (mono.len() as u64 * 1000) / sample_rate as u64,
-        wav_16k_mono: wav,
-    }));
+    let result = pipeline::finalize_recording(&mono, sample_rate);
+    let _ = result_tx.send(result.map(|(wav, duration_ms)| Recording { wav_16k_mono: wav, duration_ms }));
 }

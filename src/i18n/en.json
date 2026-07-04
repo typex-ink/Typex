@@ -1,0 +1,61 @@
+{
+  "error": {
+    "auth_error": "Invalid API key (401)",
+    "network_error": "Cannot reach the API — check your network",
+    "timeout": "The service timed out",
+    "rate_limited": "Rate limited (429), retrying automatically",
+    "server_error": "Server error (5xx)",
+    "invalid_request": "Request rejected",
+    "no_speech": "No speech detected",
+    "no_focus": "No input focus — result copied to clipboard",
+    "permission_missing": "Accessibility permission missing — cannot type text",
+    "audio_device": "Microphone unavailable",
+    "not_configured": "No model service configured",
+    "internal": "Internal error"
+  },
+  "hud": {
+    "mode_dictation": "Dictate",
+    "mode_dictation_verbatim": "Dictate · verbatim",
+    "mode_assistant": "Assistant",
+    "transcribing": "Transcribing…",
+    "polishing": "Polishing…",
+    "translating": "Translating…",
+    "thinking": "Thinking…",
+    "injecting": "Typing…",
+    "injected": "Typed",
+    "unpolished": "unpolished",
+    "no_sound": "No sound detected",
+    "retry": "Retry",
+    "copy_transcript": "Copy transcript",
+    "inject_original": "Type original",
+    "busy": "Still processing the last one…",
+    "stage_transcribing": "Transcription",
+    "stage_processing": "Processing",
+    "stage_injecting": "Typing",
+    "stage_recording": "Recording"
+  },
+  "actions": {
+    "open_model_settings": "Open model settings",
+    "select_microphone": "Select microphone",
+    "grant_permission": "Grant",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "copy": "Copy",
+    "test": "Test",
+    "edit": "Edit",
+    "switch": "Switch",
+    "restore_default": "Restore default"
+  },
+  "settings": {
+    "nav_general": "General",
+    "nav_dictation": "Dictation",
+    "nav_translation": "Translation",
+    "nav_assistant": "Assistant",
+    "nav_providers": "Model services",
+    "nav_hotkeys": "Hotkeys",
+    "nav_history": "History",
+    "nav_diagnostics": "Diagnostics",
+    "nav_about": "About"
+  }
+}

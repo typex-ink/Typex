@@ -10,6 +10,11 @@ import {
   type ErrorCode,
 } from "./ipc";
 import Waveform from "./Waveform.vue";
+// HUD 纪律：不引 vue-i18n 运行时，静态 JSON 按语言直取（文案仍单一来源）
+import zhCN from "@/i18n/zh-CN.json";
+import en from "@/i18n/en.json";
+
+const L = navigator.language.toLowerCase().startsWith("zh") ? zhCN : en;
 
 const snap = reactive<SessionSnapshot>({
   session_id: 0,
@@ -36,40 +41,27 @@ let lastVoice = 0;
 let unlistenSnap: (() => void) | null = null;
 let unlistenLevel: (() => void) | null = null;
 
-// 错误文案（05 §9；CP-1.10 移入 i18n）
-const errorText: Record<ErrorCode, string> = {
-  auth_error: "API 密钥无效（401）",
-  network_error: "无法连接 API，请检查网络",
-  timeout: "服务响应超时",
-  rate_limited: "请求过于频繁（429），稍后自动重试",
-  server_error: "服务端错误（5xx）",
-  invalid_request: "请求被拒绝",
-  no_speech: "没有听到声音",
-  no_focus: "当前没有输入焦点，结果已复制",
-  permission_missing: "缺少辅助功能权限，无法输入文字",
-  audio_device: "麦克风不可用",
-  not_configured: "尚未配置模型服务",
-  internal: "内部错误",
-};
+// 错误文案（05 §9）：单一来源 = i18n 资源，key 与 Rust ErrorCode 对齐
+const errorText: Record<ErrorCode, string> = L.error as Record<ErrorCode, string>;
 
 const stageText: Record<string, string> = {
-  transcribing: "转写",
-  processing: "处理",
-  injecting: "输入",
-  recording: "录音",
+  transcribing: L.hud.stage_transcribing,
+  processing: L.hud.stage_processing,
+  injecting: L.hud.stage_injecting,
+  recording: L.hud.stage_recording,
 };
 
 const modeLabel = computed(() => {
   if (snap.mode === "translation") return snap.translation_direction ?? "翻译";
-  if (snap.mode === "assistant") return "助手";
-  return snap.verbatim ? "听写 · 原样" : "听写";
+  if (snap.mode === "assistant") return L.hud.mode_assistant;
+  return snap.verbatim ? L.hud.mode_dictation_verbatim : L.hud.mode_dictation;
 });
 
 const processingText = computed(() => {
-  if (snap.phase === "transcribing") return "正在转写…";
-  if (snap.mode === "translation") return "正在翻译…";
-  if (snap.mode === "dictation") return snap.verbatim ? "正在输入…" : "正在整理…";
-  return "正在思考…";
+  if (snap.phase === "transcribing") return L.hud.transcribing;
+  if (snap.mode === "translation") return L.hud.translating;
+  if (snap.mode === "dictation") return snap.verbatim ? L.hud.injecting : L.hud.polishing;
+  return L.hud.thinking;
 });
 
 const failText = computed(() => {
@@ -150,14 +142,14 @@ function onKey(e: KeyboardEvent) {
     <Transition name="hud">
       <!-- 成功反馈 -->
       <div v-if="showSuccess" class="hud success-pop">
-        <span class="ok">✓</span><span>已输入</span>
+        <span class="ok">✓</span><span>{{ L.hud.injected }}</span>
       </div>
 
       <!-- 录音中 -->
       <div v-else-if="isRecording" class="hud">
         <span class="dot" />
         <span class="time">{{ fmtTime(elapsed) }}</span>
-        <span v-if="silent" class="hint">没有听到声音</span>
+        <span v-if="silent" class="hint">{{ L.hud.no_sound }}</span>
         <Waveform v-else :levels="levels" />
         <span class="mode">{{ modeLabel }}</span>
         <button class="x" title="取消（Esc）" @click="sendCommand('cancel')">✕</button>
@@ -168,7 +160,7 @@ function onKey(e: KeyboardEvent) {
         <Waveform :levels="[]" breathing />
         <span class="ptext">{{ processingText }}</span>
         <span v-if="processingSecs > 5" class="hint mono">{{ processingSecs }}s</span>
-        <span v-if="snap.unpolished" class="hint">未整理</span>
+        <span v-if="snap.unpolished" class="hint">{{ L.hud.unpolished }}</span>
       </div>
 
       <!-- 失败（不自动消失，05 §3.2） -->
@@ -176,20 +168,20 @@ function onKey(e: KeyboardEvent) {
         <span v-if="snap.error === 'no_focus'" class="info">ⓘ</span>
         <span v-else class="warn">⚠</span>
         <span class="ftext">{{ failText }}</span>
-        <button v-if="canRetry" class="btn-sm" @click="sendCommand('retry')">重试</button>
+        <button v-if="canRetry" class="btn-sm" @click="sendCommand('retry')">{{ L.hud.retry }}</button>
         <button
           v-if="canInjectOriginal"
           class="btn-ghost-sm"
           @click="sendCommand('inject_original')"
         >
-          注入原文
+          {{ L.hud.inject_original }}
         </button>
         <button
           v-else-if="snap.has_transcript"
           class="btn-ghost-sm"
           @click="sendCommand('copy_transcript')"
         >
-          复制原文
+          {{ L.hud.copy_transcript }}
         </button>
         <button class="x" @click="sendCommand('dismiss')">✕</button>
       </div>

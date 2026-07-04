@@ -47,6 +47,7 @@ futures-util = "0.3"
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
 async-stream = "0.3.6"
+rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"

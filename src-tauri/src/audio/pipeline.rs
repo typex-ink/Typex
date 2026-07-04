@@ -28,6 +28,20 @@ pub fn to_wav_16k_mono(samples: &[f32], src_rate: u32) -> Result<Vec<u8>> {
     encode_wav(&resampled, TARGET_RATE)
 }
 
+/// 录音后处理：重采样 → VAD 首尾静音裁剪 → WAV（07 §7.4）。
+/// 返回 (wav, 有效时长 ms)；全静音时 wav 为空录音（0 采样）。
+pub fn finalize_recording(samples: &[f32], src_rate: u32) -> Result<(Vec<u8>, u64)> {
+    let resampled = if src_rate == TARGET_RATE {
+        samples.to_vec()
+    } else {
+        resample(samples, src_rate, TARGET_RATE)?
+    };
+    let (start, end) = super::vad::trim_silence(&resampled, 150);
+    let trimmed = &resampled[start..end];
+    let duration_ms = (trimmed.len() as u64 * 1000) / TARGET_RATE as u64;
+    Ok((encode_wav(trimmed, TARGET_RATE)?, duration_ms))
+}
+
 fn resample(input: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {
     if input.is_empty() {
         return Ok(Vec::new());

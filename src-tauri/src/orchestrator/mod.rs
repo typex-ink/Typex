@@ -188,12 +188,12 @@ impl Orchestrator {
                             return;
                         }
                     };
-                    let result = stt
-                        .transcribe(
-                            AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
-                            SttOptions { language: Some(lang), prompt: None, temperature: None },
-                        )
-                        .await;
+                    let result = crate::providers::stt::transcribe_auto_chunk(
+                        stt.as_ref(),
+                        AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
+                        SttOptions { language: Some(lang), prompt: None, temperature: None },
+                    )
+                    .await;
                     let event = match result {
                         Ok(t) if t.text.trim().is_empty() => Event::SttFailed {
                             session_id,
@@ -243,8 +243,15 @@ impl Orchestrator {
                 self.emit_snapshot(exec);
             }
             Effect::PlayChime(chime) => {
-                // CP-1.9 接 rodio；先记日志
-                tracing::debug!("chime: {chime:?}");
+                let g = self.settings.get().general;
+                if g.chimes_enabled {
+                    let kind = match chime {
+                        session::Chime::Start => crate::audio::chime::ChimeKind::Start,
+                        session::Chime::Success => crate::audio::chime::ChimeKind::Success,
+                        session::Chime::Error => crate::audio::chime::ChimeKind::Error,
+                    };
+                    crate::audio::chime::play(kind, g.chimes_volume);
+                }
             }
             Effect::CopyToClipboard(text) => {
                 tokio::task::spawn_blocking(move || {

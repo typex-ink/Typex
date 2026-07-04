@@ -39,3 +39,48 @@ pub trait SttProvider: Send + Sync {
         -> Result<Transcript, ProviderError>;
     fn capabilities(&self) -> SttCapabilities;
 }
+
+/// 长录音自动切片转写（02 F-1 无时长硬上限）：
+/// 超过 provider 单次上限时在 VAD 静音处切片，分段转写后拼接，用户无感。
+pub async fn transcribe_auto_chunk(
+    provider: &dyn SttProvider,
+    audio: AudioInput,
+    opts: SttOptions,
+) -> Result<Transcript, ProviderError> {
+    let max = provider.capabilities().max_bytes;
+    let Some(max_bytes) = max else {
+        return provider.transcribe(audio, opts).await;
+    };
+    if audio.wav_16k_mono.len() <= max_bytes {
+        return provider.transcribe(audio, opts).await;
+    }
+
+    // 解 WAV → 采样 → 静音处切片
+    let reader = hound::WavReader::new(std::io::Cursor::new(&audio.wav_16k_mono))
+        .map_err(|e| ProviderError::InvalidRequest(format!("WAV 解析失败: {e}")))?;
+    let samples: Vec<f32> = reader
+        .into_samples::<i16>()
+        .filter_map(|s| s.ok())
+        .map(|s| s as f32 / i16::MAX as f32)
+        .collect();
+    // 16-bit PCM：每采样 2 字节 + 头部余量
+    let max_samples = (max_bytes.saturating_sub(1024)) / 2;
+    let chunks = crate::audio::vad::split_at_silence(&samples, max_samples);
+
+    let mut full_text = String::new();
+    let mut detected = None;
+    for (start, end) in chunks {
+        let wav = crate::audio::pipeline::to_wav_16k_mono(&samples[start..end], 16_000)
+            .map_err(|e| ProviderError::InvalidRequest(e.message))?;
+        let duration_ms = ((end - start) as u64 * 1000) / 16_000;
+        let t = provider
+            .transcribe(AudioInput { wav_16k_mono: wav, duration_ms }, opts.clone())
+            .await?;
+        if !full_text.is_empty() && !t.text.is_empty() {
+            full_text.push(' ');
+        }
+        full_text.push_str(t.text.trim());
+        detected = detected.or(t.detected_language);
+    }
+    Ok(Transcript { text: full_text, detected_language: detected })
+}
