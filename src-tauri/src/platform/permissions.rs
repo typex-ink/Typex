@@ -1,0 +1,35 @@
+//! 各平台权限检测/引导（07 §4 platform/permissions.rs）。
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionKind {
+    Microphone,
+    Accessibility,
+    InputMonitoring,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PermissionStatus {
+    pub kind: PermissionKind,
+    pub granted: bool,
+}
+
+/// 检测全部权限状态（macOS 主动检测；其他平台按需扩展）。
+pub fn check_all() -> Vec<PermissionStatus> {
+    #[cfg(target_os = "macos")]
+    {
+        vec![
+            PermissionStatus {
+                kind: PermissionKind::Accessibility,
+                granted: macos_accessibility_client::accessibility::application_is_trusted(),
+            },
+            // 麦克风与输入监听的检测在 CP-1.8 onboarding 完善
+        ]
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}

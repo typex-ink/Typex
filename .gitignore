@@ -1,0 +1,18 @@
+# Rust
+/src-tauri/target
+/target
+
+# Node
+node_modules
+dist
+
+# 生成物
+/src/ipc/bindings.ts
+/src-tauri/gen/schemas
+
+# 系统
+.DS_Store
+
+# IDE
+.idea
+.vscode

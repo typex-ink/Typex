@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!--
+    Typex 主图标「声波成 T」— 设计规格见 docs/04-design-system.md §2.1
+    墨版（默认）：纯黑底 + 纯白 glyph。1024 网格：柱宽 72、间距 56，
+    五柱高度比 0.42:0.68:1:0.68:0.42（最高 360），全圆角；
+    竖笔 72×480，顶端与中柱底留 56 负空间，底部左右各出头 40。
+    整体居中偏上 2%。本文件是唯一图形源，位图由 scripts/gen-icons.py 导出。
+  -->
+  <rect width="1024" height="1024" fill="#000000"/>
+  <g fill="#FFFFFF">
+    <!-- 五根波形柱：中线 y=224；高 151/245/360 -->
+    <rect x="220" y="148.5" width="72" height="151" rx="36"/>
+    <rect x="348" y="101.5" width="72" height="245" rx="36"/>
+    <rect x="476" y="44"    width="72" height="360" rx="36"/>
+    <rect x="604" y="101.5" width="72" height="245" rx="36"/>
+    <rect x="732" y="148.5" width="72" height="151" rx="36"/>
+    <!-- 竖笔（文本光标）：中柱底 404 + 56 间隙 -->
+    <rect x="476" y="460" width="72" height="480" rx="36"/>
+    <!-- 底衬：左右各出头 40 -->
+    <rect x="436" y="884" width="152" height="56" rx="28"/>
+  </g>
+</svg>

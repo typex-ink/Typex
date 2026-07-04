@@ -1,0 +1,40 @@
+{
+  "name": "typex",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-os": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "markdown-it": "^14",
+    "pinia": "^3",
+    "vue": "^3.5",
+    "vue-i18n": "^11"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
+    "@types/markdown-it": "^14",
+    "@types/node": "^24",
+    "@vitejs/plugin-vue": "^6",
+    "@vue/test-utils": "^2",
+    "jsdom": "^26",
+    "tailwindcss": "^4",
+    "typescript": "^5.8",
+    "vite": "^7",
+    "vitest": "^3",
+    "vue-tsc": "^3"
+  }
+}

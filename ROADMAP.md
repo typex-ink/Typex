@@ -9,9 +9,9 @@
 
 ## M0 · 骨架（管线端到端打通）
 
-- [ ] **CP-0.1 工程初始化**
+- [x] **CP-0.1 工程初始化**（2026-07-05）
   Tauri 2 工程：Vue 3 + TS + Tailwind CSS v4 + Pinia + Vite 多窗口入口（hud/assistant/settings/onboarding/home）；`src/styles/tokens.css` 从 mockup 复制落地；`src-tauri` 骨架 + `tauri.conf.json`（appId `ink.typex.app`）；GPLv3 LICENSE；`cargo check` + `pnpm build` 通过。
-- [ ] **CP-0.2 Rust 模块骨架 + IPC 契约链路**
+- [x] **CP-0.2 Rust 模块骨架 + IPC 契约链路**（2026-07-05）
   按 07 §4 目录树建全部模块（types/error/settings schema 数据先行）；tauri-specta 生成 `src/ipc/bindings.ts` 链路跑通；`error.rs` ErrorCode 全集定义。
 - [ ] **CP-0.3 托盘 + 单实例 + 设置存储**
   托盘图标（五柱波形 glyph，macOS template image）+ 基础菜单（设置/暂停/退出）；tauri-plugin-single-instance；SettingsService（JSON 读写 + schema_version + watch 广播）。
