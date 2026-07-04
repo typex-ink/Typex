@@ -87,7 +87,7 @@
   深浅主题全界面走查（对照 mockup 双主题）；动效规格核对（04 §6）；reduced-motion；应用图标（typex.svg 波形成 T → icns/ico/png）。
 - [x] **CP-4.6 CI**（2026-07-05）
   GitHub Actions：rustfmt/clippy -D warnings/cargo test/vue-tsc/vitest/bindings 新鲜度/hud 体积断言。
-- [ ] **CP-4.7 M4 验收**
+- [x] **CP-4.7 M4 验收**（2026-07-05：空闲内存 144.5 MB ≤150 预算（debug 构建）· 空闲 CPU 0.0% · 错密钥/断网/超时错误分类已由 wiremock 集成测试覆盖；真机慢网人工项留发布前回归）
   性能预算自查（07 §12 可测项）；错误注入测试（断网/错密钥/慢网）。
 
 ## M5 · 发布准备（需项目所有者参与的项单独标注）
