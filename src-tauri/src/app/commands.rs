@@ -24,3 +24,12 @@ pub fn update_settings(
 pub fn get_permission_status() -> Vec<crate::platform::permissions::PermissionStatus> {
     crate::platform::permissions::check_all()
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn session_command(
+    commander: State<'_, crate::orchestrator::SessionCommander>,
+    command: crate::orchestrator::SessionCommand,
+) {
+    let _ = commander.0.send(command);
+}

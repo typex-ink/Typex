@@ -36,7 +36,7 @@ pub enum ErrorCode {
 }
 
 /// 顶层错误：所有 service 的局部错误最终收敛到这里。
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Serialize, Deserialize, specta::Type)]
 #[error("{code:?}: {message}")]
 pub struct TypexError {
     pub code: ErrorCode,

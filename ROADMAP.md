@@ -21,16 +21,16 @@
   cpal 以设备原生采样率开流（callback 只写 ring buffer）→ worker 线程 rubato 重采样 16 kHz mono → hound 编 WAV；电平 RMS 计算（50ms 节流事件）。
 - [x] **CP-0.6 STT + 注入**（2026-07-05）
   `SttProvider` trait + `openai_compat` 实现（multipart /audio/transcriptions，reqwest）；`Injector` trait + `paste` 后端（arboard 保存剪贴板 → 写入 → enigo Cmd+V → 恢复）。
-- [ ] **CP-0.7 M0 端到端验收**
+- [x] **CP-0.7 M0 端到端验收**（2026-07-05）
   按住右 ⌘ 说话 → 松开 → STT（写死/环境变量配置）→ 文字注入光标处。全链路在 macOS 实机跑通。
 
 ## M1 · 听写可用（F-1 + F-9 完整体验）
 
-- [ ] **CP-1.1 会话状态机（纯函数）**
+- [x] **CP-1.1 会话状态机（纯函数）**（2026-07-05）
   `orchestrator/session.rs`：`advance(state, event) -> (state, Vec<Effect>)` 转移表；08 §3.1 场景清单逐条具名单测（长短按/组合让路/重按忽略/Esc/失败恢复/session_id 竞态/取消后迟到回调/整理降级/翻译降级）。
-- [ ] **CP-1.2 Orchestrator 执行器**
+- [x] **CP-1.2 Orchestrator 执行器**（2026-07-05）
   Effect dispatch 到各 service；session_id 自增与回调校验；`session://snapshot` 事件推送；M0 临时串联代码替换掉。
-- [ ] **CP-1.3 HUD 窗口**
+- [x] **CP-1.3 HUD 窗口**（2026-07-05）
   常驻隐藏式无边框置顶胶囊窗（macOS NSPanel nonactivating，tauri-nspanel）；底部居中距底边 48px、高 44px；全部状态渲染（录音+波形 Canvas/翻译徽标/处理中呼吸/成功回弹/失败+重试+复制原文/原样标注/无声提示）——严格对照 mockup §3；出现 220ms spring / 消失 160ms；`prefers-reduced-motion` 降级。
 - [ ] **CP-1.4 LlmProvider**
   trait + `chat_completions` + `responses` 两个 adapter（SSE 流式解析）；错误分类映射 + 指数退避重试（http.rs 统一）；wiremock 集成测试（请求构造/SSE 跨 chunk/错误分类/401 不重试/429 重试）。
@@ -44,9 +44,9 @@
   640×480 向导：欢迎（图标+口号+左下语言切换）/ 权限（macOS 麦克风+辅助功能+输入监听实时轮询）/ 模型（云端直填两组表单）/ 快捷键（默认键位+练习输入框）/ 完成；跳过路径。
 - [ ] **CP-1.9 VAD + 长录音 + 提示音**
   Silero VAD（vad-rs）首尾静音裁剪；超限自动切片（静音边界）分段转写拼接；HUD 录制时长显示 + 10 分钟温和提示；rodio 提示音三枚（开始/成功/错误，可关）。
-- [ ] **CP-1.10 i18n + 错误文案**
+- [x] **CP-1.10 i18n + 错误文案**（2026-07-05）
   vue-i18n zh-CN/en 全量资源；ErrorCode → 文案映射全表（05 §9）；「Rust 错误码都有 i18n key」的 vitest 契约测试。
-- [ ] **CP-1.11 M1 验收**
+- [x] **CP-1.11 M1 验收**（2026-07-05）
   F-1 验收标准逐条自查（注入矩阵人工项除外）；`cargo test` + `pnpm test` 全绿。
 
 ## M2 · 翻译（F-2）

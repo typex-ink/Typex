@@ -1,94 +1,306 @@
 //! Orchestrator：唯一的业务流程所有者（07 §3）。
-//! M0 阶段是最小串联（听写管线直通）；CP-1.1/1.2 替换为状态机 + 执行器。
+//! 状态机（session.rs 纯函数）+ 执行器（本文件）：Effect dispatch 到各 service。
 pub mod pipeline;
 pub mod session;
 
-use crate::audio::AudioService;
-use crate::error::{ErrorCode, Result, TypexError};
+use crate::audio::{AudioService, Recording};
+use crate::error::{ErrorCode, TypexError};
 use crate::hotkey::HotkeyEvent;
 use crate::inject::InjectorChain;
 use crate::providers::stt::{AudioInput, SttOptions, SttProvider};
 use crate::settings::SettingsService;
-use crate::types::SessionMode;
+use crate::types::SessionSnapshot;
+use session::{advance, Effect, Event, State};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
-/// M0 最小 orchestrator：hotkey 事件 → 录音 → STT → 注入。
-/// 无状态机（CP-1.1 加入）、无 HUD 反馈（CP-1.3 加入）。
+/// 快照推送回调（app 层注入：emit SessionSnapshotEvent；测试注入采集器）。
+pub type SnapshotSink = Box<dyn Fn(SessionSnapshot) + Send + Sync>;
+
 pub struct Orchestrator {
     pub settings: Arc<SettingsService>,
     pub audio: Arc<AudioService>,
     pub injector: Arc<InjectorChain>,
     pub stt: Arc<dyn SttProvider>,
+    pub snapshot_sink: SnapshotSink,
+    pub level_sink: Box<dyn Fn(Vec<f32>) + Send + Sync>,
+}
+
+/// HUD/前端发来的会话控制命令（07 §10.1 会话组）。
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionCommand {
+    Cancel,
+    Retry,
+    Dismiss,
+    CopyTranscript,
+    InjectOriginal,
+}
+
+/// 命令入口句柄（Tauri State 持有）。
+#[derive(Clone)]
+pub struct SessionCommander(pub mpsc::UnboundedSender<SessionCommand>);
+
+/// 执行器内部状态。
+struct Exec {
+    state: State,
+    next_session_id: u64,
+    /// 会话音频（不丢话铁律：失败重试期间保留）
+    audio_store: HashMap<u64, Recording>,
+    recording_started: Option<Instant>,
+    tx: mpsc::UnboundedSender<Event>,
 }
 
 impl Orchestrator {
-    /// 消费 hotkey 语义事件的主循环（tokio task）。
-    pub async fn run(self: Arc<Self>, mut hotkeys: mpsc::UnboundedReceiver<HotkeyEvent>) {
-        let (level_tx, mut level_rx) = mpsc::unbounded_channel::<Vec<f32>>();
-        // M0: 电平暂时丢弃（CP-1.3 推给 HUD）
-        tokio::spawn(async move { while level_rx.recv().await.is_some() {} });
+    pub async fn run(
+        self: Arc<Self>,
+        mut hotkeys: mpsc::UnboundedReceiver<HotkeyEvent>,
+        mut commands: mpsc::UnboundedReceiver<SessionCommand>,
+    ) {
+        let (tx, mut internal_rx) = mpsc::unbounded_channel::<Event>();
+        let mut exec = Exec {
+            state: State::Idle,
+            next_session_id: 1,
+            audio_store: HashMap::new(),
+            recording_started: None,
+            tx: tx.clone(),
+        };
 
-        let mut recording = false;
-        while let Some(ev) = hotkeys.recv().await {
-            match ev {
-                HotkeyEvent::TriggerDown { mode: SessionMode::Dictation } if !recording => {
-                    match self.audio.start("", level_tx.clone()) {
-                        Ok(()) => {
-                            recording = true;
-                            tracing::info!("录音开始");
-                        }
-                        Err(e) => tracing::error!("录音启动失败: {}", e.message),
-                    }
+        // 电平转发 task（audio worker → 前端）
+        let (level_tx, mut level_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+        {
+            let this = self.clone();
+            tokio::spawn(async move {
+                while let Some(levels) = level_rx.recv().await {
+                    (this.level_sink)(levels);
                 }
-                HotkeyEvent::TriggerUp { held_ms } if recording => {
-                    recording = false;
-                    if held_ms < 350 {
-                        // M0 简化：短按也结束并处理（toggle 语义在 CP-1.1 状态机实现）
-                    }
-                    let this = self.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = this.finish_dictation().await {
-                            tracing::error!("听写管线失败: {}", e.message);
-                        }
-                    });
-                }
-                HotkeyEvent::Yielded | HotkeyEvent::EscPressed if recording => {
-                    recording = false;
-                    self.audio.cancel();
-                    tracing::info!("录音取消");
-                }
-                _ => {}
+            });
+        }
+
+        loop {
+            let event = tokio::select! {
+                Some(hk) = hotkeys.recv() => self.map_hotkey(hk, &mut exec),
+                Some(cmd) = commands.recv() => Some(match cmd {
+                    SessionCommand::Cancel => Event::Esc,
+                    SessionCommand::Retry => Event::Retry,
+                    SessionCommand::Dismiss => Event::Dismiss,
+                    SessionCommand::CopyTranscript => Event::CopyTranscriptRequested,
+                    SessionCommand::InjectOriginal => Event::InjectOriginalRequested,
+                }),
+                Some(ev) = internal_rx.recv() => Some(ev),
+                else => break,
+            };
+            let Some(event) = event else { continue };
+
+            let threshold = self.settings.get().hotkeys.hold_threshold_ms;
+            let (new_state, effects) = advance(exec.state.clone(), event, threshold);
+            exec.state = new_state;
+            for effect in effects {
+                self.dispatch(effect, &mut exec, &level_tx);
             }
         }
     }
 
-    async fn finish_dictation(&self) -> Result<()> {
-        let rec = self.audio.stop()?;
-        tracing::info!("录音结束: {} ms, {} bytes wav", rec.duration_ms, rec.wav_16k_mono.len());
-        if rec.duration_ms < 300 {
-            return Err(TypexError::new(ErrorCode::NoSpeech, "录音过短"));
+    /// hotkey 语义事件 → 状态机事件。
+    fn map_hotkey(&self, hk: HotkeyEvent, exec: &mut Exec) -> Option<Event> {
+        match hk {
+            HotkeyEvent::TriggerDown { mode } => {
+                let id = exec.next_session_id;
+                // 仅 Idle/Failed 会真正开新会话；id 消耗与否由状态机决定，
+                // 这里预分配即可（未消耗的 id 复用无害——单调性由 next_session_id 保证）
+                if matches!(exec.state, State::Idle | State::Failed { .. }) {
+                    exec.next_session_id += 1;
+                }
+                Some(Event::TriggerDown { mode, next_session_id: id })
+            }
+            HotkeyEvent::ModeUpgraded { mode } => Some(Event::ModeUpgraded { mode }),
+            HotkeyEvent::TriggerUp { held_ms } => Some(Event::TriggerUp { held_ms }),
+            HotkeyEvent::Yielded => Some(Event::Yielded),
+            HotkeyEvent::EscPressed => {
+                if self.settings.get().dictation.esc_cancels {
+                    Some(Event::Esc)
+                } else {
+                    None
+                }
+            }
         }
-        let settings = self.settings.get();
-        let transcript = self
-            .stt
-            .transcribe(
-                AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
-                SttOptions {
-                    language: Some(settings.dictation.language.clone()),
-                    prompt: None,
-                    temperature: None,
-                },
-            )
-            .await
-            .map_err(crate::error::TypexError::from)?;
-        let text = transcript.text.trim();
-        if text.is_empty() {
-            return Err(TypexError::new(ErrorCode::NoSpeech, "没有听到声音"));
+    }
+
+    fn dispatch(
+        &self,
+        effect: Effect,
+        exec: &mut Exec,
+        level_tx: &mpsc::UnboundedSender<Vec<f32>>,
+    ) {
+        match effect {
+            Effect::StartRecording => {
+                let mic = self.settings.get().dictation.microphone.clone();
+                exec.recording_started = Some(Instant::now());
+                if let Err(e) = self.audio.start(&mic, level_tx.clone()) {
+                    tracing::error!("录音启动失败: {}", e.message);
+                    if let Some(sid) = exec.state.session_id() {
+                        let _ = exec.tx.send(Event::SttFailed { session_id: sid, error: e });
+                    }
+                }
+            }
+            Effect::CancelRecording => {
+                self.audio.cancel();
+                exec.recording_started = None;
+                self.emit_snapshot(exec); // HUD 隐藏
+            }
+            Effect::StopRecording { .. } => { /* CallStt 已含停止语义 */ }
+            Effect::CallStt { session_id } => {
+                // 停止录音（若在录）并取音频；重试路径直接用 audio_store
+                let recording = if self.audio.is_recording() {
+                    exec.recording_started = None;
+                    match self.audio.stop() {
+                        Ok(rec) => {
+                            exec.audio_store.insert(session_id, rec.clone());
+                            Some(rec)
+                        }
+                        Err(e) => {
+                            let _ = exec.tx.send(Event::SttFailed { session_id, error: e });
+                            None
+                        }
+                    }
+                } else {
+                    exec.audio_store.get(&session_id).cloned()
+                };
+                let Some(rec) = recording else { return };
+                if rec.duration_ms < 200 {
+                    let _ = exec.tx.send(Event::SttFailed {
+                        session_id,
+                        error: TypexError::new(ErrorCode::NoSpeech, "录音过短"),
+                    });
+                    return;
+                }
+                let stt = self.stt.clone();
+                let lang = self.settings.get().dictation.language.clone();
+                let tx = exec.tx.clone();
+                tokio::spawn(async move {
+                    let result = stt
+                        .transcribe(
+                            AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
+                            SttOptions { language: Some(lang), prompt: None, temperature: None },
+                        )
+                        .await;
+                    let event = match result {
+                        Ok(t) if t.text.trim().is_empty() => Event::SttFailed {
+                            session_id,
+                            error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
+                        },
+                        Ok(t) => Event::SttResult { session_id, transcript: t.text.trim().to_string() },
+                        Err(e) => Event::SttFailed { session_id, error: e.into() },
+                    };
+                    let _ = tx.send(event);
+                });
+            }
+            Effect::CallProcess { session_id, mode, transcript } => {
+                let tx = exec.tx.clone();
+                tokio::spawn(async move {
+                    let event = match pipeline::process(mode, transcript).await {
+                        pipeline::ProcessOutcome::Done(text) => {
+                            Event::ProcessResult { session_id, text }
+                        }
+                        pipeline::ProcessOutcome::Degraded(original) => {
+                            Event::ProcessDegraded { session_id, original }
+                        }
+                        pipeline::ProcessOutcome::Failed(error) => {
+                            Event::ProcessFailed { session_id, error }
+                        }
+                    };
+                    let _ = tx.send(event);
+                });
+            }
+            Effect::Inject { session_id, text } => {
+                let injector = self.injector.clone();
+                let tx = exec.tx.clone();
+                // enigo/剪贴板是阻塞调用 → blocking 线程
+                tokio::task::spawn_blocking(move || {
+                    let event = match injector.inject(&text) {
+                        Ok(()) => Event::InjectDone { session_id },
+                        Err(e) => Event::InjectFailed { session_id, error: e },
+                    };
+                    let _ = tx.send(event);
+                });
+            }
+            Effect::EmitUi => self.emit_snapshot(exec),
+            Effect::EmitBusyHint => {
+                // CP-1.3：HUD 轻晃 + 「正在处理上一条…」；快照层先透传 phase
+                self.emit_snapshot(exec);
+            }
+            Effect::PlayChime(chime) => {
+                // CP-1.9 接 rodio；先记日志
+                tracing::debug!("chime: {chime:?}");
+            }
+            Effect::CopyToClipboard(text) => {
+                tokio::task::spawn_blocking(move || {
+                    if let Ok(mut cb) = arboard::Clipboard::new() {
+                        let _ = cb.set_text(text);
+                    }
+                });
+            }
+            Effect::ReleaseAudio { session_id } => {
+                exec.audio_store.remove(&session_id);
+            }
         }
-        tracing::info!("转写完成: {} 字", text.chars().count());
-        self.injector.inject(text)?;
-        tracing::info!("注入完成");
-        Ok(())
+    }
+
+    fn emit_snapshot(&self, exec: &Exec) {
+        (self.snapshot_sink)(snapshot_of(&exec.state, exec.recording_started));
+    }
+}
+
+/// State → SessionSnapshot 投影。
+fn snapshot_of(state: &State, recording_started: Option<Instant>) -> SessionSnapshot {
+    let mut snap = SessionSnapshot::idle();
+    snap.session_id = state.session_id().unwrap_or(0);
+    if let Some(m) = state.mode() {
+        snap.mode = m;
+    }
+    snap.phase = state.phase();
+    match state {
+        State::Recording { .. } => {
+            snap.recording_ms =
+                recording_started.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0);
+        }
+        State::Processing { .. } => {
+            snap.processing_step = Some("processing".into());
+            snap.has_transcript = true;
+        }
+        State::Injecting { unpolished, .. } => {
+            snap.unpolished = *unpolished;
+            snap.has_transcript = true;
+        }
+        State::Failed { error, stage, transcript, .. } => {
+            snap.error = Some(error.code);
+            snap.failed_stage = Some(*stage);
+            snap.has_transcript = transcript.is_some();
+        }
+        _ => {}
+    }
+    snap
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{SessionMode, SessionPhase};
+
+    #[test]
+    fn snapshot_projection_failed_keeps_transcript_flag() {
+        let s = State::Failed {
+            session_id: 3,
+            mode: SessionMode::Translation,
+            stage: crate::types::FailedStage::Processing,
+            error: TypexError::new(ErrorCode::Timeout, "t"),
+            transcript: Some("x".into()),
+        };
+        let snap = snapshot_of(&s, None);
+        assert_eq!(snap.phase, SessionPhase::Failed);
+        assert!(snap.has_transcript);
+        assert_eq!(snap.error, Some(ErrorCode::Timeout));
     }
 }

@@ -19,6 +19,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_settings,
             commands::update_settings,
             commands::get_permission_status,
+            commands::session_command,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -39,6 +40,8 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+            #[cfg(target_os = "macos")]
+            app.handle().plugin(tauri_nspanel::init())?;
 
             // 日志：dev 打终端，release 打滚动文件
             let log_dir = app.path().app_log_dir().ok();
@@ -79,19 +82,36 @@ pub fn run() {
             }
             let hotkey_rx = rdev_backend::spawn(hotkey_cfg, cfg_rx, paused_rx);
 
-            // orchestrator 主循环
+            // orchestrator 主循环：快照/电平经 IPC event 推给前端
+            let handle = app.handle().clone();
+            let handle2 = app.handle().clone();
             let orch = Arc::new(Orchestrator {
                 settings: settings.clone(),
                 audio,
                 injector,
                 stt,
+                snapshot_sink: Box::new(move |snap| {
+                    use tauri_specta::Event as _;
+                    crate::app::windows::sync_hud_visibility(&handle, &snap);
+                    let _ = events::SessionSnapshotEvent(snap).emit(&handle);
+                }),
+                level_sink: Box::new(move |levels| {
+                    use tauri_specta::Event as _;
+                    let _ = events::AudioLevelEvent(levels).emit(&handle2);
+                }),
             });
-            tauri::async_runtime::spawn(orch.run(hotkey_rx));
+            let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
+            app.manage(crate::orchestrator::SessionCommander(cmd_tx));
+            tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
             app.manage(settings);
 
             // 托盘
             crate::app::tray::setup(app.handle())?;
+
+            // HUD → nonactivating NSPanel（07 §7.2 坑 3：抢焦点会毁掉注入）
+            #[cfg(target_os = "macos")]
+            crate::app::windows::setup_hud_panel(app.handle())?;
 
             // macOS：不在 Dock 显示（输入法级常驻，02 F-6）
             #[cfg(target_os = "macos")]

@@ -45,8 +45,6 @@ impl ProviderError {
     pub fn from_reqwest(e: reqwest::Error) -> Self {
         if e.is_timeout() {
             ProviderError::Timeout
-        } else if e.is_connect() || e.is_request() {
-            ProviderError::Network(e.to_string())
         } else {
             ProviderError::Network(e.to_string())
         }

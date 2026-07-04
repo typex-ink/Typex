@@ -51,6 +51,7 @@ uuid = { version = "1", features = ["v4"] }
 macos-accessibility-client = "0.0.1"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication"] }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 
 [dev-dependencies]
 wiremock = "0.6"
