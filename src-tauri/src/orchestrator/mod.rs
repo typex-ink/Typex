@@ -7,9 +7,10 @@ use crate::audio::{AudioService, Recording};
 use crate::error::{ErrorCode, TypexError};
 use crate::hotkey::HotkeyEvent;
 use crate::inject::InjectorChain;
-use crate::providers::stt::{AudioInput, SttOptions, SttProvider};
+use crate::providers::stt::{AudioInput, SttOptions};
+use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
-use crate::types::SessionSnapshot;
+use crate::types::{SessionSnapshot, SlotKind};
 use session::{advance, Effect, Event, State};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ pub struct Orchestrator {
     pub settings: Arc<SettingsService>,
     pub audio: Arc<AudioService>,
     pub injector: Arc<InjectorChain>,
-    pub stt: Arc<dyn SttProvider>,
+    pub registry: Arc<ProviderRegistry>,
     pub snapshot_sink: SnapshotSink,
     pub level_sink: Box<dyn Fn(Vec<f32>) + Send + Sync>,
 }
@@ -176,10 +177,17 @@ impl Orchestrator {
                     });
                     return;
                 }
-                let stt = self.stt.clone();
+                let registry = self.registry.clone();
                 let lang = self.settings.get().dictation.language.clone();
                 let tx = exec.tx.clone();
                 tokio::spawn(async move {
+                    let stt = match registry.stt_for(SlotKind::Stt) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let _ = tx.send(Event::SttFailed { session_id, error: e });
+                            return;
+                        }
+                    };
                     let result = stt
                         .transcribe(
                             AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
@@ -199,18 +207,21 @@ impl Orchestrator {
             }
             Effect::CallProcess { session_id, mode, transcript } => {
                 let tx = exec.tx.clone();
+                let settings = self.settings.get();
+                let registry = self.registry.clone();
                 tokio::spawn(async move {
-                    let event = match pipeline::process(mode, transcript).await {
-                        pipeline::ProcessOutcome::Done(text) => {
-                            Event::ProcessResult { session_id, text }
-                        }
-                        pipeline::ProcessOutcome::Degraded(original) => {
-                            Event::ProcessDegraded { session_id, original }
-                        }
-                        pipeline::ProcessOutcome::Failed(error) => {
-                            Event::ProcessFailed { session_id, error }
-                        }
-                    };
+                    let event =
+                        match pipeline::process(mode, transcript, &settings, &registry).await {
+                            pipeline::ProcessOutcome::Done(text) => {
+                                Event::ProcessResult { session_id, text }
+                            }
+                            pipeline::ProcessOutcome::Degraded(original) => {
+                                Event::ProcessDegraded { session_id, original }
+                            }
+                            pipeline::ProcessOutcome::Failed(error) => {
+                                Event::ProcessFailed { session_id, error }
+                            }
+                        };
                     let _ = tx.send(event);
                 });
             }

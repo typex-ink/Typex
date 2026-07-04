@@ -2,6 +2,8 @@
 pub mod error;
 pub mod http;
 pub mod llm;
+pub mod registry;
 pub mod stt;
 
 pub use error::ProviderError;
+pub use registry::ProviderRegistry;

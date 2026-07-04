@@ -1,4 +1,7 @@
-//! LlmProvider trait（03 §3）。adapter 实现在 CP-1.4：chat_completions / responses。
+//! LlmProvider trait + PromptKit（03 §3）。
+pub mod chat_completions;
+pub mod prompt;
+pub mod responses;
 
 use super::ProviderError;
 use futures_util::stream::BoxStream;
@@ -32,4 +35,18 @@ pub trait LlmProvider: Send + Sync {
     /// 单轮任务型调用；流式返回 delta（03 §3）。
     fn complete(&self, req: LlmRequest) -> BoxStream<'static, Result<LlmDelta, ProviderError>>;
     fn capabilities(&self) -> LlmCapabilities;
+}
+
+/// 便捷：收齐全部 delta 拼成完整文本（整理/翻译用——注入是一次性的，02 F-2）。
+pub async fn collect_text(
+    provider: &dyn LlmProvider,
+    req: LlmRequest,
+) -> Result<String, ProviderError> {
+    use futures_util::StreamExt;
+    let mut stream = provider.complete(req);
+    let mut out = String::new();
+    while let Some(delta) = stream.next().await {
+        out.push_str(&delta?.text);
+    }
+    Ok(out)
 }

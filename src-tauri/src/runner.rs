@@ -5,8 +5,8 @@ use crate::audio::AudioService;
 use crate::hotkey::{rdev_backend, HotkeyConfig};
 use crate::inject::InjectorChain;
 use crate::orchestrator::Orchestrator;
-use crate::providers::http;
-use crate::providers::stt::openai_compat::OpenAiCompatStt;
+use crate::providers::ProviderRegistry;
+use crate::settings::secrets::{KeyringStore, SecretStore};
 use crate::settings::SettingsService;
 use std::sync::Arc;
 use tauri::Manager;
@@ -19,7 +19,14 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_settings,
             commands::update_settings,
             commands::get_permission_status,
+            commands::open_permission_settings,
             commands::session_command,
+            commands::list_profiles,
+            commands::upsert_profile,
+            commands::delete_profile,
+            commands::activate_profile,
+            commands::set_profile_secret,
+            commands::test_profile,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -55,14 +62,52 @@ pub fn run() {
             let audio = Arc::new(AudioService::new());
             let injector = Arc::new(InjectorChain::platform_default(s.dictation.paste_delay_ms));
 
-            // M0：STT 从环境变量读取（CP-1.6 换 ProviderRegistry + keyring）
-            let stt_base = std::env::var("TYPEX_STT_BASE_URL")
-                .unwrap_or_else(|_| "https://api.groq.com/openai/v1".into());
-            let stt_key = std::env::var("TYPEX_STT_API_KEY").unwrap_or_default();
-            let stt_model = std::env::var("TYPEX_STT_MODEL")
-                .unwrap_or_else(|_| "whisper-large-v3-turbo".into());
-            let client = http::build_client(s.general.proxy_mode, &s.general.proxy_url, 30_000);
-            let stt = Arc::new(OpenAiCompatStt::new(client, stt_base, stt_key, stt_model));
+            // ProviderRegistry + keyring（CP-1.6）
+            let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+            // 开发便利：TYPEX_STT_API_KEY 环境变量 → 自动建/更新 env-stt 档案
+            if let Ok(key) = std::env::var("TYPEX_STT_API_KEY") {
+                let base = std::env::var("TYPEX_STT_BASE_URL")
+                    .unwrap_or_else(|_| "https://api.groq.com/openai/v1".into());
+                let model = std::env::var("TYPEX_STT_MODEL")
+                    .unwrap_or_else(|_| "whisper-large-v3-turbo".into());
+                let secret_ref = crate::settings::secrets::make_ref("stt", "env-stt", "api_key");
+                if secrets.set(&secret_ref, &key).is_ok() {
+                    let _ = settings.mutate(|st| {
+                        st.profiles.retain(|p| p.id != "env-stt");
+                        st.profiles.push(crate::types::ProviderProfile {
+                            id: "env-stt".into(),
+                            slots: vec![crate::types::SlotKind::Stt],
+                            kind: crate::types::ProviderKind::OpenaiCompat,
+                            label: "环境变量 STT".into(),
+                            base_url: base,
+                            model,
+                            credentials: [("api_key".to_string(), secret_ref.clone())].into(),
+                            extra_headers: Default::default(),
+                            extra_form: Default::default(),
+                            timeout_ms: 30_000,
+                            options: Default::default(),
+                        });
+                        st.slots.insert(
+                            crate::types::SlotKind::Stt,
+                            crate::settings::schema::SlotConfig {
+                                active_profile: Some("env-stt".into()),
+                            },
+                        );
+                    });
+                }
+            }
+            let registry = Arc::new(ProviderRegistry::new(settings.get(), secrets.clone()));
+            {
+                // 设置变更 → registry 惰性失效
+                let registry = registry.clone();
+                let mut rx = settings.subscribe();
+                tauri::async_runtime::spawn(async move {
+                    while rx.changed().await.is_ok() {
+                        let s = rx.borrow_and_update().clone();
+                        registry.on_settings_changed(s);
+                    }
+                });
+            }
 
             // 暂停状态（托盘切换）
             let (paused_tx, paused_rx) = tokio::sync::watch::channel(false);
@@ -89,7 +134,7 @@ pub fn run() {
                 settings: settings.clone(),
                 audio,
                 injector,
-                stt,
+                registry: registry.clone(),
                 snapshot_sink: Box::new(move |snap| {
                     use tauri_specta::Event as _;
                     crate::app::windows::sync_hud_visibility(&handle, &snap);
@@ -105,6 +150,8 @@ pub fn run() {
             tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
             app.manage(settings);
+            app.manage(registry);
+            app.manage(secrets);
 
             // 托盘
             crate::app::tray::setup(app.handle())?;

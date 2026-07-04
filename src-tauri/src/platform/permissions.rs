@@ -16,6 +16,23 @@ pub struct PermissionStatus {
     pub granted: bool,
 }
 
+/// 打开系统权限设置页（onboarding「去授权」按钮）。
+pub fn open_settings(kind: PermissionKind) {
+    #[cfg(target_os = "macos")]
+    {
+        let pane = match kind {
+            PermissionKind::Microphone => "Privacy_Microphone",
+            PermissionKind::Accessibility => "Privacy_Accessibility",
+            PermissionKind::InputMonitoring => "Privacy_ListenEvent",
+        };
+        let _ = std::process::Command::new("open")
+            .arg(format!("x-apple.systempreferences:com.apple.preference.security?{pane}"))
+            .spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = kind;
+}
+
 /// 检测全部权限状态（macOS 主动检测；其他平台按需扩展）。
 pub fn check_all() -> Vec<PermissionStatus> {
     #[cfg(target_os = "macos")]
