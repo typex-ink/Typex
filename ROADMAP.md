@@ -13,13 +13,13 @@
   Tauri 2 工程：Vue 3 + TS + Tailwind CSS v4 + Pinia + Vite 多窗口入口（hud/assistant/settings/onboarding/home）；`src/styles/tokens.css` 从 mockup 复制落地；`src-tauri` 骨架 + `tauri.conf.json`（appId `ink.typex.app`）；GPLv3 LICENSE；`cargo check` + `pnpm build` 通过。
 - [x] **CP-0.2 Rust 模块骨架 + IPC 契约链路**（2026-07-05）
   按 07 §4 目录树建全部模块（types/error/settings schema 数据先行）；tauri-specta 生成 `src/ipc/bindings.ts` 链路跑通；`error.rs` ErrorCode 全集定义。
-- [ ] **CP-0.3 托盘 + 单实例 + 设置存储**
+- [x] **CP-0.3 托盘 + 单实例 + 设置存储**（2026-07-05）
   托盘图标（五柱波形 glyph，macOS template image）+ 基础菜单（设置/暂停/退出）；tauri-plugin-single-instance；SettingsService（JSON 读写 + schema_version + watch 广播）。
-- [ ] **CP-0.4 全局按键监听（rdev）**
+- [x] **CP-0.4 全局按键监听（rdev）**（2026-07-05）
   rdev 独立线程监听右 ⌘（macOS）按住/松开事件 → mpsc 发往主循环；长短按 350ms 判定的纯逻辑判定器 + 单测；组合键让路规则（普通键 down → 取消）。
-- [ ] **CP-0.5 录音管线**
+- [x] **CP-0.5 录音管线**（2026-07-05）
   cpal 以设备原生采样率开流（callback 只写 ring buffer）→ worker 线程 rubato 重采样 16 kHz mono → hound 编 WAV；电平 RMS 计算（50ms 节流事件）。
-- [ ] **CP-0.6 STT + 注入**
+- [x] **CP-0.6 STT + 注入**（2026-07-05）
   `SttProvider` trait + `openai_compat` 实现（multipart /audio/transcriptions，reqwest）；`Injector` trait + `paste` 后端（arboard 保存剪贴板 → 写入 → enigo Cmd+V → 恢复）。
 - [ ] **CP-0.7 M0 端到端验收**
   按住右 ⌘ 说话 → 松开 → STT（写死/环境变量配置）→ 文字注入光标处。全链路在 macOS 实机跑通。
