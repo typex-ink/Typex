@@ -6,9 +6,9 @@
 use crate::error::{ErrorCode, Result, TypexError};
 use crate::providers::http;
 use crate::providers::llm::{
-    chat_completions::ChatCompletionsLlm, responses::ResponsesLlm, LlmProvider,
+    LlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
-use crate::providers::stt::{openai_compat::OpenAiCompatStt, SttProvider};
+use crate::providers::stt::{SttProvider, openai_compat::OpenAiCompatStt};
 use crate::settings::schema::Settings;
 use crate::settings::secrets::SecretStore;
 use crate::types::{ProviderKind, ProviderProfile, SlotKind};
@@ -41,7 +41,10 @@ impl ProviderRegistry {
             .profiles
             .iter()
             .filter(|op| {
-                new.profiles.iter().find(|np| np.id == op.id).is_none_or(|np| np != *op)
+                new.profiles
+                    .iter()
+                    .find(|np| np.id == op.id)
+                    .is_none_or(|np| np != *op)
             })
             .map(|p| p.id.clone())
             .collect();
@@ -62,17 +65,24 @@ impl ProviderRegistry {
             .slots
             .get(&slot)
             .and_then(|c| c.active_profile.clone())
-            .ok_or_else(|| TypexError::new(ErrorCode::NotConfigured, format!("{slot:?} 槽未配置")))?;
+            .ok_or_else(|| {
+                TypexError::new(ErrorCode::NotConfigured, format!("{slot:?} 槽未配置"))
+            })?;
         s.profiles
             .iter()
             .find(|p| p.id == active)
             .cloned()
-            .ok_or_else(|| TypexError::new(ErrorCode::NotConfigured, format!("档案 {active} 不存在")))
+            .ok_or_else(|| {
+                TypexError::new(ErrorCode::NotConfigured, format!("档案 {active} 不存在"))
+            })
     }
 
     fn resolve_secret(&self, profile: &ProviderProfile, field: &str) -> Result<String> {
         let reference = profile.credentials.get(field).ok_or_else(|| {
-            TypexError::new(ErrorCode::NotConfigured, format!("档案 {} 缺少凭据 {field}", profile.id))
+            TypexError::new(
+                ErrorCode::NotConfigured,
+                format!("档案 {} 缺少凭据 {field}", profile.id),
+            )
         })?;
         self.secrets.get(reference)
     }
@@ -89,7 +99,10 @@ impl ProviderRegistry {
             return Ok(p.clone());
         }
         let provider = self.build_stt(&profile)?;
-        self.stt_cache.lock().unwrap().insert(profile.id.clone(), provider.clone());
+        self.stt_cache
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), provider.clone());
         Ok(provider)
     }
 
@@ -100,7 +113,10 @@ impl ProviderRegistry {
             return Ok(p.clone());
         }
         let provider = self.build_llm(&profile)?;
-        self.llm_cache.lock().unwrap().insert(profile.id.clone(), provider.clone());
+        self.llm_cache
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), provider.clone());
         Ok(provider)
     }
 
@@ -111,13 +127,21 @@ impl ProviderRegistry {
                 let key = self.resolve_secret(profile, "api_key")?;
                 let client = self.http_client(profile.timeout_ms);
                 Ok(Arc::new(
-                    OpenAiCompatStt::new(client, profile.base_url.clone(), key, profile.model.clone())
-                        .with_extras(profile.extra_headers.clone(), profile.extra_form.clone()),
+                    OpenAiCompatStt::new(
+                        client,
+                        profile.base_url.clone(),
+                        key,
+                        profile.model.clone(),
+                    )
+                    .with_extras(profile.extra_headers.clone(), profile.extra_form.clone()),
                 ))
             }
             ProviderKind::Volcengine => {
                 // CP-2.x 之后按需实现 volcengine adapter
-                Err(TypexError::new(ErrorCode::InvalidRequest, "volcengine adapter 尚未实现"))
+                Err(TypexError::new(
+                    ErrorCode::InvalidRequest,
+                    "volcengine adapter 尚未实现",
+                ))
             }
             _ => Err(TypexError::new(
                 ErrorCode::InvalidRequest,
@@ -131,8 +155,13 @@ impl ProviderRegistry {
         let client = self.http_client(profile.timeout_ms);
         match profile.kind {
             ProviderKind::ChatCompletions => Ok(Arc::new(
-                ChatCompletionsLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
-                    .with_headers(profile.extra_headers.clone()),
+                ChatCompletionsLlm::new(
+                    client,
+                    profile.base_url.clone(),
+                    key,
+                    profile.model.clone(),
+                )
+                .with_headers(profile.extra_headers.clone()),
             )),
             ProviderKind::Responses => Ok(Arc::new(
                 ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
@@ -160,8 +189,11 @@ mod tests {
             label: id.into(),
             base_url: "https://api.example.com/v1".into(),
             model: "m".into(),
-            credentials: [("api_key".to_string(), format!("keyring://typex/stt/{id}/api_key"))]
-                .into(),
+            credentials: [(
+                "api_key".to_string(),
+                format!("keyring://typex/stt/{id}/api_key"),
+            )]
+            .into(),
             extra_headers: HashMap::new(),
             extra_form: HashMap::new(),
             timeout_ms: 30_000,
@@ -171,10 +203,17 @@ mod tests {
 
     fn setup() -> (ProviderRegistry, Arc<MemoryStore>) {
         let secrets = Arc::new(MemoryStore::default());
-        secrets.set("keyring://typex/stt/p1/api_key", "sk-1").unwrap();
+        secrets
+            .set("keyring://typex/stt/p1/api_key", "sk-1")
+            .unwrap();
         let mut s = Settings::default();
         s.profiles.push(profile("p1", ProviderKind::OpenaiCompat));
-        s.slots.insert(SlotKind::Stt, SlotConfig { active_profile: Some("p1".into()) });
+        s.slots.insert(
+            SlotKind::Stt,
+            SlotConfig {
+                active_profile: Some("p1".into()),
+            },
+        );
         (ProviderRegistry::new(s, secrets.clone()), secrets)
     }
 
@@ -201,7 +240,12 @@ mod tests {
         let secrets = Arc::new(MemoryStore::default()); // 没存密钥
         let mut s = Settings::default();
         s.profiles.push(profile("p1", ProviderKind::OpenaiCompat));
-        s.slots.insert(SlotKind::Stt, SlotConfig { active_profile: Some("p1".into()) });
+        s.slots.insert(
+            SlotKind::Stt,
+            SlotConfig {
+                active_profile: Some("p1".into()),
+            },
+        );
         let reg = ProviderRegistry::new(s, secrets);
         assert!(reg.stt_for(SlotKind::Stt).is_err());
     }

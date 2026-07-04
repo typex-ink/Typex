@@ -71,12 +71,30 @@ mod tests {
 
     #[test]
     fn status_code_classification_table() {
-        assert!(matches!(ProviderError::from_status(401, String::new()), ProviderError::Auth(_)));
-        assert!(matches!(ProviderError::from_status(403, String::new()), ProviderError::Auth(_)));
-        assert!(matches!(ProviderError::from_status(429, String::new()), ProviderError::RateLimited(_)));
-        assert!(matches!(ProviderError::from_status(500, String::new()), ProviderError::Server { .. }));
-        assert!(matches!(ProviderError::from_status(503, String::new()), ProviderError::Server { .. }));
-        assert!(matches!(ProviderError::from_status(400, String::new()), ProviderError::InvalidRequest(_)));
+        assert!(matches!(
+            ProviderError::from_status(401, String::new()),
+            ProviderError::Auth(_)
+        ));
+        assert!(matches!(
+            ProviderError::from_status(403, String::new()),
+            ProviderError::Auth(_)
+        ));
+        assert!(matches!(
+            ProviderError::from_status(429, String::new()),
+            ProviderError::RateLimited(_)
+        ));
+        assert!(matches!(
+            ProviderError::from_status(500, String::new()),
+            ProviderError::Server { .. }
+        ));
+        assert!(matches!(
+            ProviderError::from_status(503, String::new()),
+            ProviderError::Server { .. }
+        ));
+        assert!(matches!(
+            ProviderError::from_status(400, String::new()),
+            ProviderError::InvalidRequest(_)
+        ));
     }
 
     #[test]
@@ -84,7 +102,13 @@ mod tests {
         assert!(!ProviderError::Auth(String::new()).retryable());
         assert!(!ProviderError::InvalidRequest(String::new()).retryable());
         assert!(ProviderError::RateLimited(String::new()).retryable());
-        assert!(ProviderError::Server { status: 500, body: String::new() }.retryable());
+        assert!(
+            ProviderError::Server {
+                status: 500,
+                body: String::new()
+            }
+            .retryable()
+        );
         assert!(ProviderError::Network(String::new()).retryable());
         assert!(ProviderError::Timeout.retryable());
     }

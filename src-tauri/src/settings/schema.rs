@@ -33,7 +33,10 @@ impl Default for Settings {
             assistant: AssistantSettings::default(),
             hotkeys: HotkeySettings::default(),
             history: HistorySettings::default(),
-            slots: SlotKind::ALL.iter().map(|k| (*k, SlotConfig::default())).collect(),
+            slots: SlotKind::ALL
+                .iter()
+                .map(|k| (*k, SlotConfig::default()))
+                .collect(),
             profiles: Vec::new(),
             onboarding_done: false,
         }
@@ -210,7 +213,12 @@ impl Default for HotkeySettings {
         #[cfg(not(target_os = "macos"))]
         let (dict, assist) = (vec!["ControlRight".to_string()], vec!["AltGr".to_string()]);
         let translation = vec![dict[0].clone(), assist[0].clone()];
-        Self { dictation: dict, assistant: assist, translation, hold_threshold_ms: 350 }
+        Self {
+            dictation: dict,
+            assistant: assist,
+            translation,
+            hold_threshold_ms: 350,
+        }
     }
 }
 
@@ -224,7 +232,10 @@ pub struct HistorySettings {
 
 impl Default for HistorySettings {
     fn default() -> Self {
-        Self { enabled: true, retention_days: 90 }
+        Self {
+            enabled: true,
+            retention_days: 90,
+        }
     }
 }
 

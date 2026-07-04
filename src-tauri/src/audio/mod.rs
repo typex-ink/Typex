@@ -24,7 +24,9 @@ pub struct AudioService {
 
 impl AudioService {
     pub fn new() -> Self {
-        Self { active: Mutex::new(None) }
+        Self {
+            active: Mutex::new(None),
+        }
     }
 
     /// 开始录音。`device_name` 空 = 系统默认；电平经 `levels` 推送。

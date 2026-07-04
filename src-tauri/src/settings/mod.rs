@@ -43,8 +43,9 @@ impl SettingsService {
     /// 全量替换并落盘 + 广播。
     pub fn update(&self, new: Settings) -> Result<Settings> {
         if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| TypexError::new(ErrorCode::Internal, format!("创建配置目录失败: {e}")))?;
+            std::fs::create_dir_all(dir).map_err(|e| {
+                TypexError::new(ErrorCode::Internal, format!("创建配置目录失败: {e}"))
+            })?;
         }
         let json = serde_json::to_string_pretty(&new)
             .map_err(|e| TypexError::new(ErrorCode::Internal, format!("序列化设置失败: {e}")))?;

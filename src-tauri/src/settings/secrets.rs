@@ -57,7 +57,10 @@ pub struct MemoryStore(std::sync::Mutex<std::collections::HashMap<String, String
 impl SecretStore for MemoryStore {
     fn set(&self, reference: &str, secret: &str) -> Result<()> {
         account_of(reference)?;
-        self.0.lock().unwrap().insert(reference.to_string(), secret.to_string());
+        self.0
+            .lock()
+            .unwrap()
+            .insert(reference.to_string(), secret.to_string());
         Ok(())
     }
 

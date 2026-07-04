@@ -8,11 +8,11 @@ use crate::audio::{AudioService, Recording};
 use crate::error::{ErrorCode, TypexError};
 use crate::hotkey::HotkeyEvent;
 use crate::inject::InjectorChain;
-use crate::providers::stt::{AudioInput, SttOptions};
 use crate::providers::ProviderRegistry;
+use crate::providers::stt::{AudioInput, SttOptions};
 use crate::settings::SettingsService;
 use crate::types::{SessionMode, SessionSnapshot, SlotKind};
-use session::{advance, Effect, Event, State};
+use session::{Effect, Event, State, advance};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -112,9 +112,18 @@ impl Orchestrator {
             let Some(event) = event else { continue };
 
             // 历史记录素材：转写稿 + 录音时长（成功注入时写库）
-            if let Event::SttResult { session_id, transcript } = &event {
-                let dur = exec.audio_store.get(session_id).map(|r| r.duration_ms).unwrap_or(0);
-                exec.transcript_store.insert(*session_id, (transcript.clone(), dur));
+            if let Event::SttResult {
+                session_id,
+                transcript,
+            } = &event
+            {
+                let dur = exec
+                    .audio_store
+                    .get(session_id)
+                    .map(|r| r.duration_ms)
+                    .unwrap_or(0);
+                exec.transcript_store
+                    .insert(*session_id, (transcript.clone(), dur));
             }
             // 成功注入 → 写历史（F-7）
             if let Event::InjectDone { session_id } = &event {
@@ -140,7 +149,10 @@ impl Orchestrator {
                 if matches!(exec.state, State::Idle | State::Failed { .. }) {
                     exec.next_session_id += 1;
                 }
-                Some(Event::TriggerDown { mode, next_session_id: id })
+                Some(Event::TriggerDown {
+                    mode,
+                    next_session_id: id,
+                })
             }
             HotkeyEvent::ModeUpgraded { mode } => Some(Event::ModeUpgraded { mode }),
             HotkeyEvent::TriggerUp { held_ms } => Some(Event::TriggerUp { held_ms }),
@@ -177,7 +189,10 @@ impl Orchestrator {
                 if let Err(e) = self.audio.start(&mic, level_tx.clone()) {
                     tracing::error!("录音启动失败: {}", e.message);
                     if let Some(sid) = exec.state.session_id() {
-                        let _ = exec.tx.send(Event::SttFailed { session_id: sid, error: e });
+                        let _ = exec.tx.send(Event::SttFailed {
+                            session_id: sid,
+                            error: e,
+                        });
                     }
                 }
             }
@@ -197,7 +212,10 @@ impl Orchestrator {
                             Some(rec)
                         }
                         Err(e) => {
-                            let _ = exec.tx.send(Event::SttFailed { session_id, error: e });
+                            let _ = exec.tx.send(Event::SttFailed {
+                                session_id,
+                                error: e,
+                            });
                             None
                         }
                     }
@@ -219,14 +237,24 @@ impl Orchestrator {
                     let stt = match registry.stt_for(SlotKind::Stt) {
                         Ok(s) => s,
                         Err(e) => {
-                            let _ = tx.send(Event::SttFailed { session_id, error: e });
+                            let _ = tx.send(Event::SttFailed {
+                                session_id,
+                                error: e,
+                            });
                             return;
                         }
                     };
                     let result = crate::providers::stt::transcribe_auto_chunk(
                         stt.as_ref(),
-                        AudioInput { wav_16k_mono: rec.wav_16k_mono, duration_ms: rec.duration_ms },
-                        SttOptions { language: Some(lang), prompt: None, temperature: None },
+                        AudioInput {
+                            wav_16k_mono: rec.wav_16k_mono,
+                            duration_ms: rec.duration_ms,
+                        },
+                        SttOptions {
+                            language: Some(lang),
+                            prompt: None,
+                            temperature: None,
+                        },
                     )
                     .await;
                     let event = match result {
@@ -234,13 +262,23 @@ impl Orchestrator {
                             session_id,
                             error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
                         },
-                        Ok(t) => Event::SttResult { session_id, transcript: t.text.trim().to_string() },
-                        Err(e) => Event::SttFailed { session_id, error: e.into() },
+                        Ok(t) => Event::SttResult {
+                            session_id,
+                            transcript: t.text.trim().to_string(),
+                        },
+                        Err(e) => Event::SttFailed {
+                            session_id,
+                            error: e.into(),
+                        },
                     };
                     let _ = tx.send(event);
                 });
             }
-            Effect::CallProcess { session_id, mode, transcript } => {
+            Effect::CallProcess {
+                session_id,
+                mode,
+                transcript,
+            } => {
                 // 助手模式：转写结果 = 语音指令 → 交给助手面板（F-3），主会话结束
                 if mode == SessionMode::Assistant {
                     if let Some(assistant) = &self.assistant {
@@ -251,7 +289,10 @@ impl Orchestrator {
                                 (self.show_assistant_panel)();
                             }
                             Err(e) => {
-                                let _ = exec.tx.send(Event::ProcessFailed { session_id, error: e });
+                                let _ = exec.tx.send(Event::ProcessFailed {
+                                    session_id,
+                                    error: e,
+                                });
                             }
                         }
                     } else {
@@ -266,18 +307,20 @@ impl Orchestrator {
                 let settings = self.settings.get();
                 let registry = self.registry.clone();
                 tokio::spawn(async move {
-                    let event =
-                        match pipeline::process(mode, transcript, &settings, &registry).await {
-                            pipeline::ProcessOutcome::Done(text) => {
-                                Event::ProcessResult { session_id, text }
-                            }
-                            pipeline::ProcessOutcome::Degraded(original) => {
-                                Event::ProcessDegraded { session_id, original }
-                            }
-                            pipeline::ProcessOutcome::Failed(error) => {
-                                Event::ProcessFailed { session_id, error }
-                            }
-                        };
+                    let event = match pipeline::process(mode, transcript, &settings, &registry)
+                        .await
+                    {
+                        pipeline::ProcessOutcome::Done(text) => {
+                            Event::ProcessResult { session_id, text }
+                        }
+                        pipeline::ProcessOutcome::Degraded(original) => Event::ProcessDegraded {
+                            session_id,
+                            original,
+                        },
+                        pipeline::ProcessOutcome::Failed(error) => {
+                            Event::ProcessFailed { session_id, error }
+                        }
+                    };
                     let _ = tx.send(event);
                 });
             }
@@ -289,7 +332,10 @@ impl Orchestrator {
                 tokio::task::spawn_blocking(move || {
                     let event = match injector.inject(&text) {
                         Ok(()) => Event::InjectDone { session_id },
-                        Err(e) => Event::InjectFailed { session_id, error: e },
+                        Err(e) => Event::InjectFailed {
+                            session_id,
+                            error: e,
+                        },
                     };
                     let _ = tx.send(event);
                 });
@@ -389,8 +435,9 @@ fn snapshot_of(state: &State, recording_started: Option<Instant>) -> SessionSnap
     snap.phase = state.phase();
     match state {
         State::Recording { .. } => {
-            snap.recording_ms =
-                recording_started.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0);
+            snap.recording_ms = recording_started
+                .map(|t| t.elapsed().as_millis() as u64)
+                .unwrap_or(0);
         }
         State::Processing { .. } => {
             snap.processing_step = Some("processing".into());
@@ -400,7 +447,12 @@ fn snapshot_of(state: &State, recording_started: Option<Instant>) -> SessionSnap
             snap.unpolished = *unpolished;
             snap.has_transcript = true;
         }
-        State::Failed { error, stage, transcript, .. } => {
+        State::Failed {
+            error,
+            stage,
+            transcript,
+            ..
+        } => {
             snap.error = Some(error.code);
             snap.failed_stage = Some(*stage);
             snap.has_transcript = transcript.is_some();

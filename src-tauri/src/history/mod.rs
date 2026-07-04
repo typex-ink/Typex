@@ -57,8 +57,9 @@ pub struct HistoryService {
 impl HistoryService {
     pub fn open(db_path: &Path) -> Result<Self> {
         if let Some(dir) = db_path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| TypexError::new(ErrorCode::Internal, format!("创建数据目录失败: {e}")))?;
+            std::fs::create_dir_all(dir).map_err(|e| {
+                TypexError::new(ErrorCode::Internal, format!("创建数据目录失败: {e}"))
+            })?;
         }
         let conn = Connection::open(db_path)
             .map_err(|e| TypexError::new(ErrorCode::Internal, format!("打开历史库失败: {e}")))?;
@@ -78,7 +79,9 @@ impl HistoryService {
             CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at DESC);",
         )
         .map_err(|e| TypexError::new(ErrorCode::Internal, format!("建表失败: {e}")))?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -97,7 +100,9 @@ impl HistoryService {
             );",
         )
         .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn insert(
@@ -213,8 +218,24 @@ mod tests {
     #[test]
     fn crud_roundtrip() {
         let h = svc();
-        h.insert(1000, SessionMode::Dictation, "嗯原文", "干净结果", "微信", 5000).unwrap();
-        h.insert(2000, SessionMode::Translation, "中文", "English", "Slack", 3000).unwrap();
+        h.insert(
+            1000,
+            SessionMode::Dictation,
+            "嗯原文",
+            "干净结果",
+            "微信",
+            5000,
+        )
+        .unwrap();
+        h.insert(
+            2000,
+            SessionMode::Translation,
+            "中文",
+            "English",
+            "Slack",
+            3000,
+        )
+        .unwrap();
 
         let all = h.query("", 0, 10).unwrap();
         assert_eq!(all.len(), 2);
@@ -233,8 +254,17 @@ mod tests {
     #[test]
     fn stats_aggregate() {
         let h = svc();
-        h.insert(1, SessionMode::Dictation, "a", "十个字十个字十个字十", "x", 60_000).unwrap();
-        h.insert(2, SessionMode::Dictation, "b", "五字五字五", "x", 30_000).unwrap();
+        h.insert(
+            1,
+            SessionMode::Dictation,
+            "a",
+            "十个字十个字十个字十",
+            "x",
+            60_000,
+        )
+        .unwrap();
+        h.insert(2, SessionMode::Dictation, "b", "五字五字五", "x", 30_000)
+            .unwrap();
         let s = h.stats().unwrap();
         assert_eq!(s.total_duration_ms, 90_000.0);
         assert_eq!(s.total_chars, 15.0);
@@ -245,8 +275,24 @@ mod tests {
     fn retention_cleanup_with_injected_clock() {
         let h = svc();
         let now: i64 = 100 * 86_400_000; // 第 100 天
-        h.insert(now - 91 * 86_400_000, SessionMode::Dictation, "旧", "旧", "", 0).unwrap();
-        h.insert(now - 5 * 86_400_000, SessionMode::Dictation, "新", "新", "", 0).unwrap();
+        h.insert(
+            now - 91 * 86_400_000,
+            SessionMode::Dictation,
+            "旧",
+            "旧",
+            "",
+            0,
+        )
+        .unwrap();
+        h.insert(
+            now - 5 * 86_400_000,
+            SessionMode::Dictation,
+            "新",
+            "新",
+            "",
+            0,
+        )
+        .unwrap();
         let deleted = h.cleanup(90, now).unwrap();
         assert_eq!(deleted, 1);
         let rest = h.query("", 0, 10).unwrap();
@@ -257,7 +303,8 @@ mod tests {
     #[test]
     fn retention_zero_means_forever() {
         let h = svc();
-        h.insert(1, SessionMode::Dictation, "远古", "远古", "", 0).unwrap();
+        h.insert(1, SessionMode::Dictation, "远古", "远古", "", 0)
+            .unwrap();
         assert_eq!(h.cleanup(0, i64::MAX / 2).unwrap(), 0);
         assert_eq!(h.query("", 0, 10).unwrap().len(), 1);
     }

@@ -1,13 +1,13 @@
 //! 应用装配与启动（main.rs 委托到此；07 §5.1 手工 DI）。
 
-use crate::app::{commands, events, PausedState};
+use crate::app::{PausedState, commands, events};
 use crate::audio::AudioService;
-use crate::hotkey::{rdev_backend, HotkeyConfig};
+use crate::hotkey::{HotkeyConfig, rdev_backend};
 use crate::inject::InjectorChain;
 use crate::orchestrator::Orchestrator;
 use crate::providers::ProviderRegistry;
-use crate::settings::secrets::{KeyringStore, SecretStore};
 use crate::settings::SettingsService;
+use crate::settings::secrets::{KeyringStore, SecretStore};
 use std::sync::Arc;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events};
@@ -68,7 +68,11 @@ pub fn run() {
 
             // 日志：dev 打终端，release 打滚动文件
             let log_dir = app.path().app_log_dir().ok();
-            crate::logging::init(if cfg!(debug_assertions) { None } else { log_dir });
+            crate::logging::init(if cfg!(debug_assertions) {
+                None
+            } else {
+                log_dir
+            });
 
             // --- 服务装配（07 §5.1）---
             let config_dir = app.path().app_config_dir().expect("config dir");
@@ -166,7 +170,11 @@ pub fn run() {
                             }
                             .emit(&handle_a);
                         }
-                        AssistantEvent::Done { request_id, kind, full_text } => {
+                        AssistantEvent::Done {
+                            request_id,
+                            kind,
+                            full_text,
+                        } => {
                             let chars = pending_for_sink
                                 .lock()
                                 .unwrap()

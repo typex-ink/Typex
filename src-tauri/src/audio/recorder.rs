@@ -3,7 +3,7 @@
 //! callback 内只做「拷贝进 channel」（实时线程禁止分配大块/锁/日志）；
 //! 重采样与电平计算在 worker 线程（pipeline.rs）。
 
-use super::{pipeline, LevelSender, Recording};
+use super::{LevelSender, Recording, pipeline};
 use crate::error::{ErrorCode, Result, TypexError};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::mpsc as std_mpsc;
@@ -63,14 +63,19 @@ fn run_stream(
             .or_else(|| host.default_input_device())
     };
     let Some(device) = device else {
-        let _ = ready_tx.send(Err(TypexError::new(ErrorCode::AudioDevice, "找不到输入设备")));
+        let _ = ready_tx.send(Err(TypexError::new(
+            ErrorCode::AudioDevice,
+            "找不到输入设备",
+        )));
         return;
     };
     let config = match device.default_input_config() {
         Ok(c) => c,
         Err(e) => {
-            let _ = ready_tx
-                .send(Err(TypexError::new(ErrorCode::AudioDevice, format!("读取设备配置失败: {e}"))));
+            let _ = ready_tx.send(Err(TypexError::new(
+                ErrorCode::AudioDevice,
+                format!("读取设备配置失败: {e}"),
+            )));
             return;
         }
     };
@@ -91,14 +96,18 @@ fn run_stream(
     ) {
         Ok(s) => s,
         Err(e) => {
-            let _ = ready_tx
-                .send(Err(TypexError::new(ErrorCode::AudioDevice, format!("打开音频流失败: {e}"))));
+            let _ = ready_tx.send(Err(TypexError::new(
+                ErrorCode::AudioDevice,
+                format!("打开音频流失败: {e}"),
+            )));
             return;
         }
     };
     if let Err(e) = stream.play() {
-        let _ =
-            ready_tx.send(Err(TypexError::new(ErrorCode::AudioDevice, format!("启动音频流失败: {e}"))));
+        let _ = ready_tx.send(Err(TypexError::new(
+            ErrorCode::AudioDevice,
+            format!("启动音频流失败: {e}"),
+        )));
         return;
     }
     let _ = ready_tx.send(Ok(()));
@@ -133,5 +142,8 @@ fn run_stream(
     drop(stream);
 
     let result = pipeline::finalize_recording(&mono, sample_rate);
-    let _ = result_tx.send(result.map(|(wav, duration_ms)| Recording { wav_16k_mono: wav, duration_ms }));
+    let _ = result_tx.send(result.map(|(wav, duration_ms)| Recording {
+        wav_16k_mono: wav,
+        duration_ms,
+    }));
 }

@@ -35,8 +35,11 @@ pub struct SttCapabilities {
 
 #[async_trait::async_trait]
 pub trait SttProvider: Send + Sync {
-    async fn transcribe(&self, audio: AudioInput, opts: SttOptions)
-        -> Result<Transcript, ProviderError>;
+    async fn transcribe(
+        &self,
+        audio: AudioInput,
+        opts: SttOptions,
+    ) -> Result<Transcript, ProviderError>;
     fn capabilities(&self) -> SttCapabilities;
 }
 
@@ -74,7 +77,13 @@ pub async fn transcribe_auto_chunk(
             .map_err(|e| ProviderError::InvalidRequest(e.message))?;
         let duration_ms = ((end - start) as u64 * 1000) / 16_000;
         let t = provider
-            .transcribe(AudioInput { wav_16k_mono: wav, duration_ms }, opts.clone())
+            .transcribe(
+                AudioInput {
+                    wav_16k_mono: wav,
+                    duration_ms,
+                },
+                opts.clone(),
+            )
             .await?;
         if !full_text.is_empty() && !t.text.is_empty() {
             full_text.push(' ');
@@ -82,5 +91,8 @@ pub async fn transcribe_auto_chunk(
         full_text.push_str(t.text.trim());
         detected = detected.or(t.detected_language);
     }
-    Ok(Transcript { text: full_text, detected_language: detected })
+    Ok(Transcript {
+        text: full_text,
+        detected_language: detected,
+    })
 }

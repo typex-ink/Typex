@@ -2,7 +2,7 @@
 //! 开始 = 上行双音「叮·咚」；成功 = 单音短「嗒」；错误 = 低频闷「噗」。
 //! 不依赖音频文件——正弦 + 指数衰减合成，体积零成本。
 
-use rodio::{buffer::SamplesBuffer, OutputStreamBuilder, Sink};
+use rodio::{OutputStreamBuilder, Sink, buffer::SamplesBuffer};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ChimeKind {
@@ -44,7 +44,9 @@ fn samples_of(kind: ChimeKind, volume: f32) -> Vec<f32> {
 /// 播放提示音（异步 fire-and-forget；播放失败静默——提示音不值得报错）。
 pub fn play(kind: ChimeKind, volume: f32) {
     std::thread::spawn(move || {
-        let Ok(stream) = OutputStreamBuilder::open_default_stream() else { return };
+        let Ok(stream) = OutputStreamBuilder::open_default_stream() else {
+            return;
+        };
         let sink = Sink::connect_new(stream.mixer());
         let samples = samples_of(kind, volume);
         sink.append(SamplesBuffer::new(1, RATE, samples));

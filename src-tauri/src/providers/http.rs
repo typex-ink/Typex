@@ -82,7 +82,10 @@ mod tests {
             let n = calls.fetch_add(1, Ordering::SeqCst);
             async move {
                 if n == 0 {
-                    Err(ProviderError::Server { status: 503, body: String::new() })
+                    Err(ProviderError::Server {
+                        status: 503,
+                        body: String::new(),
+                    })
                 } else {
                     Ok(42)
                 }

@@ -4,8 +4,8 @@
 use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest};
 use crate::providers::ProviderError;
 use eventsource_stream::Eventsource;
-use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use std::collections::HashMap;
 
 pub struct ResponsesLlm {
@@ -43,7 +43,11 @@ impl ResponsesLlm {
             "content": [{"type": "input_text", "text": req.system}]
         })];
         for m in &req.messages {
-            let ctype = if m.role == "assistant" { "output_text" } else { "input_text" };
+            let ctype = if m.role == "assistant" {
+                "output_text"
+            } else {
+                "input_text"
+            };
             input.push(serde_json::json!({
                 "role": m.role,
                 "content": [{"type": ctype, "text": m.content}]
@@ -153,8 +157,14 @@ mod tests {
 
     #[test]
     fn parse_completed_and_failed() {
-        assert!(matches!(parse_event("response.completed", "{}"), ResponsesEvent::Completed));
-        match parse_event("response.failed", r#"{"response":{"error":{"message":"boom"}}}"#) {
+        assert!(matches!(
+            parse_event("response.completed", "{}"),
+            ResponsesEvent::Completed
+        ));
+        match parse_event(
+            "response.failed",
+            r#"{"response":{"error":{"message":"boom"}}}"#,
+        ) {
             ResponsesEvent::Failed(m) => assert_eq!(m, "boom"),
             _ => panic!("expected Failed"),
         }

@@ -2,7 +2,7 @@
 //! 覆盖 OpenAI / Groq / SiliconFlow / 自建（vLLM、speaches…）。
 
 use super::{AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript};
-use crate::providers::{http, ProviderError};
+use crate::providers::{ProviderError, http};
 use std::collections::HashMap;
 
 pub struct OpenAiCompatStt {
@@ -98,9 +98,13 @@ impl SttProvider for OpenAiCompatStt {
             if status >= 400 {
                 return Err(ProviderError::from_status(status, body));
             }
-            let parsed: TranscriptionResponse = serde_json::from_str(&body)
-                .map_err(|e| ProviderError::InvalidRequest(format!("响应解析失败: {e}; body: {body}")))?;
-            Ok(Transcript { text: parsed.text, detected_language: parsed.language })
+            let parsed: TranscriptionResponse = serde_json::from_str(&body).map_err(|e| {
+                ProviderError::InvalidRequest(format!("响应解析失败: {e}; body: {body}"))
+            })?;
+            Ok(Transcript {
+                text: parsed.text,
+                detected_language: parsed.language,
+            })
         })
         .await
     }

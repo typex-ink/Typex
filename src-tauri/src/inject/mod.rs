@@ -30,7 +30,11 @@ impl InjectorChain {
             match backend.inject(text) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    tracing::warn!("注入后端 {} 失败: {}，尝试下一个", backend.name(), e.message);
+                    tracing::warn!(
+                        "注入后端 {} 失败: {}，尝试下一个",
+                        backend.name(),
+                        e.message
+                    );
                     last_err = Some(e);
                 }
             }
@@ -45,8 +49,8 @@ impl InjectorChain {
 mod tests {
     use super::*;
     use crate::error::{ErrorCode, TypexError};
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     struct MockInjector {
         fail: bool,
@@ -72,8 +76,14 @@ mod tests {
         let c1 = Arc::new(AtomicU32::new(0));
         let c2 = Arc::new(AtomicU32::new(0));
         let chain = InjectorChain::new(vec![
-            Box::new(MockInjector { fail: false, calls: c1.clone() }),
-            Box::new(MockInjector { fail: false, calls: c2.clone() }),
+            Box::new(MockInjector {
+                fail: false,
+                calls: c1.clone(),
+            }),
+            Box::new(MockInjector {
+                fail: false,
+                calls: c2.clone(),
+            }),
         ]);
         chain.inject("hi").unwrap();
         assert_eq!(c1.load(Ordering::SeqCst), 1);
@@ -85,8 +95,14 @@ mod tests {
         let c1 = Arc::new(AtomicU32::new(0));
         let c2 = Arc::new(AtomicU32::new(0));
         let chain = InjectorChain::new(vec![
-            Box::new(MockInjector { fail: true, calls: c1.clone() }),
-            Box::new(MockInjector { fail: false, calls: c2.clone() }),
+            Box::new(MockInjector {
+                fail: true,
+                calls: c1.clone(),
+            }),
+            Box::new(MockInjector {
+                fail: false,
+                calls: c2.clone(),
+            }),
         ]);
         chain.inject("hi").unwrap();
         assert_eq!(c1.load(Ordering::SeqCst), 1);
@@ -96,8 +112,10 @@ mod tests {
     #[test]
     fn all_failed_returns_error() {
         let c = Arc::new(AtomicU32::new(0));
-        let chain =
-            InjectorChain::new(vec![Box::new(MockInjector { fail: true, calls: c.clone() })]);
+        let chain = InjectorChain::new(vec![Box::new(MockInjector {
+            fail: true,
+            calls: c.clone(),
+        })]);
         assert!(chain.inject("hi").is_err());
     }
 }

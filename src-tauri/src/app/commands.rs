@@ -2,9 +2,9 @@
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
+use crate::settings::SettingsService;
 use crate::settings::schema::{Settings, SlotConfig};
 use crate::settings::secrets::SecretStore;
-use crate::settings::SettingsService;
 use crate::types::{ProviderProfile, SlotKind};
 use std::sync::Arc;
 use tauri::State;
@@ -103,7 +103,12 @@ pub fn activate_profile(
         return Err(TypexError::new(ErrorCode::InvalidRequest, "档案不存在"));
     }
     settings.mutate(|s| {
-        s.slots.insert(slot, SlotConfig { active_profile: Some(profile_id.clone()) });
+        s.slots.insert(
+            slot,
+            SlotConfig {
+                active_profile: Some(profile_id.clone()),
+            },
+        );
     })
 }
 
@@ -148,7 +153,11 @@ pub fn ask_assistant(
     text: String,
     use_selection: bool,
 ) -> Result<u32, TypexError> {
-    let selection = if use_selection { selection_store.0.lock().unwrap().clone() } else { None };
+    let selection = if use_selection {
+        selection_store.0.lock().unwrap().clone()
+    } else {
+        None
+    };
     assistant.ask(text, selection).map(|id| id as u32)
 }
 
@@ -165,11 +174,9 @@ pub fn assistant_action(
             // 替换选区 = 焦点应用中选区仍在，注入即覆盖；插入 = 注入光标处
             injector.inject(&text)
         }
-        "copy" => {
-            arboard::Clipboard::new()
-                .and_then(|mut c| c.set_text(text))
-                .map_err(|e| TypexError::new(ErrorCode::Internal, format!("复制失败: {e}")))
-        }
+        "copy" => arboard::Clipboard::new()
+            .and_then(|mut c| c.set_text(text))
+            .map_err(|e| TypexError::new(ErrorCode::Internal, format!("复制失败: {e}"))),
         _ => Err(TypexError::new(ErrorCode::InvalidRequest, "未知动作")),
     }
 }
@@ -285,7 +292,11 @@ pub fn cycle_translation_target(settings: SettingsState<'_>) -> Result<String, T
         }
     }
     let cur = &s.translation.target_language;
-    let idx = pool.iter().position(|x| x == cur).map(|i| (i + 1) % pool.len()).unwrap_or(0);
+    let idx = pool
+        .iter()
+        .position(|x| x == cur)
+        .map(|i| (i + 1) % pool.len())
+        .unwrap_or(0);
     let next = pool[idx].clone();
     let next2 = next.clone();
     settings.mutate(move |st| {
@@ -319,7 +330,10 @@ pub async fn test_profile(
             .collect();
         let wav = crate::audio::pipeline::to_wav_16k_mono(&samples, 16000)?;
         stt.transcribe(
-            crate::providers::stt::AudioInput { wav_16k_mono: wav, duration_ms: 2000 },
+            crate::providers::stt::AudioInput {
+                wav_16k_mono: wav,
+                duration_ms: 2000,
+            },
             crate::providers::stt::SttOptions::default(),
         )
         .await

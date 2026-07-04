@@ -91,7 +91,10 @@ fn ax_selected_text() -> Result<Option<String>> {
         CFRelease(attr_focused as CFTypeRef);
         CFRelease(system as CFTypeRef);
         if err != 0 || focused.is_null() {
-            return Err(TypexError::new(ErrorCode::Internal, format!("无焦点元素 (AXError {err})")));
+            return Err(TypexError::new(
+                ErrorCode::Internal,
+                format!("无焦点元素 (AXError {err})"),
+            ));
         }
         let attr_sel = cf_str("AXSelectedText");
         let mut sel: CFTypeRef = ptr::null();
@@ -113,7 +116,9 @@ fn ax_selected_text() -> Result<Option<String>> {
         if !ok {
             return Ok(None);
         }
-        let text = std::ffi::CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
+        let text = std::ffi::CStr::from_ptr(buf.as_ptr())
+            .to_string_lossy()
+            .into_owned();
         Ok(if text.is_empty() { None } else { Some(text) })
     }
 }
@@ -145,7 +150,12 @@ impl SelectionReader for ClipboardFallbackReader {
             .key(modifier, Direction::Press)
             .and_then(|_| enigo.key(Key::Unicode('c'), Direction::Click))
             .and_then(|_| enigo.key(modifier, Direction::Release))
-            .map_err(|e| TypexError::new(ErrorCode::PermissionMissing, format!("模拟 Cmd+C 失败: {e}")))?;
+            .map_err(|e| {
+                TypexError::new(
+                    ErrorCode::PermissionMissing,
+                    format!("模拟 Cmd+C 失败: {e}"),
+                )
+            })?;
 
         // 300ms 超时轮询（07 §7.6-4）
         let mut text = None;

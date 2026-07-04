@@ -31,8 +31,12 @@ impl Injector for PasteInjector {
             .map_err(|e| TypexError::new(ErrorCode::Internal, format!("写剪贴板失败: {e}")))?;
 
         // 3. 模拟粘贴组合键
-        let mut enigo = Enigo::new(&Settings::default())
-            .map_err(|e| TypexError::new(ErrorCode::PermissionMissing, format!("enigo 初始化失败（缺辅助功能权限？）: {e}")))?;
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {
+            TypexError::new(
+                ErrorCode::PermissionMissing,
+                format!("enigo 初始化失败（缺辅助功能权限？）: {e}"),
+            )
+        })?;
         #[cfg(target_os = "macos")]
         let modifier = Key::Meta;
         #[cfg(not(target_os = "macos"))]
@@ -45,7 +49,9 @@ impl Injector for PasteInjector {
             .key(modifier, Direction::Press)
             .and_then(|_| enigo.key(Key::Unicode('v'), Direction::Click))
             .and_then(|_| enigo.key(modifier, Direction::Release))
-            .map_err(|e| TypexError::new(ErrorCode::PermissionMissing, format!("模拟按键失败: {e}")))?;
+            .map_err(|e| {
+                TypexError::new(ErrorCode::PermissionMissing, format!("模拟按键失败: {e}"))
+            })?;
 
         // 4. 等待目标应用读取后恢复剪贴板
         std::thread::sleep(Duration::from_millis(200));

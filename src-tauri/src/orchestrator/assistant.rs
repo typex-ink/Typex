@@ -4,19 +4,29 @@
 //! F-3b：无选区提问 → 问答提示词 → 面板流式展示
 
 use crate::error::{ErrorCode, Result, TypexError};
-use crate::providers::llm::{prompt, LlmRequest, Msg};
 use crate::providers::ProviderRegistry;
+use crate::providers::llm::{LlmRequest, Msg, prompt};
 use crate::settings::SettingsService;
 use crate::types::SlotKind;
 use futures_util::StreamExt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// 面板事件回调：delta / done(kind) / error。
 pub enum AssistantEvent {
-    Delta { request_id: u64, text: String },
-    Done { request_id: u64, kind: AnswerKind, full_text: String },
-    Error { request_id: u64, error: TypexError },
+    Delta {
+        request_id: u64,
+        text: String,
+    },
+    Done {
+        request_id: u64,
+        kind: AnswerKind,
+        full_text: String,
+    },
+    Error {
+        request_id: u64,
+        error: TypexError,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
@@ -41,7 +51,12 @@ impl AssistantService {
         registry: Arc<ProviderRegistry>,
         sink: Box<dyn Fn(AssistantEvent) + Send + Sync>,
     ) -> Self {
-        Self { settings, registry, sink, next_id: AtomicU64::new(1) }
+        Self {
+            settings,
+            registry,
+            sink,
+            next_id: AtomicU64::new(1),
+        }
     }
 
     /// 发起单轮提问（07 §10.1 ask_assistant）。返回 request_id。
@@ -57,7 +72,11 @@ impl AssistantService {
         } else {
             (prompt::ASK_TEMPLATE, s.assistant.ask_prompt.clone())
         };
-        let template = if custom.is_empty() { template.to_string() } else { custom };
+        let template = if custom.is_empty() {
+            template.to_string()
+        } else {
+            custom
+        };
 
         let mut values = std::collections::HashMap::new();
         values.insert("{instruction}", instruction);
@@ -68,7 +87,10 @@ impl AssistantService {
 
         let req = LlmRequest {
             system: String::new(),
-            messages: vec![Msg { role: "user".into(), content: rendered }],
+            messages: vec![Msg {
+                role: "user".into(),
+                content: rendered,
+            }],
             temperature: 0.3,
             max_tokens: None,
         };
@@ -82,10 +104,16 @@ impl AssistantService {
                 match item {
                     Ok(delta) => {
                         full.push_str(&delta.text);
-                        (this.sink)(AssistantEvent::Delta { request_id, text: delta.text });
+                        (this.sink)(AssistantEvent::Delta {
+                            request_id,
+                            text: delta.text,
+                        });
                     }
                     Err(e) => {
-                        (this.sink)(AssistantEvent::Error { request_id, error: e.into() });
+                        (this.sink)(AssistantEvent::Error {
+                            request_id,
+                            error: e.into(),
+                        });
                         return;
                     }
                 }
@@ -98,7 +126,10 @@ impl AssistantService {
                 return;
             }
             let kind = classify(&full, had_selection);
-            let display = full.trim().strip_prefix(prompt::ANSWER_PREFIX).unwrap_or(full.trim());
+            let display = full
+                .trim()
+                .strip_prefix(prompt::ANSWER_PREFIX)
+                .unwrap_or(full.trim());
             (this.sink)(AssistantEvent::Done {
                 request_id,
                 kind,
@@ -132,7 +163,10 @@ mod tests {
 
     #[test]
     fn answer_prefix_prevents_replace() {
-        assert_eq!(classify("ANSWER: 这段报错的原因是……", true), AnswerKind::Answer);
+        assert_eq!(
+            classify("ANSWER: 这段报错的原因是……", true),
+            AnswerKind::Answer
+        );
         assert_eq!(classify("  ANSWER: 前导空格也算", true), AnswerKind::Answer);
     }
 

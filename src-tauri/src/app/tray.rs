@@ -5,12 +5,19 @@ use crate::settings::SettingsService;
 use crate::types::{SessionPhase, SessionSnapshot, SlotKind};
 use std::sync::Arc;
 use tauri::{
+    AppHandle, Manager, Runtime,
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Manager, Runtime,
 };
 
-const TARGET_LANGS: [&str; 6] = ["English", "中文（简体）", "日本語", "한국어", "Français", "Deutsch"];
+const TARGET_LANGS: [&str; 6] = [
+    "English",
+    "中文（简体）",
+    "日本語",
+    "한국어",
+    "Français",
+    "Deutsch",
+];
 
 /// 构建整套菜单（配置/状态变化时重建——菜单结构简单，重建成本可忽略）。
 fn build_menu<R: Runtime>(
@@ -21,7 +28,9 @@ fn build_menu<R: Runtime>(
 ) -> tauri::Result<tauri::menu::Menu<R>> {
     let s = settings.get();
 
-    let status = MenuItemBuilder::with_id("status", status_text).enabled(false).build(app)?;
+    let status = MenuItemBuilder::with_id("status", status_text)
+        .enabled(false)
+        .build(app)?;
     let assistant = MenuItemBuilder::with_id("assistant", "打开助手")
         .accelerator("")
         .build(app)?;
@@ -50,7 +59,11 @@ fn build_menu<R: Runtime>(
     ];
     let mut first_group = true;
     for (label, slot) in groups {
-        let profiles: Vec<_> = s.profiles.iter().filter(|p| p.slots.contains(&slot)).collect();
+        let profiles: Vec<_> = s
+            .profiles
+            .iter()
+            .filter(|p| p.slots.contains(&slot))
+            .collect();
         if profiles.is_empty() {
             continue;
         }
@@ -58,24 +71,33 @@ fn build_menu<R: Runtime>(
             model_menu = model_menu.separator();
         }
         first_group = false;
-        let header = MenuItemBuilder::with_id(format!("mh:{label}"), label).enabled(false).build(app)?;
+        let header = MenuItemBuilder::with_id(format!("mh:{label}"), label)
+            .enabled(false)
+            .build(app)?;
         model_menu = model_menu.item(&header);
         let active = s.slots.get(&slot).and_then(|c| c.active_profile.as_deref());
         for p in profiles {
-            let item = CheckMenuItemBuilder::with_id(
-                format!("model:{:?}:{}", slot, p.id),
-                &p.label,
-            )
-            .checked(active == Some(p.id.as_str()))
-            .build(app)?;
+            let item =
+                CheckMenuItemBuilder::with_id(format!("model:{:?}:{}", slot, p.id), &p.label)
+                    .checked(active == Some(p.id.as_str()))
+                    .build(app)?;
             model_menu = model_menu.item(&item);
         }
     }
     let model_menu = model_menu.build()?;
 
-    let pause = MenuItemBuilder::with_id("pause", if paused { "恢复 Typex" } else { "暂停 Typex" })
+    let pause = MenuItemBuilder::with_id(
+        "pause",
+        if paused {
+            "恢复 Typex"
+        } else {
+            "暂停 Typex"
+        },
+    )
+    .build(app)?;
+    let settings_item = MenuItemBuilder::with_id("settings", "设置…")
+        .accelerator("Cmd+,")
         .build(app)?;
-    let settings_item = MenuItemBuilder::with_id("settings", "设置…").accelerator("Cmd+,").build(app)?;
     let home = MenuItemBuilder::with_id("home", "主页…").build(app)?;
     let update = MenuItemBuilder::with_id("update", "检查更新").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
@@ -105,7 +127,8 @@ pub fn status_line(snap: Option<&SessionSnapshot>, paused: bool) -> String {
     }
     match snap.map(|s| s.phase) {
         Some(SessionPhase::Recording) => "● 录音中".into(),
-        Some(SessionPhase::Transcribing) | Some(SessionPhase::Processing)
+        Some(SessionPhase::Transcribing)
+        | Some(SessionPhase::Processing)
         | Some(SessionPhase::Injecting) => "◐ 处理中".into(),
         Some(SessionPhase::Failed) => "⚠ 上次会话失败".into(),
         _ => "● Typex 就绪".into(),
@@ -154,7 +177,8 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
                 "polish" => {
                     let settings = app.state::<Arc<SettingsService>>();
-                    let _ = settings.mutate(|s| s.dictation.polish_enabled = !s.dictation.polish_enabled);
+                    let _ = settings
+                        .mutate(|s| s.dictation.polish_enabled = !s.dictation.polish_enabled);
                     refresh(app);
                 }
                 "update" => { /* CP-5.1 updater */ }
@@ -199,7 +223,9 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 /// 重建菜单（设置变更/状态变化后）。
 pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
-    let Some(tray) = app.tray_by_id("main") else { return };
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
     let settings = app.state::<Arc<SettingsService>>().inner().clone();
     let paused = app
         .try_state::<crate::app::PausedState>()
@@ -212,7 +238,9 @@ pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
 
 /// 会话状态变化 → 状态行更新（orchestrator snapshot_sink 调用）。
 pub fn update_status<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapshot) {
-    let Some(tray) = app.tray_by_id("main") else { return };
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
     let settings = app.state::<Arc<SettingsService>>().inner().clone();
     let paused = app
         .try_state::<crate::app::PausedState>()

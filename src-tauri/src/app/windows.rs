@@ -23,12 +23,17 @@ tauri_nspanel::tauri_panel! {
 #[cfg(target_os = "macos")]
 pub fn setup_hud_panel(app: &AppHandle) -> tauri::Result<()> {
     use tauri_nspanel::{CollectionBehavior, PanelLevel, StyleMask, WebviewWindowExt};
-    let Some(hud) = app.get_webview_window("hud") else { return Ok(()) };
+    let Some(hud) = app.get_webview_window("hud") else {
+        return Ok(());
+    };
     let panel = hud.to_panel::<HudPanel>()?;
     panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
     panel.set_level(PanelLevel::ScreenSaver.into()); // 全屏应用之上也可见
     panel.set_collection_behavior(
-        CollectionBehavior::new().can_join_all_spaces().full_screen_auxiliary().value(),
+        CollectionBehavior::new()
+            .can_join_all_spaces()
+            .full_screen_auxiliary()
+            .value(),
     );
     Ok(())
 }
@@ -36,7 +41,9 @@ pub fn setup_hud_panel(app: &AppHandle) -> tauri::Result<()> {
 /// HUD 显隐随会话状态（05 §3.3）。Idle 延迟 700ms 隐藏——给前端 600ms 成功反馈留时间；
 /// 期间若新会话开始，show 会先到，隐藏检查会话仍为 Idle 才执行。
 pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapshot) {
-    let Some(hud) = app.get_webview_window("hud") else { return };
+    let Some(hud) = app.get_webview_window("hud") else {
+        return;
+    };
     let generation = HUD_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     match snap.phase {
         SessionPhase::Idle => {
@@ -66,7 +73,9 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
     if let Ok(Some(monitor)) = hud.current_monitor() {
         let screen = monitor.size();
         let scale = monitor.scale_factor();
-        let hud_size = hud.outer_size().unwrap_or(tauri::PhysicalSize::new(320, 44));
+        let hud_size = hud
+            .outer_size()
+            .unwrap_or(tauri::PhysicalSize::new(320, 44));
         let x = (screen.width as i32 - hud_size.width as i32) / 2;
         let y = screen.height as i32 - hud_size.height as i32 - (48.0 * scale) as i32;
         let _ = hud.set_position(tauri::PhysicalPosition::new(x, y));
@@ -80,11 +89,15 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("src/windows/settings/index.html".into()))
-        .title("Typex 设置")
-        .inner_size(720.0, 520.0)
-        .resizable(false)
-        .build()?;
+    WebviewWindowBuilder::new(
+        app,
+        "settings",
+        WebviewUrl::App("src/windows/settings/index.html".into()),
+    )
+    .title("Typex 设置")
+    .inner_size(720.0, 520.0)
+    .resizable(false)
+    .build()?;
     Ok(())
 }
 
@@ -95,12 +108,16 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, "home", WebviewUrl::App("src/windows/home/index.html".into()))
-        .title("Typex")
-        .inner_size(880.0, 560.0)
-        .resizable(false)
-        .center()
-        .build()?;
+    WebviewWindowBuilder::new(
+        app,
+        "home",
+        WebviewUrl::App("src/windows/home/index.html".into()),
+    )
+    .title("Typex")
+    .inner_size(880.0, 560.0)
+    .resizable(false)
+    .center()
+    .build()?;
     Ok(())
 }
 

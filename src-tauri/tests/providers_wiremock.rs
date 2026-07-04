@@ -1,29 +1,40 @@
 //! Provider × wiremock 集成测试（08 §4.1）。
 
 use futures_util::StreamExt;
-use typex_lib::providers::llm::{
-    chat_completions::ChatCompletionsLlm, responses::ResponsesLlm, LlmProvider, LlmRequest,
-};
-use typex_lib::providers::stt::{openai_compat::OpenAiCompatStt, AudioInput, SttOptions, SttProvider};
 use typex_lib::providers::ProviderError;
+use typex_lib::providers::llm::{
+    LlmProvider, LlmRequest, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
+};
+use typex_lib::providers::stt::{
+    AudioInput, SttOptions, SttProvider, openai_compat::OpenAiCompatStt,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 fn wav_stub() -> AudioInput {
-    AudioInput { wav_16k_mono: vec![0u8; 128], duration_ms: 1000 }
+    AudioInput {
+        wav_16k_mono: vec![0u8; 128],
+        duration_ms: 1000,
+    }
 }
 
 fn llm_req() -> LlmRequest {
     LlmRequest {
         system: "sys".into(),
-        messages: vec![typex_lib::providers::llm::Msg { role: "user".into(), content: "ping".into() }],
+        messages: vec![typex_lib::providers::llm::Msg {
+            role: "user".into(),
+            content: "ping".into(),
+        }],
         temperature: 0.3,
         max_tokens: None,
     }
 }
 
 fn client() -> reqwest::Client {
-    reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap()
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap()
 }
 
 // ── openai_compat STT ──
@@ -48,9 +59,20 @@ async fn stt_request_shape_and_response_parse() {
         .await;
 
     // base_url 带尾斜杠也能正确拼接
-    let stt = OpenAiCompatStt::new(client(), format!("{}/v1/", server.uri()), "sk-test", "whisper-large-v3-turbo");
+    let stt = OpenAiCompatStt::new(
+        client(),
+        format!("{}/v1/", server.uri()),
+        "sk-test",
+        "whisper-large-v3-turbo",
+    );
     let t = stt
-        .transcribe(wav_stub(), SttOptions { language: Some("zh".into()), ..Default::default() })
+        .transcribe(
+            wav_stub(),
+            SttOptions {
+                language: Some("zh".into()),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(t.text, "你好 Typex");
@@ -62,15 +84,24 @@ async fn stt_language_auto_is_omitted() {
     Mock::given(method("POST"))
         .respond_with(move |req: &Request| {
             let body = String::from_utf8_lossy(&req.body);
-            assert!(!body.contains("name=\"language\""), "auto 不应发送 language");
+            assert!(
+                !body.contains("name=\"language\""),
+                "auto 不应发送 language"
+            );
             ResponseTemplate::new(200).set_body_json(serde_json::json!({"text": "ok"}))
         })
         .mount(&server)
         .await;
     let stt = OpenAiCompatStt::new(client(), server.uri(), "k", "m");
-    stt.transcribe(wav_stub(), SttOptions { language: Some("auto".into()), ..Default::default() })
-        .await
-        .unwrap();
+    stt.transcribe(
+        wav_stub(),
+        SttOptions {
+            language: Some("auto".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -82,7 +113,10 @@ async fn stt_401_is_auth_error_and_not_retried() {
         .mount(&server)
         .await;
     let stt = OpenAiCompatStt::new(client(), server.uri(), "bad", "m");
-    let err = stt.transcribe(wav_stub(), SttOptions::default()).await.unwrap_err();
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
     assert!(matches!(err, ProviderError::Auth(_)));
 }
 
@@ -95,7 +129,10 @@ async fn stt_503_retried_twice_then_gives_up() {
         .mount(&server)
         .await;
     let stt = OpenAiCompatStt::new(client(), server.uri(), "k", "m");
-    let err = stt.transcribe(wav_stub(), SttOptions::default()).await.unwrap_err();
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
     assert!(matches!(err, ProviderError::Server { status: 503, .. }));
 }
 
@@ -110,10 +147,15 @@ async fn stt_timeout_classified() {
         )
         .mount(&server)
         .await;
-    let fast_client =
-        reqwest::Client::builder().timeout(std::time::Duration::from_millis(300)).build().unwrap();
+    let fast_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(300))
+        .build()
+        .unwrap();
     let stt = OpenAiCompatStt::new(fast_client, server.uri(), "k", "m");
-    let err = stt.transcribe(wav_stub(), SttOptions::default()).await.unwrap_err();
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
     assert!(matches!(err, ProviderError::Timeout));
 }
 
@@ -133,7 +175,9 @@ async fn stt_extra_headers_and_form_passthrough() {
         [("x-gateway-key".to_string(), "gw".to_string())].into(),
         [("custom_field".to_string(), "v".to_string())].into(),
     );
-    stt.transcribe(wav_stub(), SttOptions::default()).await.unwrap();
+    stt.transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap();
 }
 
 // ── chat_completions LLM ──

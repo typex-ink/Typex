@@ -70,7 +70,13 @@ pub struct HotkeyDetector {
 
 impl HotkeyDetector {
     pub fn new(config: HotkeyConfig) -> Self {
-        Self { config, held: Vec::new(), first_down_at: 0, yielded: false, current_mode: None }
+        Self {
+            config,
+            held: Vec::new(),
+            first_down_at: 0,
+            yielded: false,
+            current_mode: None,
+        }
     }
 
     pub fn set_config(&mut self, config: HotkeyConfig) {
@@ -120,7 +126,9 @@ impl HotkeyDetector {
                     && self.current_mode != Some(SessionMode::Translation)
                 {
                     self.current_mode = Some(SessionMode::Translation);
-                    vec![HotkeyEvent::ModeUpgraded { mode: SessionMode::Translation }]
+                    vec![HotkeyEvent::ModeUpgraded {
+                        mode: SessionMode::Translation,
+                    }]
                 } else {
                     vec![]
                 }
@@ -150,7 +158,9 @@ impl HotkeyDetector {
             if was_yielded {
                 vec![] // 让路后静默复位
             } else {
-                vec![HotkeyEvent::TriggerUp { held_ms: t_ms.saturating_sub(self.first_down_at) }]
+                vec![HotkeyEvent::TriggerUp {
+                    held_ms: t_ms.saturating_sub(self.first_down_at),
+                }]
             }
         } else {
             vec![] // 组合中先松一个键：等全部松开
@@ -179,9 +189,14 @@ mod tests {
         let mut d = det();
         assert_eq!(
             d.on_key("MetaRight", true, 0),
-            vec![HotkeyEvent::TriggerDown { mode: SessionMode::Dictation }]
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
         );
-        assert_eq!(d.on_key("MetaRight", false, 800), vec![HotkeyEvent::TriggerUp { held_ms: 800 }]);
+        assert_eq!(
+            d.on_key("MetaRight", false, 800),
+            vec![HotkeyEvent::TriggerUp { held_ms: 800 }]
+        );
     }
 
     #[test]
@@ -199,15 +214,22 @@ mod tests {
         let mut d = det();
         assert_eq!(
             d.on_key("MetaRight", true, 0),
-            vec![HotkeyEvent::TriggerDown { mode: SessionMode::Dictation }]
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
         );
         assert_eq!(
             d.on_key("AltRight", true, 120),
-            vec![HotkeyEvent::ModeUpgraded { mode: SessionMode::Translation }]
+            vec![HotkeyEvent::ModeUpgraded {
+                mode: SessionMode::Translation
+            }]
         );
         // 先松一个不产生事件，全松才 Up
         assert_eq!(d.on_key("MetaRight", false, 900), vec![]);
-        assert_eq!(d.on_key("AltRight", false, 950), vec![HotkeyEvent::TriggerUp { held_ms: 950 }]);
+        assert_eq!(
+            d.on_key("AltRight", false, 950),
+            vec![HotkeyEvent::TriggerUp { held_ms: 950 }]
+        );
     }
 
     #[test]
@@ -215,11 +237,15 @@ mod tests {
         let mut d = det();
         assert_eq!(
             d.on_key("AltRight", true, 0),
-            vec![HotkeyEvent::TriggerDown { mode: SessionMode::Assistant }]
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Assistant
+            }]
         );
         assert_eq!(
             d.on_key("MetaRight", true, 50),
-            vec![HotkeyEvent::ModeUpgraded { mode: SessionMode::Translation }]
+            vec![HotkeyEvent::ModeUpgraded {
+                mode: SessionMode::Translation
+            }]
         );
     }
 
@@ -234,7 +260,9 @@ mod tests {
         // 复位后恢复正常
         assert_eq!(
             d.on_key("MetaRight", true, 300),
-            vec![HotkeyEvent::TriggerDown { mode: SessionMode::Dictation }]
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
         );
     }
 
@@ -259,7 +287,9 @@ mod tests {
         // AltRight down → 助手乐观启动（正常）
         assert_eq!(
             d.on_key("AltRight", true, 1),
-            vec![HotkeyEvent::TriggerDown { mode: SessionMode::Assistant }]
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Assistant
+            }]
         );
         // 用户接着打字母（AltGr+E 输特殊字符）→ 让路
         assert_eq!(d.on_key("KeyE", true, 60), vec![HotkeyEvent::Yielded]);
@@ -283,6 +313,9 @@ mod tests {
         d.on_key("MetaRight", true, 0);
         assert_eq!(d.on_key("MetaRight", true, 30), vec![]);
         assert_eq!(d.on_key("MetaRight", true, 60), vec![]);
-        assert_eq!(d.on_key("MetaRight", false, 500), vec![HotkeyEvent::TriggerUp { held_ms: 500 }]);
+        assert_eq!(
+            d.on_key("MetaRight", false, 500),
+            vec![HotkeyEvent::TriggerUp { held_ms: 500 }]
+        );
     }
 }

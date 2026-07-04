@@ -26,7 +26,9 @@ pub fn open_settings(kind: PermissionKind) {
             PermissionKind::InputMonitoring => "Privacy_ListenEvent",
         };
         let _ = std::process::Command::new("open")
-            .arg(format!("x-apple.systempreferences:com.apple.preference.security?{pane}"))
+            .arg(format!(
+                "x-apple.systempreferences:com.apple.preference.security?{pane}"
+            ))
             .spawn();
     }
     #[cfg(not(target_os = "macos"))]

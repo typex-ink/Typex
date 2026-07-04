@@ -61,7 +61,11 @@ pub fn validate(template: &str, slot: crate::types::SlotKind) -> Result<(), Vec<
         .filter(|p| !template.contains(*p))
         .map(|p| p.to_string())
         .collect();
-    if missing.is_empty() { Ok(()) } else { Err(missing) }
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(missing)
+    }
 }
 
 /// 渲染模板：
@@ -74,7 +78,9 @@ pub fn render(template: &str, values: &HashMap<&str, String>) -> String {
         // 找出本行所有 {placeholder}
         let mut rest = line;
         while let Some(start) = rest.find('{') {
-            let Some(end_rel) = rest[start..].find('}') else { break };
+            let Some(end_rel) = rest[start..].find('}') else {
+                break;
+            };
             let ph = &rest[start..start + end_rel + 1];
             match values.get(ph) {
                 Some(v) => rendered = rendered.replace(ph, v),

@@ -14,8 +14,12 @@ pub enum SlotKind {
 }
 
 impl SlotKind {
-    pub const ALL: [SlotKind; 4] =
-        [SlotKind::Stt, SlotKind::Polish, SlotKind::Translate, SlotKind::Assistant];
+    pub const ALL: [SlotKind; 4] = [
+        SlotKind::Stt,
+        SlotKind::Polish,
+        SlotKind::Translate,
+        SlotKind::Assistant,
+    ];
 }
 
 /// adapter 走向（03 §1）。`local` 是 v1.1 扩展位。

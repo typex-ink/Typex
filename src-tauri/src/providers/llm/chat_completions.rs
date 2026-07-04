@@ -4,8 +4,8 @@
 use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest};
 use crate::providers::ProviderError;
 use eventsource_stream::Eventsource;
-use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use std::collections::HashMap;
 
 pub struct ChatCompletionsLlm {
@@ -58,7 +58,9 @@ impl ChatCompletionsLlm {
 /// 解析一行 SSE data JSON → delta 文本。
 fn parse_delta(data: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(data).ok()?;
-    v["choices"][0]["delta"]["content"].as_str().map(String::from)
+    v["choices"][0]["delta"]["content"]
+        .as_str()
+        .map(String::from)
 }
 
 impl LlmProvider for ChatCompletionsLlm {

@@ -2,7 +2,9 @@
 //! VAD 静音裁剪与长录音切片在 CP-1.9 加入。
 
 use crate::error::{ErrorCode, Result, TypexError};
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 
 pub const TARGET_RATE: u32 = 16_000;
 
@@ -125,10 +127,16 @@ mod tests {
         let out = resample(&input, 48_000, 16_000).unwrap();
         // 输出长度约 1/3（sinc 边缘允许 ±5%）
         let expect = input.len() / 3;
-        assert!((out.len() as i64 - expect as i64).unsigned_abs() < (expect / 20) as u64,
-            "len {} vs expect {expect}", out.len());
+        assert!(
+            (out.len() as i64 - expect as i64).unsigned_abs() < (expect / 20) as u64,
+            "len {} vs expect {expect}",
+            out.len()
+        );
         // 频率不漂移：过零率 ≈ 2 × 440 次/秒
-        let zc = out.windows(2).filter(|w| w[0].signum() != w[1].signum()).count();
+        let zc = out
+            .windows(2)
+            .filter(|w| w[0].signum() != w[1].signum())
+            .count();
         let dur = out.len() as f32 / 16_000.0;
         let freq = zc as f32 / dur / 2.0;
         assert!((freq - 440.0).abs() < 15.0, "measured freq {freq}");

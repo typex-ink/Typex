@@ -85,7 +85,9 @@ mod tests {
 
     fn speech(secs: f32) -> Vec<f32> {
         (0..(SAMPLE_RATE as f32 * secs) as usize)
-            .map(|i| (2.0 * std::f32::consts::PI * 200.0 * i as f32 / SAMPLE_RATE as f32).sin() * 0.3)
+            .map(|i| {
+                (2.0 * std::f32::consts::PI * 200.0 * i as f32 / SAMPLE_RATE as f32).sin() * 0.3
+            })
             .collect()
     }
 
@@ -100,7 +102,10 @@ mod tests {
         let (start, end) = trim_silence(&audio, 100);
         // 切点落在语音段边界 ±150ms 内
         let tol = SAMPLE_RATE * 150 / 1000;
-        assert!(start.abs_diff(speech_start) < tol, "start {start} vs {speech_start}");
+        assert!(
+            start.abs_diff(speech_start) < tol,
+            "start {start} vs {speech_start}"
+        );
         assert!(end.abs_diff(speech_end) < tol, "end {end} vs {speech_end}");
     }
 
@@ -128,7 +133,10 @@ mod tests {
         let chunks = split_at_silence(&audio, SAMPLE_RATE * 40);
         assert_eq!(chunks.len(), 2);
         let cut = chunks[0].1;
-        assert!(cut >= gap_start && cut <= gap_end, "cut {cut} not in [{gap_start},{gap_end}]");
+        assert!(
+            cut >= gap_start && cut <= gap_end,
+            "cut {cut} not in [{gap_start},{gap_end}]"
+        );
         // 无缝衔接
         assert_eq!(chunks[0].1, chunks[1].0);
         assert_eq!(chunks[1].1, audio.len());

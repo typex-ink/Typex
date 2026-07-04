@@ -86,7 +86,10 @@ impl State {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// 触发键按下（乐观启动）。next_session_id 由 orchestrator 预分配。
-    TriggerDown { mode: SessionMode, next_session_id: u64 },
+    TriggerDown {
+        mode: SessionMode,
+        next_session_id: u64,
+    },
     /// 按住期间组合出翻译键
     ModeUpgraded { mode: SessionMode },
     /// 全部触发键松开
@@ -127,13 +130,24 @@ pub enum Event {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     StartRecording,
-    StopRecording { session_id: u64 },
+    StopRecording {
+        session_id: u64,
+    },
     CancelRecording,
     /// 停止录音并以音频调 STT
-    CallStt { session_id: u64 },
+    CallStt {
+        session_id: u64,
+    },
     /// 以转写稿调处理层（整理/翻译/问答，按 mode 选流水线）
-    CallProcess { session_id: u64, mode: SessionMode, transcript: String },
-    Inject { session_id: u64, text: String },
+    CallProcess {
+        session_id: u64,
+        mode: SessionMode,
+        transcript: String,
+    },
+    Inject {
+        session_id: u64,
+        text: String,
+    },
     /// 推送 SessionSnapshot 给前端
     EmitUi,
     /// 忙碌提示（重按忽略时 HUD 轻晃 + 微文案）
@@ -142,7 +156,9 @@ pub enum Effect {
     /// 复制文本到剪贴板（失败兜底「复制原文」等）
     CopyToClipboard(String),
     /// 会话彻底结束，释放临时音频
-    ReleaseAudio { session_id: u64 },
+    ReleaseAudio {
+        session_id: u64,
+    },
     /// 呼出助手面板（助手键短按 = 仅呼出面板，05 §7.1）
     ShowAssistantPanel,
 }
@@ -164,8 +180,18 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
     use Effect as E;
     match (state, event) {
         // ───────── Idle ─────────
-        (State::Idle, Event::TriggerDown { mode, next_session_id }) => (
-            State::Recording { session_id: next_session_id, mode, toggled: false },
+        (
+            State::Idle,
+            Event::TriggerDown {
+                mode,
+                next_session_id,
+            },
+        ) => (
+            State::Recording {
+                session_id: next_session_id,
+                mode,
+                toggled: false,
+            },
             vec![E::StartRecording, E::EmitUi, E::PlayChime(Chime::Start)],
         ),
         (s @ State::Idle, _) => (s, vec![]),
@@ -173,20 +199,42 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         // ───────── Recording ─────────
         (State::Recording { session_id, .. }, Event::ModeUpgraded { mode }) => (
             // 模式升级（听写→翻译）：音频保留，仅换徽标
-            State::Recording { session_id, mode, toggled: false },
+            State::Recording {
+                session_id,
+                mode,
+                toggled: false,
+            },
             vec![E::EmitUi],
         ),
-        (State::Recording { session_id, mode, toggled }, Event::TriggerUp { held_ms }) => {
+        (
+            State::Recording {
+                session_id,
+                mode,
+                toggled,
+            },
+            Event::TriggerUp { held_ms },
+        ) => {
             if !toggled && is_toggle(held_ms, threshold_ms) {
                 if mode == SessionMode::Assistant {
                     // 助手键短按 = 仅呼出面板，不录音（05 §7.1）
                     return (
                         State::Idle,
-                        vec![E::CancelRecording, E::ShowAssistantPanel, E::ReleaseAudio { session_id }],
+                        vec![
+                            E::CancelRecording,
+                            E::ShowAssistantPanel,
+                            E::ReleaseAudio { session_id },
+                        ],
                     );
                 }
                 // 短按 = toggle 开始：继续录音，等待第二次按键
-                (State::Recording { session_id, mode, toggled: true }, vec![E::EmitUi])
+                (
+                    State::Recording {
+                        session_id,
+                        mode,
+                        toggled: true,
+                    },
+                    vec![E::EmitUi],
+                )
             } else {
                 // push-to-talk 结束（或 toggle 后的松开——不可能路径，防御性同样结束）
                 (
@@ -195,7 +243,14 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 )
             }
         }
-        (State::Recording { session_id, mode, toggled: true }, Event::TriggerDown { .. }) => {
+        (
+            State::Recording {
+                session_id,
+                mode,
+                toggled: true,
+            },
+            Event::TriggerDown { .. },
+        ) => {
             // toggle 模式下二次按下 = 结束录音
             (
                 State::Transcribing { session_id, mode },
@@ -208,26 +263,50 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         }
         (State::Recording { session_id, .. }, Event::Yielded) => {
             // 组合键让路：静默取消，无任何注入/提示音（08 §3.1）
-            (State::Idle, vec![E::CancelRecording, E::ReleaseAudio { session_id }])
+            (
+                State::Idle,
+                vec![E::CancelRecording, E::ReleaseAudio { session_id }],
+            )
         }
         (State::Recording { session_id, .. }, Event::Esc | Event::Dismiss) => (
             State::Idle,
-            vec![E::CancelRecording, E::EmitUi, E::ReleaseAudio { session_id }],
+            vec![
+                E::CancelRecording,
+                E::EmitUi,
+                E::ReleaseAudio { session_id },
+            ],
         ),
         (s @ State::Recording { .. }, _) => (s, vec![]),
 
         // ───────── Transcribing ─────────
-        (State::Transcribing { session_id, mode }, Event::SttResult { session_id: sid, transcript })
-            if sid == session_id =>
-        {
-            (
-                State::Processing { session_id, mode, transcript: transcript.clone() },
-                vec![E::CallProcess { session_id, mode, transcript }, E::EmitUi],
-            )
-        }
-        (State::Transcribing { session_id, mode }, Event::SttFailed { session_id: sid, error })
-            if sid == session_id =>
-        {
+        (
+            State::Transcribing { session_id, mode },
+            Event::SttResult {
+                session_id: sid,
+                transcript,
+            },
+        ) if sid == session_id => (
+            State::Processing {
+                session_id,
+                mode,
+                transcript: transcript.clone(),
+            },
+            vec![
+                E::CallProcess {
+                    session_id,
+                    mode,
+                    transcript,
+                },
+                E::EmitUi,
+            ],
+        ),
+        (
+            State::Transcribing { session_id, mode },
+            Event::SttFailed {
+                session_id: sid,
+                error,
+            },
+        ) if sid == session_id => {
             (
                 State::Failed {
                     session_id,
@@ -244,14 +323,23 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (s @ State::Transcribing { .. }, _) => (s, vec![]),
 
         // ───────── Processing ─────────
-        (State::Processing { session_id, mode, .. }, Event::ProcessResult { session_id: sid, text })
-            if sid == session_id =>
-        {
-            (
-                State::Injecting { session_id, mode, text: text.clone(), unpolished: false },
-                vec![E::Inject { session_id, text }, E::EmitUi],
-            )
-        }
+        (
+            State::Processing {
+                session_id, mode, ..
+            },
+            Event::ProcessResult {
+                session_id: sid,
+                text,
+            },
+        ) if sid == session_id => (
+            State::Injecting {
+                session_id,
+                mode,
+                text: text.clone(),
+                unpolished: false,
+            },
+            vec![E::Inject { session_id, text }, E::EmitUi],
+        ),
         (State::Processing { session_id, .. }, Event::AssistantHandedOff { session_id: sid })
             if sid == session_id =>
         {
@@ -259,18 +347,41 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
         }
         (
-            State::Processing { session_id, mode, .. },
-            Event::ProcessDegraded { session_id: sid, original },
+            State::Processing {
+                session_id, mode, ..
+            },
+            Event::ProcessDegraded {
+                session_id: sid,
+                original,
+            },
         ) if sid == session_id => {
             // F-9 降级：注入原始转写 + HUD「未整理」标注
             (
-                State::Injecting { session_id, mode, text: original.clone(), unpolished: true },
-                vec![E::Inject { session_id, text: original }, E::EmitUi],
+                State::Injecting {
+                    session_id,
+                    mode,
+                    text: original.clone(),
+                    unpolished: true,
+                },
+                vec![
+                    E::Inject {
+                        session_id,
+                        text: original,
+                    },
+                    E::EmitUi,
+                ],
             )
         }
         (
-            State::Processing { session_id, mode, transcript },
-            Event::ProcessFailed { session_id: sid, error },
+            State::Processing {
+                session_id,
+                mode,
+                transcript,
+            },
+            Event::ProcessFailed {
+                session_id: sid,
+                error,
+            },
         ) if sid == session_id => {
             // 转写稿保留：HUD 提供「复制原文」/（翻译模式）「注入原文」
             (
@@ -293,18 +404,34 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         {
             (
                 State::Idle,
-                vec![E::EmitUi, E::PlayChime(Chime::Success), E::ReleaseAudio { session_id }],
+                vec![
+                    E::EmitUi,
+                    E::PlayChime(Chime::Success),
+                    E::ReleaseAudio { session_id },
+                ],
             )
         }
         (
-            State::Injecting { session_id, mode, text, .. },
-            Event::InjectFailed { session_id: sid, error },
+            State::Injecting {
+                session_id,
+                mode,
+                text,
+                ..
+            },
+            Event::InjectFailed {
+                session_id: sid,
+                error,
+            },
         ) if sid == session_id => {
             // 注入失败 → 自动转剪贴板 + 明示（05 §9 兜底）
             let effects = if error.code == ErrorCode::NoFocus {
                 vec![E::CopyToClipboard(text.clone()), E::EmitUi]
             } else {
-                vec![E::CopyToClipboard(text.clone()), E::EmitUi, E::PlayChime(Chime::Error)]
+                vec![
+                    E::CopyToClipboard(text.clone()),
+                    E::EmitUi,
+                    E::PlayChime(Chime::Error),
+                ]
             };
             (
                 State::Failed {
@@ -321,7 +448,16 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (s @ State::Injecting { .. }, _) => (s, vec![]),
 
         // ───────── Failed ─────────
-        (State::Failed { session_id, mode, stage, transcript, .. }, Event::Retry) => {
+        (
+            State::Failed {
+                session_id,
+                mode,
+                stage,
+                transcript,
+                ..
+            },
+            Event::Retry,
+        ) => {
             // 从失败的 stage 恢复，而非从头（08 §3.1）
             match stage {
                 FailedStage::Transcribing => (
@@ -331,23 +467,55 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 FailedStage::Processing => {
                     let t = transcript.unwrap_or_default();
                     (
-                        State::Processing { session_id, mode, transcript: t.clone() },
-                        vec![E::CallProcess { session_id, mode, transcript: t }, E::EmitUi],
+                        State::Processing {
+                            session_id,
+                            mode,
+                            transcript: t.clone(),
+                        },
+                        vec![
+                            E::CallProcess {
+                                session_id,
+                                mode,
+                                transcript: t,
+                            },
+                            E::EmitUi,
+                        ],
                     )
                 }
                 FailedStage::Injecting | FailedStage::Recording => {
                     let t = transcript.unwrap_or_default();
                     (
-                        State::Injecting { session_id, mode, text: t.clone(), unpolished: false },
-                        vec![E::Inject { session_id, text: t }, E::EmitUi],
+                        State::Injecting {
+                            session_id,
+                            mode,
+                            text: t.clone(),
+                            unpolished: false,
+                        },
+                        vec![
+                            E::Inject {
+                                session_id,
+                                text: t,
+                            },
+                            E::EmitUi,
+                        ],
                     )
                 }
             }
         }
-        (State::Failed { session_id, .. }, Event::TriggerDown { mode, next_session_id }) => {
+        (
+            State::Failed { session_id, .. },
+            Event::TriggerDown {
+                mode,
+                next_session_id,
+            },
+        ) => {
             // 失败态按触发键 = 放弃旧会话开新录音（08 §3.1）
             (
-                State::Recording { session_id: next_session_id, mode, toggled: false },
+                State::Recording {
+                    session_id: next_session_id,
+                    mode,
+                    toggled: false,
+                },
                 vec![
                     E::ReleaseAudio { session_id },
                     E::StartRecording,
@@ -356,23 +524,47 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 ],
             )
         }
-        (State::Failed { session_id, .. }, Event::Dismiss) => (
-            State::Idle,
-            vec![E::EmitUi, E::ReleaseAudio { session_id }],
-        ),
-        (s @ State::Failed { transcript: Some(_), .. }, Event::CopyTranscriptRequested) => {
+        (State::Failed { session_id, .. }, Event::Dismiss) => {
+            (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
+        }
+        (
+            s @ State::Failed {
+                transcript: Some(_),
+                ..
+            },
+            Event::CopyTranscriptRequested,
+        ) => {
             let t = match &s {
-                State::Failed { transcript: Some(t), .. } => t.clone(),
+                State::Failed {
+                    transcript: Some(t),
+                    ..
+                } => t.clone(),
                 _ => unreachable!(),
             };
             (s, vec![E::CopyToClipboard(t)])
         }
         (
-            State::Failed { session_id, mode, transcript: Some(t), .. },
+            State::Failed {
+                session_id,
+                mode,
+                transcript: Some(t),
+                ..
+            },
             Event::InjectOriginalRequested,
         ) => (
-            State::Injecting { session_id, mode, text: t.clone(), unpolished: true },
-            vec![E::Inject { session_id, text: t }, E::EmitUi],
+            State::Injecting {
+                session_id,
+                mode,
+                text: t.clone(),
+                unpolished: true,
+            },
+            vec![
+                E::Inject {
+                    session_id,
+                    text: t,
+                },
+                E::EmitUi,
+            ],
         ),
         (s @ State::Failed { .. }, _) => (s, vec![]),
     }
@@ -389,11 +581,18 @@ mod tests {
     }
 
     fn recording(id: u64) -> State {
-        State::Recording { session_id: id, mode: SessionMode::Dictation, toggled: false }
+        State::Recording {
+            session_id: id,
+            mode: SessionMode::Dictation,
+            toggled: false,
+        }
     }
 
     fn down(id: u64) -> Event {
-        Event::TriggerDown { mode: SessionMode::Dictation, next_session_id: id }
+        Event::TriggerDown {
+            mode: SessionMode::Dictation,
+            next_session_id: id,
+        }
     }
 
     // ── 长按/短按（08 §3.1 场景 1）──
@@ -401,7 +600,14 @@ mod tests {
     #[test]
     fn hold_349ms_release_enters_toggle_mode() {
         let (s, fx) = advance(recording(1), Event::TriggerUp { held_ms: 349 }, T);
-        assert_eq!(s, State::Recording { session_id: 1, mode: SessionMode::Dictation, toggled: true });
+        assert_eq!(
+            s,
+            State::Recording {
+                session_id: 1,
+                mode: SessionMode::Dictation,
+                toggled: true
+            }
+        );
         assert!(!fx.contains(&Effect::CallStt { session_id: 1 }));
     }
 
@@ -425,8 +631,13 @@ mod tests {
 
     #[test]
     fn combo_upgrades_mode_and_keeps_audio() {
-        let (s, fx) =
-            advance(recording(1), Event::ModeUpgraded { mode: SessionMode::Translation }, T);
+        let (s, fx) = advance(
+            recording(1),
+            Event::ModeUpgraded {
+                mode: SessionMode::Translation,
+            },
+            T,
+        );
         assert_eq!(s.mode(), Some(SessionMode::Translation));
         assert_eq!(s.session_id(), Some(1));
         // 无 CancelRecording/StartRecording —— 音频保留
@@ -450,7 +661,10 @@ mod tests {
 
     #[test]
     fn press_during_transcribing_is_ignored_with_busy_hint() {
-        let s0 = State::Transcribing { session_id: 1, mode: SessionMode::Dictation };
+        let s0 = State::Transcribing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+        };
         let (s, fx) = advance(s0.clone(), down(2), T);
         assert_eq!(s, s0);
         assert_eq!(fx, vec![Effect::EmitBusyHint]);
@@ -458,12 +672,21 @@ mod tests {
 
     #[test]
     fn press_during_processing_and_injecting_ignored() {
-        let p = State::Processing { session_id: 1, mode: SessionMode::Dictation, transcript: "x".into() };
+        let p = State::Processing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            transcript: "x".into(),
+        };
         let (s, fx) = advance(p.clone(), down(2), T);
         assert_eq!(s, p);
         assert_eq!(fx, vec![Effect::EmitBusyHint]);
 
-        let i = State::Injecting { session_id: 1, mode: SessionMode::Dictation, text: "x".into(), unpolished: false };
+        let i = State::Injecting {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            text: "x".into(),
+            unpolished: false,
+        };
         let (s, fx) = advance(i.clone(), down(2), T);
         assert_eq!(s, i);
         assert_eq!(fx, vec![Effect::EmitBusyHint]);
@@ -495,8 +718,15 @@ mod tests {
 
         // 其他态 Esc 无效果
         for st in [
-            State::Transcribing { session_id: 1, mode: SessionMode::Dictation },
-            State::Processing { session_id: 1, mode: SessionMode::Dictation, transcript: "x".into() },
+            State::Transcribing {
+                session_id: 1,
+                mode: SessionMode::Dictation,
+            },
+            State::Processing {
+                session_id: 1,
+                mode: SessionMode::Dictation,
+                transcript: "x".into(),
+            },
             State::Idle,
         ] {
             let (s2, fx2) = advance(st.clone(), Event::Esc, T);
@@ -509,14 +739,22 @@ mod tests {
 
     #[test]
     fn stt_failure_keeps_audio_recoverable() {
-        let s0 = State::Transcribing { session_id: 1, mode: SessionMode::Dictation };
+        let s0 = State::Transcribing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+        };
         let (s, fx) = advance(
             s0,
-            Event::SttFailed { session_id: 1, error: err(ErrorCode::NetworkError) },
+            Event::SttFailed {
+                session_id: 1,
+                error: err(ErrorCode::NetworkError),
+            },
             T,
         );
         match &s {
-            State::Failed { stage, transcript, .. } => {
+            State::Failed {
+                stage, transcript, ..
+            } => {
                 assert_eq!(*stage, FailedStage::Transcribing);
                 assert!(transcript.is_none()); // 音频在 orchestrator，转写稿尚无
             }
@@ -528,14 +766,23 @@ mod tests {
 
     #[test]
     fn process_failure_keeps_transcript_for_copy() {
-        let s0 = State::Processing { session_id: 1, mode: SessionMode::Dictation, transcript: "原文".into() };
+        let s0 = State::Processing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            transcript: "原文".into(),
+        };
         let (s, _) = advance(
             s0,
-            Event::ProcessFailed { session_id: 1, error: err(ErrorCode::Timeout) },
+            Event::ProcessFailed {
+                session_id: 1,
+                error: err(ErrorCode::Timeout),
+            },
             T,
         );
         match &s {
-            State::Failed { stage, transcript, .. } => {
+            State::Failed {
+                stage, transcript, ..
+            } => {
                 assert_eq!(*stage, FailedStage::Processing);
                 assert_eq!(transcript.as_deref(), Some("原文"));
             }
@@ -578,10 +825,16 @@ mod tests {
 
     #[test]
     fn stale_stt_result_is_dropped() {
-        let s0 = State::Transcribing { session_id: 2, mode: SessionMode::Dictation };
+        let s0 = State::Transcribing {
+            session_id: 2,
+            mode: SessionMode::Dictation,
+        };
         let (s, fx) = advance(
             s0.clone(),
-            Event::SttResult { session_id: 1, transcript: "旧会话结果".into() },
+            Event::SttResult {
+                session_id: 1,
+                transcript: "旧会话结果".into(),
+            },
             T,
         );
         assert_eq!(s, s0); // 状态零变化
@@ -590,8 +843,19 @@ mod tests {
 
     #[test]
     fn stale_process_result_is_dropped() {
-        let s0 = State::Processing { session_id: 3, mode: SessionMode::Dictation, transcript: "x".into() };
-        let (s, fx) = advance(s0.clone(), Event::ProcessResult { session_id: 2, text: "旧".into() }, T);
+        let s0 = State::Processing {
+            session_id: 3,
+            mode: SessionMode::Dictation,
+            transcript: "x".into(),
+        };
+        let (s, fx) = advance(
+            s0.clone(),
+            Event::ProcessResult {
+                session_id: 2,
+                text: "旧".into(),
+            },
+            T,
+        );
         assert_eq!(s, s0);
         assert!(fx.is_empty());
     }
@@ -601,7 +865,14 @@ mod tests {
         // Recording 中取消 → Idle；迟到的 SttResult 不得产生任何效果
         let (s, _) = advance(recording(1), Event::Esc, T);
         assert_eq!(s, State::Idle);
-        let (s, fx) = advance(s, Event::SttResult { session_id: 1, transcript: "迟到".into() }, T);
+        let (s, fx) = advance(
+            s,
+            Event::SttResult {
+                session_id: 1,
+                transcript: "迟到".into(),
+            },
+            T,
+        );
         assert_eq!(s, State::Idle);
         assert!(fx.is_empty());
     }
@@ -610,20 +881,32 @@ mod tests {
 
     #[test]
     fn polish_degradation_injects_original_with_unpolished_flag() {
-        let s0 = State::Processing { session_id: 1, mode: SessionMode::Dictation, transcript: "嗯原文".into() };
+        let s0 = State::Processing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            transcript: "嗯原文".into(),
+        };
         let (s, fx) = advance(
             s0,
-            Event::ProcessDegraded { session_id: 1, original: "嗯原文".into() },
+            Event::ProcessDegraded {
+                session_id: 1,
+                original: "嗯原文".into(),
+            },
             T,
         );
         match &s {
-            State::Injecting { unpolished, text, .. } => {
+            State::Injecting {
+                unpolished, text, ..
+            } => {
                 assert!(*unpolished);
                 assert_eq!(text, "嗯原文");
             }
             _ => panic!("expected Injecting"),
         }
-        assert!(fx.contains(&Effect::Inject { session_id: 1, text: "嗯原文".into() }));
+        assert!(fx.contains(&Effect::Inject {
+            session_id: 1,
+            text: "嗯原文".into()
+        }));
     }
 
     // ── 翻译降级（场景 9）──
@@ -637,12 +920,17 @@ mod tests {
         };
         let (s, _) = advance(
             s0,
-            Event::ProcessFailed { session_id: 1, error: err(ErrorCode::ServerError) },
+            Event::ProcessFailed {
+                session_id: 1,
+                error: err(ErrorCode::ServerError),
+            },
             T,
         );
         // Failed 且转写稿保留 → HUD 可提供「注入原文」（executor 层将其映射为按钮）
         match &s {
-            State::Failed { mode, transcript, .. } => {
+            State::Failed {
+                mode, transcript, ..
+            } => {
                 assert_eq!(*mode, SessionMode::Translation);
                 assert_eq!(transcript.as_deref(), Some("中文原文"));
             }
@@ -662,7 +950,14 @@ mod tests {
         let (s, _) = advance(s, Event::TriggerUp { held_ms: 2000 }, T);
         assert_eq!(s.phase(), SessionPhase::Transcribing);
 
-        let (s, fx) = advance(s, Event::SttResult { session_id: 1, transcript: "嗯你好".into() }, T);
+        let (s, fx) = advance(
+            s,
+            Event::SttResult {
+                session_id: 1,
+                transcript: "嗯你好".into(),
+            },
+            T,
+        );
         assert_eq!(s.phase(), SessionPhase::Processing);
         assert!(fx.contains(&Effect::CallProcess {
             session_id: 1,
@@ -670,9 +965,19 @@ mod tests {
             transcript: "嗯你好".into()
         }));
 
-        let (s, fx) = advance(s, Event::ProcessResult { session_id: 1, text: "你好".into() }, T);
+        let (s, fx) = advance(
+            s,
+            Event::ProcessResult {
+                session_id: 1,
+                text: "你好".into(),
+            },
+            T,
+        );
         assert_eq!(s.phase(), SessionPhase::Injecting);
-        assert!(fx.contains(&Effect::Inject { session_id: 1, text: "你好".into() }));
+        assert!(fx.contains(&Effect::Inject {
+            session_id: 1,
+            text: "你好".into()
+        }));
 
         let (s, fx) = advance(s, Event::InjectDone { session_id: 1 }, T);
         assert_eq!(s, State::Idle);
@@ -684,16 +989,27 @@ mod tests {
 
     #[test]
     fn inject_failure_copies_to_clipboard() {
-        let s0 = State::Injecting { session_id: 1, mode: SessionMode::Dictation, text: "结果".into(), unpolished: false };
+        let s0 = State::Injecting {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            text: "结果".into(),
+            unpolished: false,
+        };
         let (s, fx) = advance(
             s0,
-            Event::InjectFailed { session_id: 1, error: err(ErrorCode::NoFocus) },
+            Event::InjectFailed {
+                session_id: 1,
+                error: err(ErrorCode::NoFocus),
+            },
             T,
         );
         assert_eq!(s.phase(), SessionPhase::Failed);
         assert!(fx.contains(&Effect::CopyToClipboard("结果".into())));
         // NoFocus 是常见情况，不放错误音
-        assert!(!fx.iter().any(|e| matches!(e, Effect::PlayChime(Chime::Error))));
+        assert!(
+            !fx.iter()
+                .any(|e| matches!(e, Effect::PlayChime(Chime::Error)))
+        );
     }
 
     #[test]

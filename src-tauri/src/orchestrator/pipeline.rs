@@ -6,8 +6,8 @@
 //! - Assistant：CP-3 实现（当前直通）
 
 use crate::error::{ErrorCode, TypexError};
-use crate::providers::llm::{collect_text, prompt, LlmRequest, Msg};
 use crate::providers::ProviderRegistry;
+use crate::providers::llm::{LlmRequest, Msg, collect_text, prompt};
 use crate::settings::schema::Settings;
 use crate::types::{SessionMode, SlotKind};
 use std::collections::HashMap;
@@ -65,7 +65,10 @@ async fn polish(
 
     let req = LlmRequest {
         system: String::new(),
-        messages: vec![Msg { role: "user".into(), content: rendered }],
+        messages: vec![Msg {
+            role: "user".into(),
+            content: rendered,
+        }],
         temperature: 0.2,
         max_tokens: None,
     };
@@ -100,13 +103,22 @@ async fn translate(
     };
     let mut values = HashMap::new();
     values.insert("{transcript}", transcript.clone());
-    values.insert("{source_language}", settings.translation.source_language.clone());
-    values.insert("{target_language}", settings.translation.target_language.clone());
+    values.insert(
+        "{source_language}",
+        settings.translation.source_language.clone(),
+    );
+    values.insert(
+        "{target_language}",
+        settings.translation.target_language.clone(),
+    );
     let rendered = prompt::render(template, &values);
 
     let req = LlmRequest {
         system: String::new(),
-        messages: vec![Msg { role: "user".into(), content: rendered }],
+        messages: vec![Msg {
+            role: "user".into(),
+            content: rendered,
+        }],
         temperature: 0.3,
         max_tokens: None,
     };
