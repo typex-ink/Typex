@@ -87,3 +87,23 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .build()?;
     Ok(())
 }
+
+/// 首次启动引导：640×480，5 步向导（05 §6）。
+pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window("onboarding") {
+        w.show()?;
+        w.set_focus()?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        app,
+        "onboarding",
+        WebviewUrl::App("src/windows/onboarding/index.html".into()),
+    )
+    .title("欢迎使用 Typex")
+    .inner_size(640.0, 480.0)
+    .resizable(false)
+    .center()
+    .build()?;
+    Ok(())
+}

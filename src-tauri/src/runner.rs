@@ -149,6 +149,7 @@ pub fn run() {
             app.manage(crate::orchestrator::SessionCommander(cmd_tx));
             tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
+            let settings_for_onboarding = settings.clone();
             app.manage(settings);
             app.manage(registry);
             app.manage(secrets);
@@ -163,6 +164,11 @@ pub fn run() {
             // macOS：不在 Dock 显示（输入法级常驻，02 F-6）
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // 首次启动 → 引导向导（02 F-8）
+            if !settings_for_onboarding.get().onboarding_done {
+                crate::app::windows::show_onboarding(app.handle())?;
+            }
 
             tracing::info!("Typex 启动完成");
             Ok(())
