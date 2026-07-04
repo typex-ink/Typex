@@ -28,11 +28,19 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::set_profile_secret,
             commands::test_profile,
             commands::cycle_translation_target,
+            commands::ask_assistant,
+            commands::assistant_action,
+            commands::read_selection_context,
+            commands::clear_selection_context,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
             events::AudioLevelEvent,
             events::SettingsChangedEvent,
+            events::AssistantDeltaEvent,
+            events::AssistantDoneEvent,
+            events::AssistantErrorEvent,
+            events::AssistantContextEvent,
         ])
 }
 
@@ -130,12 +138,60 @@ pub fn run() {
 
             // orchestrator 主循环：快照/电平经 IPC event 推给前端
             let last_result = Arc::new(std::sync::Mutex::new(None::<String>));
+            let pending_selection = Arc::new(std::sync::Mutex::new(None::<String>));
+            let selection: Arc<dyn crate::selection::SelectionReader> =
+                Arc::from(crate::selection::platform_default());
+
+            // AssistantService（F-3）：流式事件 → assistant:// IPC events
+            let handle_a = app.handle().clone();
+            let pending_for_sink = pending_selection.clone();
+            let assistant = Arc::new(crate::orchestrator::assistant::AssistantService::new(
+                settings.clone(),
+                registry.clone(),
+                Box::new(move |ev| {
+                    use crate::orchestrator::assistant::AssistantEvent;
+                    use tauri_specta::Event as _;
+                    match ev {
+                        AssistantEvent::Delta { request_id, text } => {
+                            let _ = events::AssistantDeltaEvent {
+                                request_id: request_id as u32,
+                                text_delta: text,
+                            }
+                            .emit(&handle_a);
+                        }
+                        AssistantEvent::Done { request_id, kind, full_text } => {
+                            let chars = pending_for_sink
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map(|s| s.chars().count() as u32)
+                                .unwrap_or(0);
+                            let _ = events::AssistantDoneEvent {
+                                request_id: request_id as u32,
+                                kind,
+                                full_text,
+                                selection_chars: chars,
+                            }
+                            .emit(&handle_a);
+                        }
+                        AssistantEvent::Error { request_id, error } => {
+                            let _ = events::AssistantErrorEvent {
+                                request_id: request_id as u32,
+                                error,
+                            }
+                            .emit(&handle_a);
+                        }
+                    }
+                }),
+            ));
+
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
+            let handle3 = app.handle().clone();
             let orch = Arc::new(Orchestrator {
                 settings: settings.clone(),
                 audio,
-                injector,
+                injector: injector.clone(),
                 registry: registry.clone(),
                 snapshot_sink: Box::new(move |snap| {
                     use tauri_specta::Event as _;
@@ -148,10 +204,20 @@ pub fn run() {
                     let _ = events::AudioLevelEvent(levels).emit(&handle2);
                 }),
                 last_result: last_result.clone(),
+                assistant: Some(assistant.clone()),
+                pending_selection: pending_selection.clone(),
+                show_assistant_panel: Box::new(move || {
+                    let _ = crate::app::windows::show_assistant(&handle3);
+                }),
+                selection: selection.clone(),
             });
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             app.manage(crate::orchestrator::SessionCommander(cmd_tx));
             app.manage(crate::app::LastResult(last_result.clone()));
+            app.manage(crate::app::AssistantSelection(pending_selection));
+            app.manage(assistant);
+            app.manage(selection);
+            app.manage(injector);
             tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
             let settings_for_onboarding = settings.clone();

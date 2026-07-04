@@ -1,5 +1,6 @@
 //! Orchestrator：唯一的业务流程所有者（07 §3）。
 //! 状态机（session.rs 纯函数）+ 执行器（本文件）：Effect dispatch 到各 service。
+pub mod assistant;
 pub mod pipeline;
 pub mod session;
 
@@ -29,6 +30,14 @@ pub struct Orchestrator {
     pub level_sink: Box<dyn Fn(Vec<f32>) + Send + Sync>,
     /// 最近一次成功注入的结果（托盘「复制上次结果」共享，02 F-7）
     pub last_result: Arc<std::sync::Mutex<Option<String>>>,
+    /// 助手服务（F-3）；快照/流式经自身 sink
+    pub assistant: Option<Arc<assistant::AssistantService>>,
+    /// 助手键按下时读到的选中文本（录音开始时读取，转写完成后消费）
+    pub pending_selection: Arc<std::sync::Mutex<Option<String>>>,
+    /// 显示助手面板回调（app 层注入）
+    pub show_assistant_panel: Box<dyn Fn() + Send + Sync>,
+    /// 选中文本读取器
+    pub selection: Arc<dyn crate::selection::SelectionReader>,
 }
 
 /// HUD/前端发来的会话控制命令（07 §10.1 会话组）。
@@ -141,6 +150,15 @@ impl Orchestrator {
             Effect::StartRecording => {
                 let mic = self.settings.get().dictation.microphone.clone();
                 exec.recording_started = Some(Instant::now());
+                // 助手模式：录音开始时后台读选中文本（F-3a 上下文；不阻塞录音）
+                if exec.state.mode() == Some(SessionMode::Assistant) {
+                    let selection = self.selection.clone();
+                    let pending = self.pending_selection.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let result = selection.read().ok().flatten();
+                        *pending.lock().unwrap() = result;
+                    });
+                }
                 if let Err(e) = self.audio.start(&mic, level_tx.clone()) {
                     tracing::error!("录音启动失败: {}", e.message);
                     if let Some(sid) = exec.state.session_id() {
@@ -208,6 +226,27 @@ impl Orchestrator {
                 });
             }
             Effect::CallProcess { session_id, mode, transcript } => {
+                // 助手模式：转写结果 = 语音指令 → 交给助手面板（F-3），主会话结束
+                if mode == SessionMode::Assistant {
+                    if let Some(assistant) = &self.assistant {
+                        let selection = self.pending_selection.lock().unwrap().take();
+                        match assistant.ask(transcript, selection) {
+                            Ok(_) => {
+                                let _ = exec.tx.send(Event::AssistantHandedOff { session_id });
+                                (self.show_assistant_panel)();
+                            }
+                            Err(e) => {
+                                let _ = exec.tx.send(Event::ProcessFailed { session_id, error: e });
+                            }
+                        }
+                    } else {
+                        let _ = exec.tx.send(Event::ProcessFailed {
+                            session_id,
+                            error: TypexError::new(ErrorCode::NotConfigured, "助手服务未装配"),
+                        });
+                    }
+                    return;
+                }
                 let tx = exec.tx.clone();
                 let settings = self.settings.get();
                 let registry = self.registry.clone();
@@ -265,6 +304,9 @@ impl Orchestrator {
             }
             Effect::ReleaseAudio { session_id } => {
                 exec.audio_store.remove(&session_id);
+            }
+            Effect::ShowAssistantPanel => {
+                (self.show_assistant_panel)();
             }
         }
     }

@@ -115,6 +115,8 @@ pub enum Event {
     ProcessFailed { session_id: u64, error: TypexError },
     /// 整理层失败但按降级策略直通原文（F-9：绝不阻塞主流程）
     ProcessDegraded { session_id: u64, original: String },
+    /// 助手模式：指令已交给助手面板流式处理，会话就此完成（F-3）
+    AssistantHandedOff { session_id: u64 },
     /// 注入完成
     InjectDone { session_id: u64 },
     /// 注入失败
@@ -141,6 +143,8 @@ pub enum Effect {
     CopyToClipboard(String),
     /// 会话彻底结束，释放临时音频
     ReleaseAudio { session_id: u64 },
+    /// 呼出助手面板（助手键短按 = 仅呼出面板，05 §7.1）
+    ShowAssistantPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +178,13 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         ),
         (State::Recording { session_id, mode, toggled }, Event::TriggerUp { held_ms }) => {
             if !toggled && is_toggle(held_ms, threshold_ms) {
+                if mode == SessionMode::Assistant {
+                    // 助手键短按 = 仅呼出面板，不录音（05 §7.1）
+                    return (
+                        State::Idle,
+                        vec![E::CancelRecording, E::ShowAssistantPanel, E::ReleaseAudio { session_id }],
+                    );
+                }
                 // 短按 = toggle 开始：继续录音，等待第二次按键
                 (State::Recording { session_id, mode, toggled: true }, vec![E::EmitUi])
             } else {
@@ -240,6 +251,12 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 State::Injecting { session_id, mode, text: text.clone(), unpolished: false },
                 vec![E::Inject { session_id, text }, E::EmitUi],
             )
+        }
+        (State::Processing { session_id, .. }, Event::AssistantHandedOff { session_id: sid })
+            if sid == session_id =>
+        {
+            // F-3：转写完成后指令交给助手面板，主会话即结束（面板独立流式）
+            (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
         }
         (
             State::Processing { session_id, mode, .. },
