@@ -88,6 +88,45 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 主页窗口：880×560 侧边栏导航（05 §8 / ADR-19）。
+pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window("home") {
+        w.show()?;
+        w.set_focus()?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(app, "home", WebviewUrl::App("src/windows/home/index.html".into()))
+        .title("Typex")
+        .inner_size(880.0, 560.0)
+        .resizable(false)
+        .center()
+        .build()?;
+    Ok(())
+}
+
+/// 助手面板：560px 浮窗，屏幕上 1/3 居中（05 §4）。CP-3.2 完善失焦隐藏。
+pub fn show_assistant<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window("assistant") {
+        w.show()?;
+        w.set_focus()?;
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        app,
+        "assistant",
+        WebviewUrl::App("src/windows/assistant/index.html".into()),
+    )
+    .title("Typex 助手")
+    .inner_size(560.0, 320.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .center()
+    .build()?;
+    Ok(())
+}
+
 /// 首次启动引导：640×480，5 步向导（05 §6）。
 pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("onboarding") {

@@ -128,6 +128,7 @@ pub fn run() {
             let hotkey_rx = rdev_backend::spawn(hotkey_cfg, cfg_rx, paused_rx);
 
             // orchestrator 主循环：快照/电平经 IPC event 推给前端
+            let last_result = Arc::new(std::sync::Mutex::new(None::<String>));
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
             let orch = Arc::new(Orchestrator {
@@ -138,15 +139,18 @@ pub fn run() {
                 snapshot_sink: Box::new(move |snap| {
                     use tauri_specta::Event as _;
                     crate::app::windows::sync_hud_visibility(&handle, &snap);
+                    crate::app::tray::update_status(&handle, &snap);
                     let _ = events::SessionSnapshotEvent(snap).emit(&handle);
                 }),
                 level_sink: Box::new(move |levels| {
                     use tauri_specta::Event as _;
                     let _ = events::AudioLevelEvent(levels).emit(&handle2);
                 }),
+                last_result: last_result.clone(),
             });
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             app.manage(crate::orchestrator::SessionCommander(cmd_tx));
+            app.manage(crate::app::LastResult(last_result.clone()));
             tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
             let settings_for_onboarding = settings.clone();
@@ -156,6 +160,19 @@ pub fn run() {
 
             // 托盘
             crate::app::tray::setup(app.handle())?;
+            {
+                // 设置变更（含设置窗口改动）→ 托盘菜单重建 + 全窗口广播
+                let handle = app.handle().clone();
+                let mut rx = settings_for_onboarding.subscribe();
+                tauri::async_runtime::spawn(async move {
+                    while rx.changed().await.is_ok() {
+                        let s = rx.borrow_and_update().clone();
+                        crate::app::tray::refresh(&handle);
+                        use tauri_specta::Event as _;
+                        let _ = events::SettingsChangedEvent(s).emit(&handle);
+                    }
+                });
+            }
 
             // HUD → nonactivating NSPanel（07 §7.2 坑 3：抢焦点会毁掉注入）
             #[cfg(target_os = "macos")]

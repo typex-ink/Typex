@@ -10,7 +10,7 @@ use crate::inject::InjectorChain;
 use crate::providers::stt::{AudioInput, SttOptions};
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
-use crate::types::{SessionSnapshot, SlotKind};
+use crate::types::{SessionMode, SessionSnapshot, SlotKind};
 use session::{advance, Effect, Event, State};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,6 +27,8 @@ pub struct Orchestrator {
     pub registry: Arc<ProviderRegistry>,
     pub snapshot_sink: SnapshotSink,
     pub level_sink: Box<dyn Fn(Vec<f32>) + Send + Sync>,
+    /// 最近一次成功注入的结果（托盘「复制上次结果」共享，02 F-7）
+    pub last_result: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// HUD/前端发来的会话控制命令（07 §10.1 会话组）。
@@ -228,6 +230,7 @@ impl Orchestrator {
             Effect::Inject { session_id, text } => {
                 let injector = self.injector.clone();
                 let tx = exec.tx.clone();
+                *self.last_result.lock().unwrap() = Some(text.clone());
                 // enigo/剪贴板是阻塞调用 → blocking 线程
                 tokio::task::spawn_blocking(move || {
                     let event = match injector.inject(&text) {
@@ -267,8 +270,36 @@ impl Orchestrator {
     }
 
     fn emit_snapshot(&self, exec: &Exec) {
-        (self.snapshot_sink)(snapshot_of(&exec.state, exec.recording_started));
+        let mut snap = snapshot_of(&exec.state, exec.recording_started);
+        // 快照补全设置态字段：原样模式标注、翻译方向徽标（05 §3.2）
+        let s = self.settings.get();
+        snap.verbatim = !s.dictation.polish_enabled;
+        if snap.mode == SessionMode::Translation {
+            snap.translation_direction = Some(direction_label(
+                &s.translation.source_language,
+                &s.translation.target_language,
+            ));
+        }
+        (self.snapshot_sink)(snap);
     }
+}
+
+/// 翻译方向徽标：如「中 → EN」（05 §3.2）。
+fn direction_label(source: &str, target: &str) -> String {
+    fn short(lang: &str) -> String {
+        match lang {
+            l if l.starts_with("中文") => "中".into(),
+            "English" => "EN".into(),
+            "日本語" => "日".into(),
+            "한국어" => "한".into(),
+            "Français" => "FR".into(),
+            "Deutsch" => "DE".into(),
+            "Español" => "ES".into(),
+            "Русский" => "RU".into(),
+            other => other.chars().take(2).collect(),
+        }
+    }
+    format!("{} → {}", short(source), short(target))
 }
 
 /// State → SessionSnapshot 投影。
@@ -305,7 +336,7 @@ fn snapshot_of(state: &State, recording_started: Option<Instant>) -> SessionSnap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{SessionMode, SessionPhase};
+    use crate::types::SessionPhase;
 
     #[test]
     fn snapshot_projection_failed_keeps_transcript_flag() {
