@@ -193,6 +193,51 @@ pub fn clear_selection_context(selection_store: State<'_, crate::app::AssistantS
     *selection_store.0.lock().unwrap() = None;
 }
 
+// ── 历史（F-7；07 §10.1）──
+
+#[tauri::command]
+#[specta::specta]
+pub fn query_history(
+    history: State<'_, Arc<crate::history::HistoryService>>,
+    search: String,
+    offset: u32,
+) -> Result<Vec<crate::history::HistoryItem>, TypexError> {
+    history.query(&search, offset, 50)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_stats(
+    history: State<'_, Arc<crate::history::HistoryService>>,
+) -> Result<crate::history::HistoryStats, TypexError> {
+    history.stats()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn delete_history_item(
+    history: State<'_, Arc<crate::history::HistoryService>>,
+    id: i32,
+) -> Result<(), TypexError> {
+    history.delete(id as i64)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn clear_history(
+    history: State<'_, Arc<crate::history::HistoryService>>,
+) -> Result<(), TypexError> {
+    history.clear()
+}
+
+/// 打开设置窗口（主页侧边栏 ⚙）。
+#[tauri::command]
+#[specta::specta]
+pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+    crate::app::windows::show_settings(&app)
+        .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
+}
+
 /// HUD 翻译徽标点击：在最近使用的目标语言间轮换（05 §3.2）。
 #[tauri::command]
 #[specta::specta]

@@ -38,6 +38,8 @@ pub struct Orchestrator {
     pub show_assistant_panel: Box<dyn Fn() + Send + Sync>,
     /// 选中文本读取器
     pub selection: Arc<dyn crate::selection::SelectionReader>,
+    /// 历史记录服务（None = 未启用）
+    pub history: Option<Arc<crate::history::HistoryService>>,
 }
 
 /// HUD/前端发来的会话控制命令（07 §10.1 会话组）。
@@ -61,6 +63,8 @@ struct Exec {
     next_session_id: u64,
     /// 会话音频（不丢话铁律：失败重试期间保留）
     audio_store: HashMap<u64, Recording>,
+    /// 会话原始转写（历史记录用：id → (transcript, duration_ms)）
+    transcript_store: HashMap<u64, (String, u64)>,
     recording_started: Option<Instant>,
     tx: mpsc::UnboundedSender<Event>,
 }
@@ -76,6 +80,7 @@ impl Orchestrator {
             state: State::Idle,
             next_session_id: 1,
             audio_store: HashMap::new(),
+            transcript_store: HashMap::new(),
             recording_started: None,
             tx: tx.clone(),
         };
@@ -105,6 +110,16 @@ impl Orchestrator {
                 else => break,
             };
             let Some(event) = event else { continue };
+
+            // 历史记录素材：转写稿 + 录音时长（成功注入时写库）
+            if let Event::SttResult { session_id, transcript } = &event {
+                let dur = exec.audio_store.get(session_id).map(|r| r.duration_ms).unwrap_or(0);
+                exec.transcript_store.insert(*session_id, (transcript.clone(), dur));
+            }
+            // 成功注入 → 写历史（F-7）
+            if let Event::InjectDone { session_id } = &event {
+                self.record_history(*session_id, &exec);
+            }
 
             let threshold = self.settings.get().hotkeys.hold_threshold_ms;
             let (new_state, effects) = advance(exec.state.clone(), event, threshold);
@@ -304,10 +319,30 @@ impl Orchestrator {
             }
             Effect::ReleaseAudio { session_id } => {
                 exec.audio_store.remove(&session_id);
+                exec.transcript_store.remove(&session_id);
             }
             Effect::ShowAssistantPanel => {
                 (self.show_assistant_panel)();
             }
+        }
+    }
+
+    fn record_history(&self, session_id: u64, exec: &Exec) {
+        let Some(history) = &self.history else { return };
+        if !self.settings.get().history.enabled {
+            return;
+        }
+        let Some((transcript, duration_ms)) = exec.transcript_store.get(&session_id) else {
+            return;
+        };
+        let result = self.last_result.lock().unwrap().clone().unwrap_or_default();
+        let mode = exec.state.mode().unwrap_or(SessionMode::Dictation);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Err(e) = history.insert(now, mode, transcript, &result, "", *duration_ms as u32) {
+            tracing::warn!("写历史失败: {}", e.message);
         }
     }
 

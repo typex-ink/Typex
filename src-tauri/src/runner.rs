@@ -32,6 +32,11 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::assistant_action,
             commands::read_selection_context,
             commands::clear_selection_context,
+            commands::query_history,
+            commands::get_stats,
+            commands::delete_history_item,
+            commands::clear_history,
+            commands::open_settings_window,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -185,6 +190,31 @@ pub fn run() {
                 }),
             ));
 
+            // 历史记录（F-7）：data dir + 启动保留期清理
+            let history = {
+                let data_dir = app.path().app_data_dir().expect("data dir");
+                match crate::history::HistoryService::open(&data_dir.join("history.sqlite")) {
+                    Ok(h) => {
+                        let h = Arc::new(h);
+                        let retention = settings.get().history.retention_days;
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        if let Ok(n) = h.cleanup(retention, now) {
+                            if n > 0 {
+                                tracing::info!("历史保留期清理: 删除 {n} 条");
+                            }
+                        }
+                        Some(h)
+                    }
+                    Err(e) => {
+                        tracing::error!("历史库打开失败: {}", e.message);
+                        None
+                    }
+                }
+            };
+
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
             let handle3 = app.handle().clone();
@@ -210,6 +240,7 @@ pub fn run() {
                     let _ = crate::app::windows::show_assistant(&handle3);
                 }),
                 selection: selection.clone(),
+                history: history.clone(),
             });
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             app.manage(crate::orchestrator::SessionCommander(cmd_tx));
@@ -218,6 +249,9 @@ pub fn run() {
             app.manage(assistant);
             app.manage(selection);
             app.manage(injector);
+            if let Some(h) = &history {
+                app.manage(h.clone());
+            }
             tauri::async_runtime::spawn(orch.run(hotkey_rx, cmd_rx));
 
             let settings_for_onboarding = settings.clone();
@@ -252,6 +286,16 @@ pub fn run() {
             // 首次启动 → 引导向导（02 F-8）
             if !settings_for_onboarding.get().onboarding_done {
                 crate::app::windows::show_onboarding(app.handle())?;
+            }
+
+            // 开发调试：TYPEX_OPEN=home|settings|assistant 直接打开窗口
+            if cfg!(debug_assertions) {
+                match std::env::var("TYPEX_OPEN").as_deref() {
+                    Ok("home") => crate::app::windows::show_home(app.handle())?,
+                    Ok("settings") => crate::app::windows::show_settings(app.handle())?,
+                    Ok("assistant") => crate::app::windows::show_assistant(app.handle())?,
+                    _ => {}
+                }
             }
 
             tracing::info!("Typex 启动完成");

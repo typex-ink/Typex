@@ -3,6 +3,7 @@ pub mod app;
 pub mod runner;
 pub mod audio;
 pub mod error;
+pub mod history;
 pub mod hotkey;
 pub mod inject;
 pub mod logging;
