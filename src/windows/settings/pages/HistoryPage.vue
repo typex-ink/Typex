@@ -4,8 +4,16 @@ import FormRow from "@/components/FormRow.vue";
 import Select from "@/components/Select.vue";
 import Toggle from "@/components/Toggle.vue";
 import Button from "@/components/Button.vue";
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { commands } from "@/ipc/bindings";
 import { useSetting } from "@/composables/useSetting";
+
+const cleared = ref(false);
+async function clearAll() {
+  await commands.clearHistory();
+  cleared.value = true;
+  setTimeout(() => (cleared.value = false), 2000);
+}
 
 const enabled = useSetting(
   (s) => s.history.enabled,
@@ -40,7 +48,8 @@ const retention = computed({
       />
     </FormRow>
     <FormRow label="清空全部历史">
-      <Button variant="danger" size="sm">清空…</Button>
+      <span v-if="cleared" class="ok">✓ 已清空</span>
+      <Button v-else variant="danger" size="sm" @click="clearAll">清空…</Button>
     </FormRow>
   </div>
 </template>
@@ -55,5 +64,9 @@ const retention = computed({
   font-size: 12px;
   color: var(--text-2);
   margin: -10px 0 16px;
+}
+.ok {
+  color: var(--success);
+  font-size: 12px;
 }
 </style>

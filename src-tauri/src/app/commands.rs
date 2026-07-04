@@ -230,6 +230,40 @@ pub fn clear_history(
     history.clear()
 }
 
+/// 诊断报告（05 §5.2 诊断页）。
+#[derive(serde::Serialize, serde::Deserialize, specta::Type, Clone)]
+pub struct DiagnosticsReport {
+    pub platform: String,
+    pub permissions: Vec<crate::platform::permissions::PermissionStatus>,
+    pub inject_backend: String,
+    pub log_dir: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_diagnostics(app: tauri::AppHandle) -> DiagnosticsReport {
+    use tauri::Manager;
+    DiagnosticsReport {
+        platform: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        permissions: crate::platform::permissions::check_all(),
+        inject_backend: "剪贴板粘贴（CGEvent Cmd+V）".into(),
+        log_dir: app
+            .path()
+            .app_log_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn open_log_dir(app: tauri::AppHandle) {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().app_log_dir() {
+        let _ = std::process::Command::new("open").arg(dir).spawn();
+    }
+}
+
 /// 打开设置窗口（主页侧边栏 ⚙）。
 #[tauri::command]
 #[specta::specta]

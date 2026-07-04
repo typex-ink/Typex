@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// 诊断页（mockup 2.12）
+// 诊断页（mockup 2.12）：环境自检 + 日志目录
 import { onMounted, ref } from "vue";
 import Button from "@/components/Button.vue";
-import { commands, type PermissionStatus } from "@/ipc/bindings";
+import { commands, type DiagnosticsReport, type PermissionStatus } from "@/ipc/bindings";
 
-const perms = ref<PermissionStatus[]>([]);
+const report = ref<DiagnosticsReport | null>(null);
 
 const LABEL: Record<string, string> = {
   microphone: "麦克风权限",
@@ -13,7 +13,7 @@ const LABEL: Record<string, string> = {
 };
 
 onMounted(async () => {
-  perms.value = await commands.getPermissionStatus();
+  report.value = await commands.getDiagnostics();
 });
 
 function openSettings(kind: PermissionStatus["kind"]) {
@@ -22,21 +22,25 @@ function openSettings(kind: PermissionStatus["kind"]) {
 </script>
 
 <template>
-  <div>
+  <div v-if="report">
     <h5 class="page-title">诊断</h5>
-    <div v-for="p in perms" :key="p.kind" class="diag">
+    <div class="diag">
+      <span class="ok">✓</span>
+      <span>平台：{{ report.platform }}</span>
+    </div>
+    <div v-for="p in report.permissions" :key="p.kind" class="diag">
       <span :class="p.granted ? 'ok' : 'bad'">{{ p.granted ? "✓" : "✗" }}</span>
       <span>{{ LABEL[p.kind] ?? p.kind }}</span>
       <Button v-if="!p.granted" size="sm" class="fix" @click="openSettings(p.kind)">去授权</Button>
     </div>
     <div class="diag">
       <span class="ok">✓</span>
-      <span>注入后端：剪贴板粘贴（CGEvent）</span>
+      <span>注入后端：{{ report.inject_backend }}</span>
     </div>
     <div class="actions">
-      <Button>打开日志目录</Button>
-      <Button>导出诊断包（自动脱敏）</Button>
+      <Button @click="commands.openLogDir()">打开日志目录</Button>
     </div>
+    <p class="log-path">日志：{{ report.log_dir }}</p>
   </div>
 </template>
 
@@ -67,5 +71,12 @@ function openSettings(kind: PermissionStatus["kind"]) {
   display: flex;
   gap: 8px;
   margin-top: 14px;
+}
+.log-path {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  margin-top: 10px;
+  user-select: text;
 }
 </style>
