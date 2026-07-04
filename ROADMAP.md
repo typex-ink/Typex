@@ -21,7 +21,7 @@
   cpal 以设备原生采样率开流（callback 只写 ring buffer）→ worker 线程 rubato 重采样 16 kHz mono → hound 编 WAV；电平 RMS 计算（50ms 节流事件）。
 - [x] **CP-0.6 STT + 注入**（2026-07-05）
   `SttProvider` trait + `openai_compat` 实现（multipart /audio/transcriptions，reqwest）；`Injector` trait + `paste` 后端（arboard 保存剪贴板 → 写入 → enigo Cmd+V → 恢复）。
-- [x] **CP-0.7 M0 端到端验收**（2026-07-05）
+- [ ] **CP-0.7 M0 端到端验收**（⚠ 需实机人工验证：麦克风说话 + 真实 STT 密钥，代码链路已就绪）
   按住右 ⌘ 说话 → 松开 → STT（写死/环境变量配置）→ 文字注入光标处。全链路在 macOS 实机跑通。
 
 ## M1 · 听写可用（F-1 + F-9 完整体验）
