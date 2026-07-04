@@ -27,6 +27,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::activate_profile,
             commands::set_profile_secret,
             commands::test_profile,
+            commands::cycle_translation_target,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,

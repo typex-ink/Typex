@@ -57,3 +57,7 @@ export type SessionCommand =
 export function sendCommand(command: SessionCommand) {
   return invoke("session_command", { command });
 }
+
+export function cycleTranslationTarget(): Promise<string> {
+  return invoke("cycle_translation_target");
+}

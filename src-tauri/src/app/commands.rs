@@ -137,6 +137,31 @@ pub fn set_profile_secret(
     Ok(())
 }
 
+/// HUD 翻译徽标点击：在最近使用的目标语言间轮换（05 §3.2）。
+#[tauri::command]
+#[specta::specta]
+pub fn cycle_translation_target(settings: SettingsState<'_>) -> Result<String, TypexError> {
+    const DEFAULTS: [&str; 3] = ["English", "中文（简体）", "日本語"];
+    let s = settings.get();
+    let mut pool: Vec<String> = s.translation.recent_targets.clone();
+    for d in DEFAULTS {
+        if !pool.iter().any(|x| x == d) {
+            pool.push(d.to_string());
+        }
+    }
+    let cur = &s.translation.target_language;
+    let idx = pool.iter().position(|x| x == cur).map(|i| (i + 1) % pool.len()).unwrap_or(0);
+    let next = pool[idx].clone();
+    let next2 = next.clone();
+    settings.mutate(move |st| {
+        st.translation.target_language = next2.clone();
+        st.translation.recent_targets.retain(|x| x != &next2);
+        st.translation.recent_targets.insert(0, next2.clone());
+        st.translation.recent_targets.truncate(5);
+    })?;
+    Ok(next)
+}
+
 /// 测试连接（02 F-4）：STT 槽发 2 秒静音样音，LLM 槽发 ping；返回往返毫秒。
 #[tauri::command]
 #[specta::specta]

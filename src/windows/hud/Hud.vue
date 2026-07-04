@@ -6,6 +6,7 @@ import {
   onSnapshot,
   onAudioLevel,
   sendCommand,
+  cycleTranslationTarget,
   type SessionSnapshot,
   type ErrorCode,
 } from "./ipc";
@@ -132,6 +133,18 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onKey);
 });
 
+function onModeClick() {
+  // 翻译模式下点徽标 = 目标语言快切（05 §3.2）
+  if (snap.mode === "translation") {
+    cycleTranslationTarget().then((next) => {
+      if (snap.translation_direction) {
+        const parts = snap.translation_direction.split("→");
+        snap.translation_direction = `${parts[0]?.trim()} → ${next.slice(0, 2)}`;
+      }
+    });
+  }
+}
+
 function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") sendCommand(isRecording.value ? "cancel" : "dismiss");
 }
@@ -151,7 +164,12 @@ function onKey(e: KeyboardEvent) {
         <span class="time">{{ fmtTime(elapsed) }}</span>
         <span v-if="silent" class="hint">{{ L.hud.no_sound }}</span>
         <Waveform v-else :levels="levels" />
-        <span class="mode">{{ modeLabel }}</span>
+        <span
+          class="mode"
+          :class="{ clickable: snap.mode === 'translation' }"
+          @click="onModeClick"
+          >{{ modeLabel }}</span
+        >
         <button class="x" title="取消（Esc）" @click="sendCommand('cancel')">✕</button>
       </div>
 
@@ -246,6 +264,9 @@ function onKey(e: KeyboardEvent) {
   font-size: 11px;
 }
 
+.mode.clickable {
+  cursor: pointer;
+}
 .mode {
   font-size: 10.5px;
   border: 1px solid var(--border-2);
