@@ -347,3 +347,10 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
         .map_err(|e| TypexError::new(ErrorCode::NetworkError, format!("下载安装失败: {e}")))?;
     app.restart();
 }
+
+/// 枚举输入设备（听写页麦克风下拉，CP-6.4）。
+#[tauri::command]
+#[specta::specta]
+pub fn list_audio_devices() -> Vec<String> {
+    crate::audio::list_input_devices()
+}

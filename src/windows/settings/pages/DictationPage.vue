@@ -7,7 +7,7 @@ import Toggle from "@/components/Toggle.vue";
 import Button from "@/components/Button.vue";
 import { useSetting } from "@/composables/useSetting";
 import { useSettingsStore } from "@/stores/settings";
-import { events } from "@/ipc/bindings";
+import { events, commands } from "@/ipc/bindings";
 
 const POLISH_DEFAULT = `你是语音转写的后处理引擎。输入是一段语音识别原始文本，输出整理后的文本。
 规则：删除语气词与无意义重复；修复标点与断句；
@@ -35,6 +35,16 @@ const pasteDelay = useSetting(
   (s) => s.dictation.paste_delay_ms,
   (s, v) => (s.dictation.paste_delay_ms = v),
 );
+const microphone = useSetting(
+  (s) => s.dictation.microphone,
+  (s, v) => (s.dictation.microphone = v),
+);
+// 麦克风设备列表（cpal 枚举，CP-6.4）
+const devices = ref<string[]>([]);
+const deviceOptions = computed(() => [
+  { value: "", label: "系统默认" },
+  ...devices.value.map((d) => ({ value: d, label: d })),
+]);
 
 // 提示词编辑器（05 §5.2：缺必需占位符禁用保存 + 行内报错）
 const promptOpen = ref(false);
@@ -62,6 +72,7 @@ function restoreDefault() {
 const levels = ref<number[]>([]);
 let unlisten: (() => void) | null = null;
 onMounted(async () => {
+  devices.value = await commands.listAudioDevices();
   unlisten = await events.audioLevelEvent.listen((e) => (levels.value = e.payload));
 });
 onUnmounted(() => unlisten?.());
@@ -124,7 +135,7 @@ onUnmounted(() => unlisten?.());
       <Toggle v-model="escCancels" />
     </FormRow>
     <FormRow label="麦克风">
-      <Select model-value="" :options="[{ value: '', label: '系统默认' }]" />
+      <Select v-model="microphone" :options="deviceOptions" />
     </FormRow>
     <FormRow label="电平预览">
       <div class="bars">

@@ -35,16 +35,50 @@ pub fn open_settings(kind: PermissionKind) {
     let _ = kind;
 }
 
+/// 麦克风权限（macOS：AVCaptureDevice authorizationStatus，3 = Authorized）。
+/// NotDetermined 时首次开流会触发系统弹窗——按未授权报告，onboarding 引导点击。
+#[cfg(target_os = "macos")]
+fn microphone_granted() -> bool {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+    // SAFETY: AVMediaTypeAudio 是系统常量；authorizationStatusForMediaType 无副作用
+    unsafe {
+        let Some(media_type) = AVMediaTypeAudio else {
+            return false;
+        };
+        AVCaptureDevice::authorizationStatusForMediaType(media_type)
+            == AVAuthorizationStatus::Authorized
+    }
+}
+
+/// 输入监听权限（macOS：IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)==granted）。
+#[cfg(target_os = "macos")]
+fn input_monitoring_granted() -> bool {
+    // IOHIDRequestTypeListenEvent = 1；kIOHIDAccessTypeGranted = 0
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOHIDCheckAccess(request_type: u32) -> u32;
+    }
+    // SAFETY: 纯查询 API，无副作用
+    unsafe { IOHIDCheckAccess(1) == 0 }
+}
+
 /// 检测全部权限状态（macOS 主动检测；其他平台按需扩展）。
 pub fn check_all() -> Vec<PermissionStatus> {
     #[cfg(target_os = "macos")]
     {
         vec![
             PermissionStatus {
+                kind: PermissionKind::Microphone,
+                granted: microphone_granted(),
+            },
+            PermissionStatus {
                 kind: PermissionKind::Accessibility,
                 granted: macos_accessibility_client::accessibility::application_is_trusted(),
             },
-            // 麦克风与输入监听的检测在 CP-1.8 onboarding 完善
+            PermissionStatus {
+                kind: PermissionKind::InputMonitoring,
+                granted: input_monitoring_granted(),
+            },
         ]
     }
     #[cfg(not(target_os = "macos"))]

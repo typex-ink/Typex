@@ -51,6 +51,7 @@ rodio = { version = "0.21.1", default-features = false, features = ["playback"] 
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 base64 = "0.22.1"
 tauri-plugin-updater = "2.10.1"
+objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"

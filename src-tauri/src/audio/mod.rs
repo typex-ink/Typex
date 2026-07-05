@@ -64,3 +64,12 @@ impl Default for AudioService {
         Self::new()
     }
 }
+
+/// 枚举输入设备名列表（设置页麦克风下拉，CP-6.4）。
+pub fn list_input_devices() -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    host.input_devices()
+        .map(|it| it.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default()
+}

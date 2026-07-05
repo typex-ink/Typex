@@ -142,7 +142,7 @@
   `tauri-plugin-autostart` 已在依赖但未初始化；接通用页开关与 onboarding 完成步骤的默认开启。
 - [x] **CP-6.3 自动更新**（2026-07-06：plugin 接入 + createUpdaterArtifacts + endpoints（typex.ink 主源 / GitHub 备源，pubkey 待 CP-5.4 签名密钥）· 启动 10s 后自动检查（release 构建、可关）→ `update://available` 事件 · 托盘「检查更新」发事件并打开设置 · 关于页确认卡片（下载并安装→重启，ADR-11 安装需确认）· check_update/install_update commands）
   `tauri-plugin-updater` 接入：默认自动检查、手动确认安装；托盘「检查更新」当前是空操作；设置-关于「检查更新」按钮接真实逻辑。
-- [ ] **CP-6.4 麦克风权限检测 + 设备选择**（02 F-8 / 05 §5.2）
+- [x] **CP-6.4 麦克风权限检测 + 设备选择**（2026-07-06：AVCaptureDevice 麦克风授权检测 + IOHIDCheckAccess 输入监听检测（check_all 三项齐）· Info.plist NSMicrophoneUsageDescription · cpal 输入设备枚举 command · 听写页麦克风下拉接真实设备并写入 dictation.microphone（录音启动已按该值选设备））
   权限检测目前仅辅助功能（`permissions.rs::check_all`）；补麦克风（AVCaptureDevice / tauri-plugin-macos-permissions）与输入监听（IOHIDCheckAccess）实时状态；听写页麦克风下拉接 cpal 设备枚举（当前只有「系统默认」占位）。
 - [ ] **CP-6.5 HUD 细节补齐**（05 §3.2）
   录音超 10 分钟温和提示；重按忽略时的轻晃 +「正在处理上一条…」微文案（EmitBusyHint 已有 Effect，HUD 未渲染）；HUD 处一键切原样模式入口（02 F-9：HUD 与设置均可切换）。
