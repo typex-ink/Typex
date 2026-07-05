@@ -141,7 +141,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 
 - **引擎**：llama.cpp（`llama-cpp-2` 绑定——GGUF 生态最全，Apple Silicon Metal 加速成熟；与本地 STT 的 Qwen3-ASR 共用同一引擎，[ADR-22](09-decisions.md)）。
 - **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B，Q4_K_M），按硬件档位下载（见 §8）。Apache 2.0，多语言，中文分词效率高。
-- **槽位限制**：只允许绑定到「文本整理」与「翻译模型」槽——整理是窄任务小模型完全胜任，翻译日常可用；**问答槽默认不提供本地选项**（小模型问答体验差；性能档设备允许在设置中手动指向本地 4B 级模型，[ADR-22](09-decisions.md)）。
+- **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B 级模型（[ADR-22](09-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
 
@@ -229,7 +229,7 @@ F-3 不引入新的 Provider 类型：
 语音转文字   ──▶  SttProvider（openai_compat | volcengine | local）
 文本整理     ──▶  LlmProvider + 整理提示词（推荐轻量快模型；可用 local）
 翻译模型     ──▶  LlmProvider + 翻译提示词（可用 local）
-问答模型     ──▶  LlmProvider + 处理/问答提示词（推荐强模型；不提供 local）
+问答模型     ──▶  LlmProvider + 处理/问答提示词（推荐强模型；可手动选择 local）
 ```
 
 共用规则：LLM 三槽默认共用同一个「连接配置」（base_url + 密钥），仅模型名与提示词不同；用户可随时把某个槽切换为完全独立的配置。onboarding 只需配置 STT + 一个 LLM 连接即全功能可用。

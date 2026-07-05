@@ -61,8 +61,7 @@ const hasExistingVolcKeys = computed(
 );
 
 // ── 本地档案编辑态（CP-8.7 / mockup 2.7）──
-// 模型下拉来自模型库，按槽位 purpose 过滤：stt 槽列 stt 模型，其余槽列 llm
-// （assistant 槽预设无本地，但用户手动持有的 local 档案仍能编辑）。
+// 模型下拉来自模型库，按槽位 purpose 过滤：stt 槽列 stt 模型，其余槽列 llm。
 const localModels = ref<LocalModelInfo[]>([]);
 const loadPolicy = ref<string>(
   (props.profile?.options?.["load_policy"] as string) ?? "resident",

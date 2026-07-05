@@ -35,10 +35,5 @@ export const PRESETS: Preset[] = [
 ];
 
 export function presetsForSlot(slot: SlotKind): Preset[] {
-  return PRESETS.filter(
-    (p) =>
-      p.for === (slot === "stt" ? "stt" : "llm") &&
-      // 问答槽预设不出现「本地」（ADR-20：问答槽无本地兜底；手动持有的 local 档案仍可编辑）
-      !(slot === "assistant" && p.kind === "local"),
-  );
+  return PRESETS.filter((p) => p.for === (slot === "stt" ? "stt" : "llm"));
 }

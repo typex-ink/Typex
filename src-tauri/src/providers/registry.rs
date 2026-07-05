@@ -316,8 +316,7 @@ impl ProviderRegistry {
                             format!("未知本地模型 {}", profile.model),
                         )
                     })?;
-                // 槽位限制（ADR-22）：本地 LLM 只允许整理/翻译槽；问答槽仅当
-                // profile 显式配置（设置中手动指向）时可用——兜底路径不会走到这。
+                // ADR-20：问答槽不自动兜底；显式配置到 local 档案时照常可用。
                 let gguf = entry
                     .files
                     .first()
