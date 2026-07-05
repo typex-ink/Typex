@@ -153,7 +153,7 @@
 
 - [x] **CP-6.7 逐字输入注入后端**（2026-07-06：TypeDirectInjector（enigo text()）· 默认链 paste→type_direct 双后端 · inject_with 按 dictation.inject_method 首选排序（Auto=默认序，失败自动落到后备）· 排序/回退/Auto 三条具名单测）
   设置里已有「逐字输入」选项但无对应后端（仅 paste）；enigo text() 实现 + 后备链接入。
-- [ ] **CP-6.8 目标应用识别**（02 F-7 历史字段 / F-11 预留）
+- [x] **CP-6.8 目标应用识别**（2026-07-06：`platform/focus.rs`（NSWorkspace frontmostApplication 本地化名）· 录音开始时采样注入目标 · 历史 app_name 真实写入；其他平台返回 None 留扩展位）
   `platform/focus.rs`（NSWorkspace frontmostApplication）；历史记录 app_name 当前恒为空；HUD NoFocus 检测同源。
 - [ ] **CP-6.9 托盘图标状态动画**（04 §2.4）
   录音中电平动画（8fps）+ 红点角标、处理中呼吸、暂停 40% 透明 + 斜杠、错误红点；当前仅静态图标 + 状态行文字。

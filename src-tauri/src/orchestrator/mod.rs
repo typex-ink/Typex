@@ -64,6 +64,8 @@ struct Exec {
     /// 会话原始转写（历史记录用：id → (transcript, duration_ms)）
     transcript_store: HashMap<u64, (String, u64)>,
     recording_started: Option<Instant>,
+    /// 录音开始时的前台应用名（历史 app_name / F-11 预留）
+    target_app: Option<String>,
     tx: mpsc::UnboundedSender<Event>,
 }
 
@@ -80,6 +82,7 @@ impl Orchestrator {
             audio_store: HashMap::new(),
             transcript_store: HashMap::new(),
             recording_started: None,
+            target_app: None,
             tx: tx.clone(),
         };
 
@@ -175,6 +178,8 @@ impl Orchestrator {
             Effect::StartRecording => {
                 let mic = self.settings.get().dictation.microphone.clone();
                 exec.recording_started = Some(Instant::now());
+                // 采样注入目标应用（02 F-7：录音开始时的前台应用即注入目标）
+                exec.target_app = crate::platform::focus::frontmost_app_name();
                 // 助手模式的选区读取推迟到触发键松开（CallStt 时并发执行，07 §7.6-5）：
                 // 剪贴板降级的模拟 Cmd+C 在按住期间会触发组合键让路、误取消本会话
                 if exec.state.mode() == Some(SessionMode::Assistant) {
@@ -402,7 +407,15 @@ impl Orchestrator {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        if let Err(e) = history.insert(now, mode, transcript, &result, "", *duration_ms as u32) {
+        let app_name = exec.target_app.clone().unwrap_or_default();
+        if let Err(e) = history.insert(
+            now,
+            mode,
+            transcript,
+            &result,
+            &app_name,
+            *duration_ms as u32,
+        ) {
             tracing::warn!("写历史失败: {}", e.message);
         }
     }
