@@ -157,7 +157,7 @@
   `platform/focus.rs`（NSWorkspace frontmostApplication）；历史记录 app_name 当前恒为空；HUD NoFocus 检测同源。
 - [x] **CP-6.9 托盘图标状态动画**（2026-07-06：运行时渲染 22×22 RGBA 帧——空闲静态五柱（template）/ 录音实时电平 8fps / 处理左→右呼吸 40%↔100% / 暂停 40% 透明+斜杠 / 错误红点角标（非 template 真彩帧）；空闲期零重绘；render 纯函数 5 条单测）
   录音中电平动画（8fps）+ 红点角标、处理中呼吸、暂停 40% 透明 + 斜杠、错误红点；当前仅静态图标 + 状态行文字。
-- [ ] **CP-6.10 提示词评测脚本**（08 §6）
+- [x] **CP-6.10 提示词评测脚本**（2026-07-06：`scripts/eval-prompts.ts`（`pnpm eval:prompts [denoise|translate|rewrite] [--limit N]`，TYPEX_EVAL_* 环境变量供密钥）——解析三套 fixtures markdown 表（65+44+25 例）→ 真实 API → 「含/不含/长度/无中文/ANSWER: 前缀」要点断言 → 通过率报告；提示词模板与 Rust 逐字同步；真实 API 全量跑归入发布前回归）
   `scripts/eval-prompts.ts`：读 `docs/fixtures/denoise-cases.md` → 真实 API → 要点断言 + 通过率报告；语料已备，脚本未写。
 - [ ] **CP-6.11 日志 redact 层 + 诊断包导出**（07 §5.5 / 05 §5.2）
   当前靠编码纪律（日志语句不含内容/凭据）；补 tracing Layer 级自动脱敏与「导出诊断包」按钮。

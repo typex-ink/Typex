@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
-    "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings"
+    "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings",
+    "eval:prompts": "tsx scripts/eval-prompts.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -32,6 +33,7 @@
     "@vue/test-utils": "^2",
     "jsdom": "^26",
     "tailwindcss": "^4",
+    "tsx": "^4.23.0",
     "typescript": "^5.8",
     "vite": "^7",
     "vitest": "^3",
