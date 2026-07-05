@@ -65,3 +65,8 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# rdev 0.5.3 补丁：监听回调不调 TSM 输入法 API（macOS 26 强制主线程，否则 SIGTRAP）
+# 见 vendor/rdev/src/macos/common.rs 的 Typex patch 注释
+[patch.crates-io]
+rdev = { path = "vendor/rdev" }
