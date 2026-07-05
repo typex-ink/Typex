@@ -8,7 +8,9 @@ use crate::providers::http;
 use crate::providers::llm::{
     LlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
-use crate::providers::stt::{SttProvider, openai_compat::OpenAiCompatStt};
+use crate::providers::stt::{
+    SttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
+};
 use crate::settings::schema::Settings;
 use crate::settings::secrets::SecretStore;
 use crate::types::{ProviderKind, ProviderProfile, SlotKind};
@@ -137,11 +139,15 @@ impl ProviderRegistry {
                 ))
             }
             ProviderKind::Volcengine => {
-                // CP-2.x 之后按需实现 volcengine adapter
-                Err(TypexError::new(
-                    ErrorCode::InvalidRequest,
-                    "volcengine adapter 尚未实现",
-                ))
+                let app_key = self.resolve_secret(profile, "app_key")?;
+                let access_key = self.resolve_secret(profile, "access_token")?;
+                let client = self.http_client(profile.timeout_ms);
+                let mut p =
+                    VolcengineStt::new(client, profile.base_url.clone(), app_key, access_key);
+                if let Some(rid) = profile.options.get("resource_id").and_then(|v| v.as_str()) {
+                    p = p.with_resource_id(rid);
+                }
+                Ok(Arc::new(p))
             }
             _ => Err(TypexError::new(
                 ErrorCode::InvalidRequest,

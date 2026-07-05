@@ -33,12 +33,21 @@ const baseUrl = ref(props.profile?.base_url ?? "");
 const model = ref(props.profile?.model ?? "");
 const kind = ref(props.profile?.kind ?? (props.slotKind === "stt" ? "openai_compat" : "chat_completions"));
 const apiKey = ref("");
+// volcengine 双凭据（03 §2.2）
+const appKey = ref("");
+const accessToken = ref("");
 const testResult = ref<string | null>(null);
 const testOk = ref(false);
 const saving = ref(false);
 
 const isNew = computed(() => !props.profile);
+const isVolc = computed(() => kind.value === "volcengine");
 const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
+const hasExistingVolcKeys = computed(
+  () =>
+    !!props.profile?.credentials?.["app_key"] &&
+    !!props.profile?.credentials?.["access_token"],
+);
 
 function applyPreset(id: string) {
   presetId.value = id;
@@ -50,13 +59,19 @@ function applyPreset(id: string) {
   if (!label.value || presets.some((x) => x.label === label.value)) label.value = p.label;
 }
 
-const valid = computed(
-  () =>
-    label.value.trim() &&
+const valid = computed(() => {
+  if (!label.value.trim() || !model.value.trim()) return false;
+  if (isVolc.value) {
+    // 火山官方端点内置，base_url 留空即可
+    return (
+      (appKey.value.trim() && accessToken.value.trim()) || hasExistingVolcKeys.value
+    );
+  }
+  return (
     baseUrl.value.trim().startsWith("http") &&
-    model.value.trim() &&
-    (apiKey.value.trim() || hasExistingKey.value),
-);
+    (apiKey.value.trim() || hasExistingKey.value)
+  );
+});
 
 async function save(): Promise<string | null> {
   if (!valid.value) return null;
@@ -80,7 +95,14 @@ async function save(): Promise<string | null> {
     saving.value = false;
     return null;
   }
-  if (apiKey.value.trim()) {
+  if (isVolc.value) {
+    if (appKey.value.trim()) {
+      await commands.setProfileSecret(id, "app_key", appKey.value.trim());
+    }
+    if (accessToken.value.trim()) {
+      await commands.setProfileSecret(id, "access_token", accessToken.value.trim());
+    }
+  } else if (apiKey.value.trim()) {
     await commands.setProfileSecret(id, "api_key", apiKey.value.trim());
   }
   if (isNew.value) {
@@ -142,8 +164,11 @@ async function deleteProfile() {
     <FormRow label="名称">
       <span class="w280"><Input v-model="label" placeholder="如 Groq · whisper-turbo" /></span>
     </FormRow>
-    <FormRow label="Base URL">
+    <FormRow v-if="!isVolc" label="Base URL">
       <span class="w280"><Input v-model="baseUrl" mono placeholder="https://api.example.com/v1" /></span>
+    </FormRow>
+    <FormRow v-else label="端点" hint="留空使用官方端点 openspeech.bytedance.com">
+      <span class="w280"><Input v-model="baseUrl" mono placeholder="（默认官方端点）" /></span>
     </FormRow>
     <FormRow label="模型">
       <span class="w280"><Input v-model="model" mono placeholder="模型名" /></span>
@@ -157,7 +182,15 @@ async function deleteProfile() {
         ]"
       />
     </FormRow>
-    <FormRow label="API 密钥" :hint="hasExistingKey ? '已保存在系统凭据库；留空则不修改' : undefined">
+    <template v-if="isVolc">
+      <FormRow label="APP ID" :hint="hasExistingVolcKeys ? '已保存在系统凭据库；留空则不修改' : '火山控制台的 APP ID'">
+        <span class="w280"><SecretInput v-model="appKey" /></span>
+      </FormRow>
+      <FormRow label="Access Token" :hint="hasExistingVolcKeys ? undefined : '火山控制台的 Access Token'">
+        <span class="w280"><SecretInput v-model="accessToken" /></span>
+      </FormRow>
+    </template>
+    <FormRow v-else label="API 密钥" :hint="hasExistingKey ? '已保存在系统凭据库；留空则不修改' : undefined">
       <span class="w280"><SecretInput v-model="apiKey" /></span>
     </FormRow>
 

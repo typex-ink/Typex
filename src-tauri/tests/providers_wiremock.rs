@@ -298,3 +298,127 @@ async fn responses_failed_event_maps_to_error() {
     }
     assert!(got_delta && got_err);
 }
+
+// ── volcengine STT（03 §2.2）──
+
+use typex_lib::providers::stt::volcengine::VolcengineStt;
+
+#[tokio::test]
+async fn volc_request_shape_and_response_parse() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(header("X-Api-App-Key", "app-1"))
+        .and(header("X-Api-Access-Key", "tok-1"))
+        .and(header("X-Api-Resource-Id", "volc.bigasr.auc_turbo"))
+        .respond_with(move |req: &Request| {
+            // 双凭据 header + base64 JSON body（03 §2.2）
+            assert!(
+                req.headers.get("X-Api-Request-Id").is_some(),
+                "缺 Request-Id"
+            );
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["user"]["uid"], "typex");
+            assert_eq!(body["audio"]["format"], "wav");
+            assert_eq!(body["request"]["model_name"], "bigmodel");
+            assert_eq!(body["request"]["enable_punc"], true);
+            // 音频是合法 base64
+            use base64::Engine;
+            let data = body["audio"]["data"].as_str().unwrap();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap();
+            assert_eq!(decoded.len(), 128);
+            ResponseTemplate::new(200)
+                .insert_header("X-Api-Status-Code", "20000000")
+                .set_body_json(serde_json::json!({"result": {"text": "火山转写结果"}}))
+        })
+        .mount(&server)
+        .await;
+
+    let stt = VolcengineStt::new(client(), server.uri(), "app-1", "tok-1");
+    let t = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(t.text, "火山转写结果");
+}
+
+#[tokio::test]
+async fn volc_error_status_header_maps_auth_not_retried() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Api-Status-Code", "45000030")
+                .set_body_string("invalid access token"),
+        )
+        .expect(1) // Auth 不重试
+        .mount(&server)
+        .await;
+
+    let stt = VolcengineStt::new(client(), server.uri(), "a", "t");
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ProviderError::Auth(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn volc_server_status_retried() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Api-Status-Code", "55000001")
+                .set_body_string("internal"),
+        )
+        .expect(3) // 首次 + 重试 2 次
+        .mount(&server)
+        .await;
+
+    let stt = VolcengineStt::new(client(), server.uri(), "a", "t");
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ProviderError::Server { .. }), "{err:?}");
+}
+
+#[tokio::test]
+async fn volc_missing_status_header_falls_back_to_http_status() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .mount(&server)
+        .await;
+
+    let stt = VolcengineStt::new(client(), server.uri(), "a", "t");
+    let err = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ProviderError::Auth(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn volc_custom_resource_id_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(header("X-Api-Resource-Id", "volc.bigasr.custom"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-Api-Status-Code", "20000000")
+                .set_body_json(serde_json::json!({"result": {"text": "ok"}})),
+        )
+        .mount(&server)
+        .await;
+
+    let stt =
+        VolcengineStt::new(client(), server.uri(), "a", "t").with_resource_id("volc.bigasr.custom");
+    let t = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(t.text, "ok");
+}

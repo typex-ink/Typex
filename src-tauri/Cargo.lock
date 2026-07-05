@@ -5299,6 +5299,7 @@ dependencies = [
  "arboard",
  "async-stream",
  "async-trait",
+ "base64 0.22.1",
  "bytes",
  "cpal",
  "enigo",

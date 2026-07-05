@@ -1,5 +1,6 @@
 //! SttProvider trait（03 §2）。
 pub mod openai_compat;
+pub mod volcengine;
 
 use super::ProviderError;
 
