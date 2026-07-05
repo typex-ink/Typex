@@ -55,7 +55,7 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
     <AppIcon :size="88" />
     <div class="logotype">Typex</div>
     <p class="meta">
-      v0.1.0 · GPL-3.0 · typex.ink<br />
+      v0.1.1 · GPL-3.0 · typex.ink<br />
       {{ t("settings.about.privacy") }}
     </p>
     <div v-if="available" class="update-card">
