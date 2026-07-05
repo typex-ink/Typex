@@ -32,7 +32,9 @@
     "stage_transcribing": "转写",
     "stage_processing": "处理",
     "stage_injecting": "输入",
-    "stage_recording": "录音"
+    "stage_recording": "录音",
+    "long_recording": "已录制超过 10 分钟",
+    "toggle_verbatim": "点击切换原样模式"
   },
   "actions": {
     "open_model_settings": "打开模型设置",

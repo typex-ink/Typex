@@ -359,8 +359,8 @@ impl Orchestrator {
             }
             Effect::EmitUi => self.emit_snapshot(exec),
             Effect::EmitBusyHint => {
-                // CP-1.3：HUD 轻晃 + 「正在处理上一条…」；快照层先透传 phase
-                self.emit_snapshot(exec);
+                // 重按忽略：HUD 轻晃 + 「正在处理上一条…」（05 §3.3）
+                self.emit_snapshot_with(exec, true);
             }
             Effect::PlayChime(chime) => {
                 let g = self.settings.get().general;
@@ -407,7 +407,12 @@ impl Orchestrator {
     }
 
     fn emit_snapshot(&self, exec: &Exec) {
+        self.emit_snapshot_with(exec, false);
+    }
+
+    fn emit_snapshot_with(&self, exec: &Exec, busy_hint: bool) {
         let mut snap = snapshot_of(&exec.state, exec.recording_started);
+        snap.busy_hint = busy_hint;
         // 快照补全设置态字段：原样模式标注、翻译方向徽标（05 §3.2）
         let s = self.settings.get();
         snap.verbatim = !s.dictation.polish_enabled;

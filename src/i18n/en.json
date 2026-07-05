@@ -32,7 +32,9 @@
     "stage_transcribing": "Transcription",
     "stage_processing": "Processing",
     "stage_injecting": "Typing",
-    "stage_recording": "Recording"
+    "stage_recording": "Recording",
+    "long_recording": "Recording over 10 minutes",
+    "toggle_verbatim": "Click to toggle verbatim mode"
   },
   "actions": {
     "open_model_settings": "Open model settings",

@@ -354,3 +354,15 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
 pub fn list_audio_devices() -> Vec<String> {
     crate::audio::list_input_devices()
 }
+
+/// HUD 一键切换原样模式（02 F-9：HUD 与设置均可切换）；返回切换后 verbatim 状态。
+#[tauri::command]
+#[specta::specta]
+pub fn toggle_verbatim(settings: SettingsState<'_>) -> Result<bool, TypexError> {
+    let mut verbatim = false;
+    settings.mutate(|s| {
+        s.dictation.polish_enabled = !s.dictation.polish_enabled;
+        verbatim = !s.dictation.polish_enabled;
+    })?;
+    Ok(verbatim)
+}

@@ -7,6 +7,7 @@ import {
   onAudioLevel,
   sendCommand,
   cycleTranslationTarget,
+  toggleVerbatim,
   type SessionSnapshot,
   type ErrorCode,
 } from "./ipc";
@@ -29,6 +30,7 @@ const snap = reactive<SessionSnapshot>({
   has_transcript: false,
   unpolished: false,
   processing_step: null,
+  busy_hint: false,
 });
 
 const levels = ref<number[]>([]);
@@ -36,6 +38,11 @@ const elapsed = ref(0);
 const processingSecs = ref(0);
 const showSuccess = ref(false);
 const silent = ref(false);
+// 重按忽略：轻晃 + 微文案（05 §3.3）
+const busyShake = ref(false);
+let busyTimer: ReturnType<typeof setTimeout> | null = null;
+// 录音超 10 分钟温和提示（02 F-1，非中断）
+const longRecording = computed(() => elapsed.value >= 600_000);
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let lastVoice = 0;
@@ -122,7 +129,15 @@ watch(
 );
 
 onMounted(async () => {
-  unlistenSnap = await onSnapshot((s) => Object.assign(snap, s));
+  unlistenSnap = await onSnapshot((s) => {
+    Object.assign(snap, s);
+    if (s.busy_hint) {
+      // 轻晃 + 微文案，随后自动淡出
+      busyShake.value = true;
+      if (busyTimer) clearTimeout(busyTimer);
+      busyTimer = setTimeout(() => (busyShake.value = false), 1600);
+    }
+  });
   unlistenLevel = await onAudioLevel((l) => {
     levels.value = l;
     if (l.some((v) => v > 0.02)) lastVoice = Date.now();
@@ -138,7 +153,7 @@ onUnmounted(() => {
 });
 
 function onModeClick() {
-  // 翻译模式下点徽标 = 目标语言快切（05 §3.2）
+  // 翻译模式点徽标 = 目标语言快切（05 §3.2）；听写模式点徽标 = 切原样模式（02 F-9）
   if (snap.mode === "translation") {
     cycleTranslationTarget().then((next) => {
       if (snap.translation_direction) {
@@ -146,6 +161,8 @@ function onModeClick() {
         snap.translation_direction = `${parts[0]?.trim()} → ${next.slice(0, 2)}`;
       }
     });
+  } else if (snap.mode === "dictation") {
+    toggleVerbatim().then((v) => (snap.verbatim = v));
   }
 }
 
@@ -158,7 +175,7 @@ function onKey(e: KeyboardEvent) {
   <div class="hud-viewport">
     <Transition name="hud">
       <!-- 单一常驻胶囊：阶段切换直接换内容，出现/消失才播放动画（防止每次状态切换闪一下） -->
-      <div v-if="active" class="hud" :class="{ 'success-pop': showSuccess }">
+      <div v-if="active" class="hud" :class="{ 'success-pop': showSuccess, shake: busyShake }">
         <!-- 成功反馈 -->
         <template v-if="showSuccess">
           <span class="ok">✓</span><span>{{ L.hud.injected }}</span>
@@ -170,9 +187,11 @@ function onKey(e: KeyboardEvent) {
           <span class="time">{{ fmtTime(elapsed) }}</span>
           <span v-if="silent" class="hint">{{ L.hud.no_sound }}</span>
           <Waveform v-else :levels="levels" />
+          <span v-if="longRecording" class="hint">{{ L.hud.long_recording }}</span>
           <span
             class="mode"
-            :class="{ clickable: snap.mode === 'translation' }"
+            :class="{ clickable: snap.mode === 'translation' || snap.mode === 'dictation' }"
+            :title="snap.mode === 'dictation' ? L.hud.toggle_verbatim : undefined"
             @click="onModeClick"
             >{{ modeLabel }}</span
           >
@@ -185,6 +204,7 @@ function onKey(e: KeyboardEvent) {
           <span class="ptext">{{ processingText }}</span>
           <span v-if="processingSecs > 5" class="hint mono">{{ processingSecs }}s</span>
           <span v-if="snap.unpolished" class="hint">{{ L.hud.unpolished }}</span>
+          <span v-if="busyShake" class="hint">{{ L.hud.busy }}</span>
         </template>
 
         <!-- 失败（不自动消失，05 §3.2） -->
@@ -374,12 +394,35 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+/* 重按忽略轻晃（05 §3.3） */
+.shake {
+  animation: shake 0.35s ease-out;
+}
+@keyframes shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  75% {
+    transform: translateX(-2px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dot {
     animation: none;
     opacity: 1;
   }
   .success-pop {
+    animation: none;
+  }
+  .shake {
     animation: none;
   }
 }

@@ -144,7 +144,7 @@
   `tauri-plugin-updater` 接入：默认自动检查、手动确认安装；托盘「检查更新」当前是空操作；设置-关于「检查更新」按钮接真实逻辑。
 - [x] **CP-6.4 麦克风权限检测 + 设备选择**（2026-07-06：AVCaptureDevice 麦克风授权检测 + IOHIDCheckAccess 输入监听检测（check_all 三项齐）· Info.plist NSMicrophoneUsageDescription · cpal 输入设备枚举 command · 听写页麦克风下拉接真实设备并写入 dictation.microphone（录音启动已按该值选设备））
   权限检测目前仅辅助功能（`permissions.rs::check_all`）；补麦克风（AVCaptureDevice / tauri-plugin-macos-permissions）与输入监听（IOHIDCheckAccess）实时状态；听写页麦克风下拉接 cpal 设备枚举（当前只有「系统默认」占位）。
-- [ ] **CP-6.5 HUD 细节补齐**（05 §3.2）
+- [x] **CP-6.5 HUD 细节补齐**（2026-07-06：快照增 busy_hint 字段——重按忽略时 HUD 轻晃 0.35s + 「正在处理上一条…」微文案（reduced-motion 降级）· 录音超 10 分钟温和提示 · 听写模式点徽标一键切原样（toggle_verbatim command，02 F-9 双入口））
   录音超 10 分钟温和提示；重按忽略时的轻晃 +「正在处理上一条…」微文案（EmitBusyHint 已有 Effect，HUD 未渲染）；HUD 处一键切原样模式入口（02 F-9：HUD 与设置均可切换）。
 - [ ] **CP-6.6 i18n 全量化**（ADR-11 中英双语首发）
   当前仅 HUD 与错误码走 i18n 资源；设置/引导/主页/助手界面文案为硬编码中文——全部迁入 vue-i18n 并跟随「界面语言」设置（含 onboarding 第 1 步语言切换即时生效于全 UI）。

@@ -38,6 +38,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::check_update,
             commands::install_update,
             commands::list_audio_devices,
+            commands::toggle_verbatim,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,

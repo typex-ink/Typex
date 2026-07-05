@@ -37,6 +37,7 @@ export interface SessionSnapshot {
   has_transcript: boolean;
   unpolished: boolean;
   processing_step: string | null;
+  busy_hint: boolean;
 }
 
 export function onSnapshot(cb: (snap: SessionSnapshot) => void) {
@@ -60,6 +61,11 @@ export function sendCommand(command: SessionCommand) {
 
 export function cycleTranslationTarget(): Promise<string> {
   return invoke("cycle_translation_target");
+}
+
+/// HUD 一键切原样模式（02 F-9）；返回切换后 verbatim 状态。
+export function toggleVerbatim(): Promise<boolean> {
+  return invoke("toggle_verbatim");
 }
 
 // ── 主题同步（04 §3.4：HUD 同样双主题，手动固定跟随设置）──

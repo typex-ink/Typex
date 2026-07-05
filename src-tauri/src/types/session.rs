@@ -56,6 +56,8 @@ pub struct SessionSnapshot {
     pub unpolished: bool,
     /// 处理中文案键（"transcribing" / "polishing" / "translating" / "thinking"）
     pub processing_step: Option<String>,
+    /// 重按忽略提示（05 §3.3）：HUD 轻晃 + 「正在处理上一条…」微文案
+    pub busy_hint: bool,
 }
 
 impl SessionSnapshot {
@@ -72,6 +74,7 @@ impl SessionSnapshot {
             has_transcript: false,
             unpolished: false,
             processing_step: None,
+            busy_hint: false,
         }
     }
 }
