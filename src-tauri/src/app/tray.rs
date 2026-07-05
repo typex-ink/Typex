@@ -31,9 +31,6 @@ fn build_menu<R: Runtime>(
     let status = MenuItemBuilder::with_id("status", status_text)
         .enabled(false)
         .build(app)?;
-    let assistant = MenuItemBuilder::with_id("assistant", "打开助手")
-        .accelerator("")
-        .build(app)?;
     let copy_last = MenuItemBuilder::with_id("copy_last", "复制上次结果").build(app)?;
 
     let polish = CheckMenuItemBuilder::with_id("polish", "文本整理")
@@ -105,7 +102,6 @@ fn build_menu<R: Runtime>(
     MenuBuilder::new(app)
         .item(&status)
         .separator()
-        .item(&assistant)
         .item(&copy_last)
         .separator()
         .item(&polish)
@@ -163,9 +159,6 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 }
                 "home" => {
                     let _ = crate::app::windows::show_home(app);
-                }
-                "assistant" => {
-                    let _ = crate::app::windows::show_assistant(app);
                 }
                 "copy_last" => {
                     if let Some(last) = app.try_state::<crate::app::LastResult>() {

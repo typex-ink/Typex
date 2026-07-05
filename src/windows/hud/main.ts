@@ -2,7 +2,18 @@
 import { createApp } from "vue";
 import "@/styles/base.css";
 import Hud from "./Hud.vue";
+import { getThemeMode, onThemeChanged, type ThemeMode } from "./ipc";
 
-// 主题：HUD 只跟随系统（毛玻璃 + token @media 已覆盖；手动固定主题经 settings 事件同步成本高，
-// HUD 用途单一且半透明，跟随系统即可）
+// 主题（04 §3.4）：HUD 同样跟随「设置 → 通用 → 主题」；system = 移除属性走 tokens.css @media
+function applyTheme(theme: ThemeMode) {
+  const root = document.documentElement;
+  if (theme === "light" || theme === "dark") {
+    root.setAttribute("data-theme", theme);
+  } else {
+    root.removeAttribute("data-theme");
+  }
+}
+getThemeMode().then(applyTheme).catch(() => {});
+onThemeChanged(applyTheme);
+
 createApp(Hud).mount("#app");

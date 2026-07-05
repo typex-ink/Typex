@@ -28,10 +28,6 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::set_profile_secret,
             commands::test_profile,
             commands::cycle_translation_target,
-            commands::ask_assistant,
-            commands::assistant_action,
-            commands::read_selection_context,
-            commands::clear_selection_context,
             commands::query_history,
             commands::get_stats,
             commands::delete_history_item,
@@ -44,10 +40,10 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::SessionSnapshotEvent,
             events::AudioLevelEvent,
             events::SettingsChangedEvent,
+            events::AssistantStartedEvent,
             events::AssistantDeltaEvent,
             events::AssistantDoneEvent,
             events::AssistantErrorEvent,
-            events::AssistantContextEvent,
         ])
 }
 
@@ -153,9 +149,10 @@ pub fn run() {
             let selection: Arc<dyn crate::selection::SelectionReader> =
                 Arc::from(crate::selection::platform_default());
 
-            // AssistantService（F-3）：流式事件 → assistant:// IPC events
+            // AssistantService（F-3 / ADR-23）：流式事件 → assistant:// IPC events；
+            // 回答型确认时经 show_panel 回调呼出回答弹窗
             let handle_a = app.handle().clone();
-            let pending_for_sink = pending_selection.clone();
+            let handle_panel = app.handle().clone();
             let assistant = Arc::new(crate::orchestrator::assistant::AssistantService::new(
                 settings.clone(),
                 registry.clone(),
@@ -163,6 +160,18 @@ pub fn run() {
                     use crate::orchestrator::assistant::AssistantEvent;
                     use tauri_specta::Event as _;
                     match ev {
+                        AssistantEvent::Started {
+                            request_id,
+                            instruction,
+                            selection_chars,
+                        } => {
+                            let _ = events::AssistantStartedEvent {
+                                request_id: request_id as u32,
+                                instruction,
+                                selection_chars,
+                            }
+                            .emit(&handle_a);
+                        }
                         AssistantEvent::Delta { request_id, text } => {
                             let _ = events::AssistantDeltaEvent {
                                 request_id: request_id as u32,
@@ -172,20 +181,11 @@ pub fn run() {
                         }
                         AssistantEvent::Done {
                             request_id,
-                            kind,
                             full_text,
                         } => {
-                            let chars = pending_for_sink
-                                .lock()
-                                .unwrap()
-                                .as_ref()
-                                .map(|s| s.chars().count() as u32)
-                                .unwrap_or(0);
                             let _ = events::AssistantDoneEvent {
                                 request_id: request_id as u32,
-                                kind,
                                 full_text,
-                                selection_chars: chars,
                             }
                             .emit(&handle_a);
                         }
@@ -197,6 +197,9 @@ pub fn run() {
                             .emit(&handle_a);
                         }
                     }
+                }),
+                Box::new(move |has_selection| {
+                    let _ = crate::app::windows::show_assistant(&handle_panel, has_selection);
                 }),
             ));
 
@@ -227,7 +230,6 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
-            let handle3 = app.handle().clone();
             let orch = Arc::new(Orchestrator {
                 settings: settings.clone(),
                 audio,
@@ -246,16 +248,12 @@ pub fn run() {
                 last_result: last_result.clone(),
                 assistant: Some(assistant.clone()),
                 pending_selection: pending_selection.clone(),
-                show_assistant_panel: Box::new(move || {
-                    let _ = crate::app::windows::show_assistant(&handle3);
-                }),
                 selection: selection.clone(),
                 history: history.clone(),
             });
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
             app.manage(crate::orchestrator::SessionCommander(cmd_tx));
             app.manage(crate::app::LastResult(last_result.clone()));
-            app.manage(crate::app::AssistantSelection(pending_selection));
             app.manage(assistant);
             app.manage(selection);
             app.manage(injector);
@@ -301,7 +299,7 @@ pub fn run() {
                 match std::env::var("TYPEX_OPEN").as_deref() {
                     Ok("home") => crate::app::windows::show_home(app.handle())?,
                     Ok("settings") => crate::app::windows::show_settings(app.handle())?,
-                    Ok("assistant") => crate::app::windows::show_assistant(app.handle())?,
+                    Ok("assistant") => crate::app::windows::show_assistant(app.handle(), false)?,
                     _ => {}
                 }
             }
@@ -317,7 +315,11 @@ pub fn run() {
             move |app, event| {
                 // 点击 Dock 图标（无可见窗口时）→ 打开主页（05 §8：Dock/托盘按需打开）
                 #[cfg(target_os = "macos")]
-                if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if let tauri::RunEvent::Reopen {
+                    has_visible_windows,
+                    ..
+                } = event
+                {
                     if !has_visible_windows && launched_at.elapsed().as_secs() >= 2 {
                         let _ = crate::app::windows::show_home(app);
                     }

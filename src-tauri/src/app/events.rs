@@ -17,33 +17,33 @@ pub struct AudioLevelEvent(pub Vec<f32>);
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct SettingsChangedEvent(pub crate::settings::schema::Settings);
 
-/// `assistant://delta` — 助手面板流式渲染。
+/// `assistant://started` — 回答弹窗重置内容 + 指令回显（回答型确认的那一刻）。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+pub struct AssistantStartedEvent {
+    pub request_id: u32,
+    /// 本次语音指令（弹窗顶部回显）
+    pub instruction: String,
+    /// 选区字数（摘要行显示；None = 无选区）
+    pub selection_chars: Option<u32>,
+}
+
+/// `assistant://delta` — 回答弹窗流式渲染。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct AssistantDeltaEvent {
     pub request_id: u32,
     pub text_delta: String,
 }
 
-/// `assistant://done` — 面板动作行（kind 决定是否可替换选区）。
+/// `assistant://done` — 回答终态（改写型结果不经 assistant:// 事件，走 session 注入）。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct AssistantDoneEvent {
     pub request_id: u32,
-    pub kind: crate::orchestrator::assistant::AnswerKind,
     pub full_text: String,
-    /// 呼出时读到的选中文本长度（上下文芯片显示；0 = 无选区）
-    pub selection_chars: u32,
 }
 
-/// `assistant://error`
+/// `assistant://error` — 弹窗已呼出后的流中断（此前的失败走 HUD）。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
 pub struct AssistantErrorEvent {
     pub request_id: u32,
     pub error: crate::error::TypexError,
-}
-
-/// `assistant://context` — 呼出面板时的上下文信息（选中文本芯片）。
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
-pub struct AssistantContextEvent {
-    pub selection_chars: u32,
-    pub selection_preview: String,
 }

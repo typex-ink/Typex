@@ -142,67 +142,6 @@ pub fn set_profile_secret(
     Ok(())
 }
 
-// ── 助手（F-3；07 §10.1）──
-
-/// 打字提问（语音提问走全局键）。use_selection: 是否携带当前选中文本。
-#[tauri::command]
-#[specta::specta]
-pub fn ask_assistant(
-    assistant: State<'_, Arc<crate::orchestrator::assistant::AssistantService>>,
-    selection_store: State<'_, crate::app::AssistantSelection>,
-    text: String,
-    use_selection: bool,
-) -> Result<u32, TypexError> {
-    let selection = if use_selection {
-        selection_store.0.lock().unwrap().clone()
-    } else {
-        None
-    };
-    assistant.ask(text, selection).map(|id| id as u32)
-}
-
-/// 面板动作：replace（模拟选区替换 = 直接注入覆盖选中）/ insert / copy。
-#[tauri::command]
-#[specta::specta]
-pub fn assistant_action(
-    injector: State<'_, Arc<crate::inject::InjectorChain>>,
-    action: String,
-    text: String,
-) -> Result<(), TypexError> {
-    match action.as_str() {
-        "replace" | "insert" => {
-            // 替换选区 = 焦点应用中选区仍在，注入即覆盖；插入 = 注入光标处
-            injector.inject(&text)
-        }
-        "copy" => arboard::Clipboard::new()
-            .and_then(|mut c| c.set_text(text))
-            .map_err(|e| TypexError::new(ErrorCode::Internal, format!("复制失败: {e}"))),
-        _ => Err(TypexError::new(ErrorCode::InvalidRequest, "未知动作")),
-    }
-}
-
-/// 面板打开时读取当前选中文本（上下文芯片）。
-#[tauri::command]
-#[specta::specta]
-pub fn read_selection_context(
-    selection: State<'_, Arc<dyn crate::selection::SelectionReader>>,
-    selection_store: State<'_, crate::app::AssistantSelection>,
-) -> Option<String> {
-    if let Some(text) = selection_store.0.lock().unwrap().clone() {
-        return Some(text);
-    }
-    let result = selection.read().ok().flatten();
-    *selection_store.0.lock().unwrap() = result.clone();
-    result
-}
-
-/// 移除上下文芯片。
-#[tauri::command]
-#[specta::specta]
-pub fn clear_selection_context(selection_store: State<'_, crate::app::AssistantSelection>) {
-    *selection_store.0.lock().unwrap() = None;
-}
-
 // ── 历史（F-7；07 §10.1）──
 
 #[tauri::command]

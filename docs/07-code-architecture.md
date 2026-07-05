@@ -49,7 +49,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 窗口 | 生命周期 | 特性 |
 |---|---|---|
 | **HUD** | 常驻（隐藏/显示切换，避免创建延迟） | 无边框、透明、置顶、**不可获得焦点**（macOS 必须用 NSPanel/nonactivating，否则注入目标失焦——经 `tauri-nspanel`）、忽略鼠标事件（除按钮区） |
-| **助手面板** | 按需显示，关闭即隐藏 | 无边框、透明、禁用原生窗口阴影、不可手动调整大小、原生窗口高度跟随内容、置顶、可获得焦点、优先贴近选区下方、失焦自动隐藏（可 pin） |
+| **回答弹窗** | 按需显示，关闭即隐藏 | 无边框、透明、禁用原生窗口阴影、不可手动调整大小、原生窗口高度跟随内容、置顶、可获得焦点、优先贴近选区下方、失焦自动关闭（无 pin）、只读展示（无输入能力，见 05 §4） |
 | **设置** | 按需创建 | 常规窗口 720×520 |
 | **引导** | 首次启动 | 常规窗口 |
 | **主页** | 按需 | 常规窗口 880×560：侧边栏导航（首页/历史记录）+ 内容区（统计、最近记录、历史列表） |
@@ -270,7 +270,7 @@ v1 保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `carg
 - 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug），改用 **rdev 独立线程**自维护 down/up 状态——默认键位为全修饰键三角方案（右⌘/右⌥ 及其组合，见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
 - **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`AltGr+E` 等），立即静默取消本次录音、不产生任何输出、按键完全放行。监听是 listen-only，普通键本来就不被拦截，此规则只是状态机层面的取消逻辑。
 - **唯一需要事件拦截的点**：Windows 上单击 Alt 会聚焦菜单栏——助手键（右 Alt）短按时用低级钩子 `WH_KEYBOARD_LL` 吞掉对应 keyup。macOS/Linux 的修饰键单按无系统副作用，无需拦截。启动时自检钩子可用性，失败降级为「监听不拦截」+ UI 提示改键。
-- 长按/短按判定：press 后 350 ms 内 release = toggle/呼出面板；超过 = push-to-talk（release 即停止）。**乐观启动**：触发键按下即开始录音，判定窗口内组合出第二触发键则无缝切换为翻译模式，音频保留。
+- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：触发键按下即开始录音，判定窗口内组合出第二触发键则无缝切换为翻译模式，音频保留。
 - Wayland：探测 `XDG_SESSION_TYPE`；优先 `ashpd` 走 `org.freedesktop.portal.GlobalShortcuts`（KDE/GNOME≥48/Hyprland 支持，Activated/Deactivated 信号天然支持按住；注意 Portal 快捷键由 compositor 分配，未必能绑到「单独的右⌥」，此时默认键退化为 compositor 允许的组合键）；不可用时提示 evdev 方案（用户加入 `input` 组）或 compositor 绑定 `typex toggle` CLI 命令（经 single-instance 转发）。
 
 ### 7.4 录音
@@ -295,10 +295,11 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 ### 7.6 读取选中文本（Selection 降级链）
 
-1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + CGEvent Cmd+C + 读剪贴板 + 恢复（禁止通过 enigo/rdev 查询输入法布局，避免 HIToolbox 主队列断言）；定位用 `AXSelectedTextRange` + `AXBoundsForRange`，不可得时回退居中。
+1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + CGEvent Cmd+C + 读剪贴板 + 恢复（禁止通过 enigo/rdev 查询输入法布局，避免 HIToolbox 主队列断言）；**AX 属性可读但为空 = 明确无选区，直接返回、不走剪贴板降级**（降级只给不支持 AX 的应用）；定位用 `AXSelectedTextRange` + `AXBoundsForRange`，不可得时回退居中。
 2. Windows：UIA `TextPattern.GetSelection()` → 失败：Ctrl+C 降级。
 3. Linux：X11 primary selection 直读；Wayland 下 primary selection 可用则用，否则明确降级提示。
 4. 降级链每步有 300 ms 超时；剪贴板法须处理「无选中时复制整行」的误触（对比复制前后剪贴板内容 + 长度启发式）。
+5. **读取时机 = 触发键松开、调 STT 的同时（并发执行，不增加延迟）**——绝不能在触发键按住期间执行：剪贴板降级要模拟 Cmd/Ctrl+C，合成的普通键 down 会命中「组合键让路」规则、把当前会话静默取消。选区在录音期间不会变（HUD 不抢焦点），松开后读取语义等价。
 
 ## 8. Linux/Wayland 支持策略（明确的分级承诺）
 
@@ -340,8 +341,6 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 分组 | Command | 说明 |
 |---|---|---|
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
-| 助手 | `ask_assistant { text?, use_selection }` | 打字提问；语音提问走全局键 |
-| 助手 | `assistant_action { action: replace/insert/copy }` | 对当前回答执行动作 |
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `test_profile { id }` | 密钥字段单独走 `set_profile_secret`（不随 profile JSON 往返） |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
@@ -354,8 +353,10 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 |---|---|---|
 | `session://snapshot` | `SessionSnapshot`（phase、mode、时长、错误码…） | HUD、托盘 |
 | `session://audio-level` | `f32[]`（50ms 节流） | HUD 波形 |
-| `assistant://delta` | `{ session_id, text_delta }` | 助手面板流式渲染 |
-| `assistant://done` | `{ session_id, kind: rewrite/answer }` | 面板动作行 |
+| `assistant://started` | `{ request_id, instruction, selection_chars? }` | 回答弹窗：重置内容 + 指令回显 |
+| `assistant://delta` | `{ request_id, text_delta }` | 回答弹窗流式渲染 |
+| `assistant://done` | `{ request_id, full_text }` | 回答弹窗终态（改写型结果不经 assistant:// 事件，走 session 注入） |
+| `assistant://error` | `{ request_id, error }` | 回答弹窗错误展示（仅弹窗已呼出后的流中断；此前的失败走 HUD） |
 | `settings://changed` | 变更后的 `Settings` | 全窗口 |
 | `hotkey://captured` | 录制期间的按键组合 | HotkeyRecorder 控件 |
 | `permission://changed` | `PermissionStatus` | onboarding、诊断页 |

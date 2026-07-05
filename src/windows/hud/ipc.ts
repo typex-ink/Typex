@@ -61,3 +61,19 @@ export function sendCommand(command: SessionCommand) {
 export function cycleTranslationTarget(): Promise<string> {
   return invoke("cycle_translation_target");
 }
+
+// ── 主题同步（04 §3.4：HUD 同样双主题，手动固定跟随设置）──
+
+export type ThemeMode = "system" | "light" | "dark";
+
+interface ThemeSlice {
+  general: { theme: ThemeMode };
+}
+
+export function getThemeMode(): Promise<ThemeMode> {
+  return invoke<ThemeSlice>("get_settings").then((s) => s.general.theme);
+}
+
+export function onThemeChanged(cb: (theme: ThemeMode) => void) {
+  return listen<ThemeSlice>("settings-changed-event", (e) => cb(e.payload.general.theme));
+}

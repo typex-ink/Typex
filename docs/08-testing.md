@@ -35,7 +35,7 @@
 
 对 `advance(state, event) -> (state, Vec<Effect>)` 做穷举式表驱动测试。**必须逐条覆盖的场景清单**（与 [02 功能规格](02-features.md)、[05 §7](05-ux-spec.md) 对齐，新增行为先加进这张表）：
 
-- 长按/短按：349ms 释放 = toggle 开始；351ms 释放 = push-to-talk 结束；toggle 模式下二次短按结束。
+- 长按/短按：349ms 释放 = toggle 开始；351ms 释放 = push-to-talk 结束；toggle 模式下二次短按结束（三种模式语义一致，含助手模式）。
 - 组合键：录音中追加第二触发键 → 模式切为翻译且音频保留；两键同时按下（乱序）等价。
 - **组合键让路**：触发键按住期间出现普通键 down → 会话静默取消、Effect 含且仅含 `CancelRecording`（无任何注入/提示音）。
 - 重按忽略：Transcribing/Processing/Injecting 中触发键按下 → 状态不变，Effect = `EmitUi(busy-hint)`；Failed 中按下 → 放弃旧会话开新录音。
@@ -45,6 +45,7 @@
 - 整理层降级：Polish 超时/报错 → 注入原始转写 + `EmitUi(unpolished)`。
 - 翻译降级：STT 成功翻译失败 → Failed 且提供「注入原文」Effect。
 - 取消后迟到的回调：Cancel 后 SttResult 到达 → 丢弃。
+- 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff`（回答型，已交回答弹窗流式）→ Idle + 释放音频；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
 
 ### 3.2 其他纯逻辑单测
 
@@ -57,6 +58,7 @@
 | `providers/error.rs` | HTTP 状态码/IO 错误 → ErrorCode 分类表 |
 | 剪贴板恢复逻辑（`inject/paste.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；恢复失败不吞注入成功的结果 |
 | PromptKit 模板渲染 | 变量替换（target_language、词典注入）、`ANSWER:` 前缀解析 |
+| 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误 |
 
 ## 4. Rust 集成测试（`src-tauri/tests/`）
 
@@ -96,7 +98,7 @@
 | 错误码 → 文案 | 遍历 Rust 导出的全部 ErrorCode（从 bindings 类型取）：zh-CN 与 en 均有对应 i18n key（防「Rust 加了错误码忘了文案」——**这条是编译期抓不到的契约缝隙，必须测**） |
 | HotkeyRecorder | 录制态进出、组合键渲染、冲突警告展示 |
 | ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误） |
-| 助手面板 | 流式 delta 追加渲染；`kind: rewrite/answer` 决定动作行；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**） |
+| 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**） |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |
 | shared/ 工具 | 常规单测 |
 

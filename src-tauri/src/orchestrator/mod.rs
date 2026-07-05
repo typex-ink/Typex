@@ -30,12 +30,10 @@ pub struct Orchestrator {
     pub level_sink: Box<dyn Fn(Vec<f32>) + Send + Sync>,
     /// 最近一次成功注入的结果（托盘「复制上次结果」共享，02 F-7）
     pub last_result: Arc<std::sync::Mutex<Option<String>>>,
-    /// 助手服务（F-3）；快照/流式经自身 sink
+    /// 助手服务（F-3）；弹窗流式经自身 sink，呼出回调也在其内（ADR-23）
     pub assistant: Option<Arc<assistant::AssistantService>>,
-    /// 助手键按下时读到的选中文本（录音开始时读取，转写完成后消费）
+    /// 助手键按下时读到的选中文本（录音开始时读取，处理阶段消费）
     pub pending_selection: Arc<std::sync::Mutex<Option<String>>>,
-    /// 显示助手面板回调（app 层注入）
-    pub show_assistant_panel: Box<dyn Fn() + Send + Sync>,
     /// 选中文本读取器
     pub selection: Arc<dyn crate::selection::SelectionReader>,
     /// 历史记录服务（None = 未启用）
@@ -177,15 +175,10 @@ impl Orchestrator {
             Effect::StartRecording => {
                 let mic = self.settings.get().dictation.microphone.clone();
                 exec.recording_started = Some(Instant::now());
-                // 助手模式：录音开始时后台读选中文本（F-3a 上下文；不阻塞录音）
+                // 助手模式的选区读取推迟到触发键松开（CallStt 时并发执行，07 §7.6-5）：
+                // 剪贴板降级的模拟 Cmd+C 在按住期间会触发组合键让路、误取消本会话
                 if exec.state.mode() == Some(SessionMode::Assistant) {
-                    let selection = self.selection.clone();
-                    let pending = self.pending_selection.clone();
-                    *pending.lock().unwrap() = None;
-                    tokio::task::spawn_blocking(move || {
-                        let result = selection.read().ok().flatten();
-                        *pending.lock().unwrap() = result;
-                    });
+                    *self.pending_selection.lock().unwrap() = None;
                 }
                 if let Err(e) = self.audio.start(&mic, level_tx.clone()) {
                     tracing::error!("录音启动失败: {}", e.message);
@@ -205,7 +198,8 @@ impl Orchestrator {
             Effect::StopRecording { .. } => { /* CallStt 已含停止语义 */ }
             Effect::CallStt { session_id } => {
                 // 停止录音（若在录）并取音频；重试路径直接用 audio_store
-                let recording = if self.audio.is_recording() {
+                let was_recording = self.audio.is_recording();
+                let recording = if was_recording {
                     exec.recording_started = None;
                     match self.audio.stop() {
                         Ok(rec) => {
@@ -231,47 +225,66 @@ impl Orchestrator {
                     });
                     return;
                 }
+                // 助手模式：触发键已松开，此刻读选区（07 §7.6-5——按住期间读会被
+                // 剪贴板降级的模拟 Cmd+C 触发组合键让路）；与 STT 并发，不增加延迟。
+                // 重试路径（!was_recording）沿用首次读到的选区。
+                let assistant_read = (was_recording
+                    && exec.state.mode() == Some(SessionMode::Assistant))
+                .then(|| (self.selection.clone(), self.pending_selection.clone()));
                 let registry = self.registry.clone();
                 let lang = self.settings.get().dictation.language.clone();
                 let tx = exec.tx.clone();
                 tokio::spawn(async move {
-                    let stt = match registry.stt_for(SlotKind::Stt) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            let _ = tx.send(Event::SttFailed {
-                                session_id,
-                                error: e,
-                            });
-                            return;
+                    let selection_fut = async {
+                        if let Some((reader, pending)) = assistant_read {
+                            let result =
+                                tokio::task::spawn_blocking(move || reader.read().ok().flatten())
+                                    .await
+                                    .ok()
+                                    .flatten();
+                            *pending.lock().unwrap() = result;
                         }
                     };
-                    let result = crate::providers::stt::transcribe_auto_chunk(
-                        stt.as_ref(),
-                        AudioInput {
-                            wav_16k_mono: rec.wav_16k_mono,
-                            duration_ms: rec.duration_ms,
-                        },
-                        SttOptions {
-                            language: Some(lang),
-                            prompt: None,
-                            temperature: None,
-                        },
-                    )
-                    .await;
-                    let event = match result {
-                        Ok(t) if t.text.trim().is_empty() => Event::SttFailed {
-                            session_id,
-                            error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
-                        },
-                        Ok(t) => Event::SttResult {
-                            session_id,
-                            transcript: t.text.trim().to_string(),
-                        },
-                        Err(e) => Event::SttFailed {
-                            session_id,
-                            error: e.into(),
-                        },
+                    let stt_fut = async {
+                        let stt = match registry.stt_for(SlotKind::Stt) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                return Event::SttFailed {
+                                    session_id,
+                                    error: e,
+                                };
+                            }
+                        };
+                        let result = crate::providers::stt::transcribe_auto_chunk(
+                            stt.as_ref(),
+                            AudioInput {
+                                wav_16k_mono: rec.wav_16k_mono,
+                                duration_ms: rec.duration_ms,
+                            },
+                            SttOptions {
+                                language: Some(lang),
+                                prompt: None,
+                                temperature: None,
+                            },
+                        )
+                        .await;
+                        match result {
+                            Ok(t) if t.text.trim().is_empty() => Event::SttFailed {
+                                session_id,
+                                error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
+                            },
+                            Ok(t) => Event::SttResult {
+                                session_id,
+                                transcript: t.text.trim().to_string(),
+                            },
+                            Err(e) => Event::SttFailed {
+                                session_id,
+                                error: e.into(),
+                            },
+                        }
                     };
+                    // join：确保选区已写入 pending 再发 SttResult（CallProcess 会立即消费）
+                    let ((), event) = tokio::join!(selection_fut, stt_fut);
                     let _ = tx.send(event);
                 });
             }
@@ -280,28 +293,31 @@ impl Orchestrator {
                 mode,
                 transcript,
             } => {
-                // 助手模式：转写结果 = 语音指令 → 交给助手面板（F-3），主会话结束
+                // 助手模式：转写结果 = 语音指令 → 助手服务分流（ADR-23）：
+                // 改写型 → ProcessResult（注入替换选区）；回答型 → 交回答弹窗，会话结束
                 if mode == SessionMode::Assistant {
-                    if let Some(assistant) = &self.assistant {
-                        let selection = self.pending_selection.lock().unwrap().take();
-                        match assistant.ask(transcript, selection) {
-                            Ok(_) => {
-                                let _ = exec.tx.send(Event::AssistantHandedOff { session_id });
-                                (self.show_assistant_panel)();
-                            }
-                            Err(e) => {
-                                let _ = exec.tx.send(Event::ProcessFailed {
-                                    session_id,
-                                    error: e,
-                                });
-                            }
-                        }
-                    } else {
+                    let Some(assistant) = self.assistant.clone() else {
                         let _ = exec.tx.send(Event::ProcessFailed {
                             session_id,
                             error: TypexError::new(ErrorCode::NotConfigured, "助手服务未装配"),
                         });
-                    }
+                        return;
+                    };
+                    // clone 而非 take：失败重试时仍可携带同一选区上下文（下次录音开始时重置）
+                    let selection = self.pending_selection.lock().unwrap().clone();
+                    let tx = exec.tx.clone();
+                    tokio::spawn(async move {
+                        let event = match assistant.run(transcript, selection).await {
+                            Ok(assistant::AssistantOutcome::Rewrite(text)) => {
+                                Event::ProcessResult { session_id, text }
+                            }
+                            Ok(assistant::AssistantOutcome::HandedOff) => {
+                                Event::AssistantHandedOff { session_id }
+                            }
+                            Err(error) => Event::ProcessFailed { session_id, error },
+                        };
+                        let _ = tx.send(event);
+                    });
                     return;
                 }
                 let tx = exec.tx.clone();
@@ -367,9 +383,6 @@ impl Orchestrator {
             Effect::ReleaseAudio { session_id } => {
                 exec.audio_store.remove(&session_id);
                 exec.transcript_store.remove(&session_id);
-            }
-            Effect::ShowAssistantPanel => {
-                (self.show_assistant_panel)();
             }
         }
     }

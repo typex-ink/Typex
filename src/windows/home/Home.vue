@@ -141,7 +141,7 @@ onMounted(async () => {
     <main v-if="tab === 'overview'" class="main">
       <div class="hero">
         <h4>说，即所得。</h4>
-        <p>按住 <Kbd>{{ dictKey }}</Kbd> 开始语音输入 · <Kbd>{{ assistKey }}</Kbd> 呼出助手</p>
+        <p>按住 <Kbd>{{ dictKey }}</Kbd> 开始语音输入 · <Kbd>{{ assistKey }}</Kbd> 向助手说指令</p>
       </div>
 
       <div v-if="historyEnabled" class="stats">

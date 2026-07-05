@@ -44,7 +44,9 @@ impl SelectionReader for MacSelectionReader {
         // 主路径：AX kAXSelectedTextAttribute
         match ax_selected_text() {
             Ok(Some(text)) if !text.is_empty() => return Ok(Some(text)),
-            Ok(_) => {}
+            // 元素明确报告选区为空 → 无选区，不做侵入式降级（Cmd+C 探测有副作用）
+            Ok(Some(_)) => return Ok(None),
+            Ok(None) => {} // 元素不支持选区属性 → 剪贴板降级
             Err(e) => tracing::debug!("AX 读选区失败，走剪贴板降级: {}", e.message),
         }
         // 降级：Cmd+C + 剪贴板
@@ -57,6 +59,7 @@ impl SelectionReader for MacSelectionReader {
 }
 
 /// AX API 读取焦点元素的选中文本（07 §7.6-1）。
+/// `Ok(Some(text))` = 元素支持选区属性（text 可为空 = 明确无选区）；`Ok(None)` = 元素不支持。
 #[cfg(target_os = "macos")]
 fn ax_selected_text() -> Result<Option<String>> {
     use std::ffi::c_void;
@@ -136,7 +139,7 @@ fn ax_selected_text() -> Result<Option<String>> {
         let text = std::ffi::CStr::from_ptr(buf.as_ptr())
             .to_string_lossy()
             .into_owned();
-        Ok(if text.is_empty() { None } else { Some(text) })
+        Ok(Some(text)) // 空字符串 = 元素支持属性但当前无选区
     }
 }
 

@@ -80,6 +80,10 @@ const isProcessing = computed(
   () => snap.phase === "transcribing" || snap.phase === "processing" || snap.phase === "injecting",
 );
 const isFailed = computed(() => snap.phase === "failed");
+// 胶囊是否可见：常驻单节点，阶段切换只换内容不重放出现动画（04 §6 动画仅出现/消失）
+const active = computed(
+  () => showSuccess.value || isRecording.value || isProcessing.value || isFailed.value,
+);
 // 翻译失败且转写在手 → 提供「注入原文」（02 F-2 降级）
 const canInjectOriginal = computed(
   () => isFailed.value && snap.mode === "translation" && snap.has_transcript,
@@ -153,55 +157,60 @@ function onKey(e: KeyboardEvent) {
 <template>
   <div class="hud-viewport">
     <Transition name="hud">
-      <!-- 成功反馈 -->
-      <div v-if="showSuccess" class="hud success-pop">
-        <span class="ok">✓</span><span>{{ L.hud.injected }}</span>
-      </div>
+      <!-- 单一常驻胶囊：阶段切换直接换内容，出现/消失才播放动画（防止每次状态切换闪一下） -->
+      <div v-if="active" class="hud" :class="{ 'success-pop': showSuccess }">
+        <!-- 成功反馈 -->
+        <template v-if="showSuccess">
+          <span class="ok">✓</span><span>{{ L.hud.injected }}</span>
+        </template>
 
-      <!-- 录音中 -->
-      <div v-else-if="isRecording" class="hud">
-        <span class="dot" />
-        <span class="time">{{ fmtTime(elapsed) }}</span>
-        <span v-if="silent" class="hint">{{ L.hud.no_sound }}</span>
-        <Waveform v-else :levels="levels" />
-        <span
-          class="mode"
-          :class="{ clickable: snap.mode === 'translation' }"
-          @click="onModeClick"
-          >{{ modeLabel }}</span
-        >
-        <button class="x" title="取消（Esc）" @click="sendCommand('cancel')">✕</button>
-      </div>
+        <!-- 录音中 -->
+        <template v-else-if="isRecording">
+          <span class="dot" />
+          <span class="time">{{ fmtTime(elapsed) }}</span>
+          <span v-if="silent" class="hint">{{ L.hud.no_sound }}</span>
+          <Waveform v-else :levels="levels" />
+          <span
+            class="mode"
+            :class="{ clickable: snap.mode === 'translation' }"
+            @click="onModeClick"
+            >{{ modeLabel }}</span
+          >
+          <button class="x" title="取消（Esc）" @click="sendCommand('cancel')">✕</button>
+        </template>
 
-      <!-- 处理中 -->
-      <div v-else-if="isProcessing" class="hud">
-        <Waveform :levels="[]" breathing />
-        <span class="ptext">{{ processingText }}</span>
-        <span v-if="processingSecs > 5" class="hint mono">{{ processingSecs }}s</span>
-        <span v-if="snap.unpolished" class="hint">{{ L.hud.unpolished }}</span>
-      </div>
+        <!-- 处理中 -->
+        <template v-else-if="isProcessing">
+          <Waveform :levels="[]" breathing />
+          <span class="ptext">{{ processingText }}</span>
+          <span v-if="processingSecs > 5" class="hint mono">{{ processingSecs }}s</span>
+          <span v-if="snap.unpolished" class="hint">{{ L.hud.unpolished }}</span>
+        </template>
 
-      <!-- 失败（不自动消失，05 §3.2） -->
-      <div v-else-if="isFailed" class="hud">
-        <span v-if="snap.error === 'no_focus'" class="info">ⓘ</span>
-        <span v-else class="warn">⚠</span>
-        <span class="ftext">{{ failText }}</span>
-        <button v-if="canRetry" class="btn-sm" @click="sendCommand('retry')">{{ L.hud.retry }}</button>
-        <button
-          v-if="canInjectOriginal"
-          class="btn-ghost-sm"
-          @click="sendCommand('inject_original')"
-        >
-          {{ L.hud.inject_original }}
-        </button>
-        <button
-          v-else-if="snap.has_transcript"
-          class="btn-ghost-sm"
-          @click="sendCommand('copy_transcript')"
-        >
-          {{ L.hud.copy_transcript }}
-        </button>
-        <button class="x" @click="sendCommand('dismiss')">✕</button>
+        <!-- 失败（不自动消失，05 §3.2） -->
+        <template v-else-if="isFailed">
+          <span v-if="snap.error === 'no_focus'" class="info">ⓘ</span>
+          <span v-else class="warn">⚠</span>
+          <span class="ftext">{{ failText }}</span>
+          <button v-if="canRetry" class="btn-sm" @click="sendCommand('retry')">
+            {{ L.hud.retry }}
+          </button>
+          <button
+            v-if="canInjectOriginal"
+            class="btn-ghost-sm"
+            @click="sendCommand('inject_original')"
+          >
+            {{ L.hud.inject_original }}
+          </button>
+          <button
+            v-else-if="snap.has_transcript"
+            class="btn-ghost-sm"
+            @click="sendCommand('copy_transcript')"
+          >
+            {{ L.hud.copy_transcript }}
+          </button>
+          <button class="x" @click="sendCommand('dismiss')">✕</button>
+        </template>
       </div>
     </Transition>
   </div>

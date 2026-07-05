@@ -1,29 +1,22 @@
 <script setup lang="ts">
-// 助手面板（05 §4 / mockup §5）：560px 浮窗、上下文芯片、流式 Markdown、动作行
+// 回答弹窗（05 §4 / ADR-23）：只读展示——指令回显 + 流式 Markdown 回答 + ✕ 关闭。
+// 仅回答型结果经 assistant:// 事件到达此窗；改写型结果直接注入替换选区，不经过这里。
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import MarkdownIt from "markdown-it";
-import Button from "@/components/Button.vue";
-import { commands, events, type AnswerKind } from "@/ipc/bindings";
+import { events } from "@/ipc/bindings";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // LLM 输出视为不可信内容：禁 raw HTML（07 §11）
 const md = new MarkdownIt({ html: false, linkify: true });
 
-const input = ref("");
+const instruction = ref("");
+const selectionChars = ref<number | null>(null);
 const answer = ref("");
-const answerDone = ref(false);
-const answerKind = ref<AnswerKind | null>(null);
-const errorText = ref("");
 const streaming = ref(false);
-const pinned = ref(false);
-const selection = ref<string | null>(null);
-const inputEl = ref<HTMLInputElement | null>(null);
+const errorText = ref("");
 const panelEl = ref<HTMLElement | null>(null);
 const currentRequest = ref(0);
-const replaced = ref(false);
-
-const selectionChars = computed(() => selection.value?.length ?? 0);
 
 const rendered = computed(() => md.render(answer.value));
 
@@ -36,36 +29,33 @@ let lastWindowHeight = 0;
 const unlisteners: (() => void)[] = [];
 
 onMounted(async () => {
-  // 呼出时读取选中文本作为上下文（F-3b）
-  selection.value = await commands.readSelectionContext();
   await syncWindowSize(true);
-  await focusInput();
 
   unlisteners.push(
-    await events.assistantDeltaEvent.listen((e) => {
-      if (e.payload.request_id < currentRequest.value) return; // 旧请求丢弃
+    await events.assistantStartedEvent.listen((e) => {
+      // 新一轮提问：重置弹窗内容（单轮语义，05 §4.3）
       currentRequest.value = e.payload.request_id;
+      instruction.value = e.payload.instruction;
+      selectionChars.value = e.payload.selection_chars;
+      answer.value = "";
+      errorText.value = "";
+      pendingDelta = "";
       streaming.value = true;
-      pendingDelta += e.payload.text_delta;
-      syncWindowSize();
+      syncWindowSize(true);
     }),
-    await events.assistantDoneEvent.listen(async (e) => {
-      if (e.payload.request_id < currentRequest.value) return;
+    await events.assistantDeltaEvent.listen((e) => {
+      if (e.payload.request_id !== currentRequest.value) return; // 旧请求丢弃
+      pendingDelta += e.payload.text_delta;
+    }),
+    await events.assistantDoneEvent.listen((e) => {
+      if (e.payload.request_id !== currentRequest.value) return;
       flushDelta();
       answer.value = e.payload.full_text;
-      answerKind.value = e.payload.kind;
-      answerDone.value = true;
       streaming.value = false;
-      await syncWindowSize();
-      // F-3a：改写型 + 自动替换设置 → 直接替换选区
-      if (e.payload.kind === "rewrite" && selection.value) {
-        const settings = await commands.getSettings();
-        if (settings.assistant.disposition === "auto_replace") {
-          await doAction("replace");
-        }
-      }
+      syncWindowSize();
     }),
     await events.assistantErrorEvent.listen((e) => {
+      if (e.payload.request_id !== currentRequest.value) return;
       streaming.value = false;
       errorText.value = e.payload.error.message;
       syncWindowSize();
@@ -79,17 +69,11 @@ onMounted(async () => {
     resizeObserver.observe(panelEl.value);
   }
 
-  // 失焦自动隐藏（05 §4.1；📌 固定时不隐藏）
+  // 焦点切换到其他应用 → 自动关闭（05 §4.1，无固定选项）
   const win = getCurrentWindow();
   unlisteners.push(
-    await win.onFocusChanged(async ({ payload: focused }) => {
-      if (focused) {
-        selection.value = await commands.readSelectionContext();
-        await syncWindowSize(true);
-        await focusInput();
-      } else if (!pinned.value) {
-        win.hide();
-      }
+    await win.onFocusChanged(({ payload: focused }) => {
+      if (!focused) close();
     }),
   );
 });
@@ -109,40 +93,14 @@ function flushDelta() {
   }
 }
 
-async function submit() {
-  const text = input.value.trim();
-  if (!text || streaming.value) return;
-  // 单轮语义：新提问清空上一条（05 §4.3）
-  answer.value = "";
-  answerDone.value = false;
-  answerKind.value = null;
-  errorText.value = "";
-  replaced.value = false;
-  input.value = "";
-  await syncWindowSize();
-  const r = await commands.askAssistant(text, selection.value !== null);
-  if (r.status === "error") errorText.value = r.error.message;
-}
-
-async function doAction(action: "replace" | "insert" | "copy") {
-  await commands.assistantAction(action, answer.value);
-  if (action === "replace") {
-    replaced.value = true;
-    if (!pinned.value) setTimeout(() => getCurrentWindow().hide(), 800);
-  }
-}
-
-function removeSelection() {
-  selection.value = null;
-  commands.clearSelectionContext();
-  syncWindowSize();
-  focusInput();
+function close() {
+  getCurrentWindow().hide();
 }
 
 async function syncWindowSize(force = false) {
   await nextTick();
   const panelRect = panelEl.value?.getBoundingClientRect();
-  const height = panelRect ? Math.ceil(panelRect.height) : 136;
+  const height = panelRect ? Math.ceil(panelRect.height) : 96;
   if (!force && Math.abs(height - lastWindowHeight) < 2) return;
   lastWindowHeight = height;
   try {
@@ -152,84 +110,30 @@ async function syncWindowSize(force = false) {
   }
 }
 
-async function focusInput() {
-  await nextTick();
-  inputEl.value?.focus();
-}
-
 function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") {
-    getCurrentWindow().hide();
-  } else if (e.key === "Enter" && !e.isComposing) {
-    if (document.activeElement?.tagName === "INPUT") {
-      submit();
-    } else if (answerDone.value) {
-      // ⏎ 主动作：有选区=替换，无=复制（05 §4.3）
-      doAction(selection.value && answerKind.value === "rewrite" ? "replace" : "copy");
-    }
-  }
+  if (e.key === "Escape") close();
 }
 </script>
 
 <template>
   <div class="panel-wrap">
     <div ref="panelEl" class="panel" data-tauri-drag-region>
-      <!-- 上下文芯片 -->
-      <div v-if="selection" class="chip-row">
-        <span class="chip">
-          ⌗ 选中内容 · {{ selectionChars }} 字
-          <button
-            class="x"
-            title="移除上下文"
-            tabindex="-1"
-            @mousedown.prevent
-            @click="removeSelection"
-          >
-            ✕
-          </button>
-        </span>
+      <!-- 指令回显行 + 关闭按钮 -->
+      <div class="ask-row">
+        <span class="ask">🎤 {{ instruction }}</span>
+        <button class="x" title="关闭" @click="close">✕</button>
+      </div>
+      <div v-if="selectionChars !== null" class="chip-row">
+        <span class="chip">⌗ 选中内容 · {{ selectionChars }} 字</span>
       </div>
 
-      <!-- 输入行 -->
-      <div class="in-row" :class="{ bordered: answer || errorText }">
-        <input
-          ref="inputEl"
-          v-model="input"
-          class="input"
-          placeholder="按住 右⌥ 说话，或输入问题…"
-          autofocus
-          @keydown.enter="submit"
-        />
-        <button class="mic" title="按住全局助手键语音输入">🎙</button>
-      </div>
-
-      <!-- 回答区（流式 Markdown） -->
+      <!-- 回答区（流式 Markdown，文本可选中复制） -->
       <div v-if="answer || streaming" class="ans">
         <div class="bubble md" v-html="rendered" />
         <p v-if="streaming" class="streaming-hint">…</p>
       </div>
       <div v-if="errorText" class="ans">
         <p class="err">⚠ {{ errorText }}</p>
-      </div>
-
-      <!-- 动作行 -->
-      <div v-if="answerDone" class="act">
-        <template v-if="replaced">
-          <span class="ok">✓ 已替换</span>
-        </template>
-        <template v-else>
-          <Button
-            v-if="selection && answerKind === 'rewrite'"
-            variant="primary"
-            @click="doAction('replace')"
-            >替换选区 ⏎</Button
-          >
-          <Button @click="doAction('insert')">插入到光标</Button>
-          <Button variant="ghost" @click="doAction('copy')">复制</Button>
-        </template>
-        <button class="pin" :class="{ on: pinned }" title="固定面板" @click="pinned = !pinned">
-          📌
-        </button>
       </div>
     </div>
   </div>
@@ -245,7 +149,7 @@ function onKey(e: KeyboardEvent) {
   justify-content: center;
   background: transparent;
 }
-/* 面板：圆角 16 + 毛玻璃 + shadow（05 §4.1） */
+/* 面板：圆角 16 + 毛玻璃 + 边框，禁系统阴影（05 §4.1） */
 .panel {
   box-sizing: border-box;
   width: 100vw;
@@ -262,10 +166,37 @@ function onKey(e: KeyboardEvent) {
     background: color-mix(in srgb, var(--surface) 98%, transparent);
   }
 }
+.ask-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px 0;
+}
+.ask {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  user-select: text;
+}
+.x {
+  flex-shrink: 0;
+  color: var(--text-3);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+.x:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .chip-row {
   display: flex;
   align-items: center;
-  padding: 10px 14px 0;
+  padding: 8px 14px 0;
 }
 .chip {
   display: inline-flex;
@@ -278,48 +209,8 @@ function onKey(e: KeyboardEvent) {
   border-radius: 99px;
   padding: 3px 10px;
 }
-.chip .x {
-  color: var(--text-3);
-  cursor: pointer;
-  background: none;
-  border: none;
-  font-size: 11px;
-  padding: 0;
-}
-.in-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 14px 12px;
-}
-.in-row.bordered {
-  border-bottom: 1px solid var(--border);
-}
-.input {
-  flex: 1;
-  height: 32px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-1);
-  padding: 0 10px;
-  font-size: 13px;
-  font-family: inherit;
-}
-.input::placeholder {
-  color: var(--text-3);
-}
-.mic {
-  height: 32px;
-  width: 36px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--border-2);
-  background: transparent;
-  cursor: default;
-  font-size: 14px;
-}
 .ans {
-  padding: 14px;
+  padding: 12px 14px 14px;
   font-size: 13px;
   line-height: 1.6;
   max-height: 320px;
@@ -329,6 +220,7 @@ function onKey(e: KeyboardEvent) {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
+  user-select: text;
 }
 .md :deep(p) {
   margin: 0 0 8px;
@@ -369,27 +261,5 @@ function onKey(e: KeyboardEvent) {
 .err {
   color: var(--error);
   font-size: 12.5px;
-}
-.act {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 12px 14px;
-  border-top: 1px solid var(--border);
-}
-.ok {
-  color: var(--success);
-  font-size: 13px;
-}
-.pin {
-  margin-left: auto;
-  background: none;
-  border: none;
-  cursor: pointer;
-  opacity: 0.4;
-  font-size: 13px;
-}
-.pin.on {
-  opacity: 1;
 }
 </style>

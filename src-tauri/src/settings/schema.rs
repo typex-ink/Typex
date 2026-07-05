@@ -174,20 +174,9 @@ impl Default for TranslationSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum RewriteDisposition {
-    /// 改写型结果自动替换选区（默认）
-    #[default]
-    AutoReplace,
-    /// 面板中预览，Enter 替换 / Esc 放弃
-    Preview,
-}
-
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct AssistantSettings {
-    pub disposition: RewriteDisposition,
     /// 自定义处理/问答提示词；空 = 内置模板
     pub process_prompt: String,
     pub ask_prompt: String,

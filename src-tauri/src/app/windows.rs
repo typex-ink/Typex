@@ -1,6 +1,5 @@
 //! 窗口创建/显隐/定位（07 §2）。HUD NSPanel 处理在 CP-1.3。
 
-use crate::app::AssistantSelection;
 use crate::selection::{SelectionBounds, SelectionReader};
 use crate::types::{SessionPhase, SessionSnapshot};
 use std::sync::Arc;
@@ -124,22 +123,20 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 助手面板：560px 浮窗，屏幕上 1/3 居中（05 §4）。CP-3.2 完善失焦隐藏。
-pub fn show_assistant<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+/// 回答弹窗：560px 只读浮窗（05 §4 / ADR-23）。
+/// `has_selection`：有选区时贴选区下方定位；无选区时屏幕上 1/3 居中。
+/// 必须在弹窗获得焦点前读取选区位置，否则焦点已切走、目标应用选区高亮会丢。
+pub fn show_assistant<R: Runtime>(app: &AppHandle<R>, has_selection: bool) -> tauri::Result<()> {
     const ASSISTANT_W: f64 = 560.0;
     const ASSISTANT_COMPACT_H: f64 = 136.0;
 
-    let selection = app.try_state::<Arc<dyn SelectionReader>>();
-    // 必须在助手窗口获得焦点前读取，否则焦点已变成助手输入框，目标应用选区会丢。
-    let selection_bounds = selection
-        .as_ref()
-        .and_then(|selection| selection.read_bounds().ok().flatten());
-    let selection_text = selection
-        .as_ref()
-        .and_then(|selection| selection.read().ok().flatten());
-    if let Some(store) = app.try_state::<AssistantSelection>() {
-        *store.0.lock().unwrap() = selection_text;
-    }
+    let selection_bounds = if has_selection {
+        app.try_state::<Arc<dyn SelectionReader>>()
+            .as_ref()
+            .and_then(|selection| selection.read_bounds().ok().flatten())
+    } else {
+        None
+    };
     if let Some(w) = app.get_webview_window("assistant") {
         let _ = w.set_shadow(false);
         let _ = w.set_resizable(false);
@@ -180,7 +177,7 @@ fn position_assistant<R: Runtime>(
     selection_bounds: Option<SelectionBounds>,
 ) {
     const WINDOW_W: f64 = 560.0;
-    // 初始助手面板是紧凑输入态；原生窗口预留 320px 给回答态，但定位避让按可见面板算。
+    // 初始弹窗是紧凑回显态；原生窗口预留高度给流式回答，定位避让按可见面板算。
     const VISIBLE_PANEL_H: f64 = 128.0;
     const GAP: f64 = 8.0;
     const MARGIN: f64 = 12.0;

@@ -118,7 +118,7 @@ pub enum Event {
     ProcessFailed { session_id: u64, error: TypexError },
     /// 整理层失败但按降级策略直通原文（F-9：绝不阻塞主流程）
     ProcessDegraded { session_id: u64, original: String },
-    /// 助手模式：指令已交给助手面板流式处理，会话就此完成（F-3）
+    /// 助手模式：回答型结果已交给回答弹窗流式展示，会话就此完成（F-3 / ADR-23）
     AssistantHandedOff { session_id: u64 },
     /// 注入完成
     InjectDone { session_id: u64 },
@@ -159,8 +159,6 @@ pub enum Effect {
     ReleaseAudio {
         session_id: u64,
     },
-    /// 呼出助手面板（助手键短按 = 仅呼出面板，05 §7.1）
-    ShowAssistantPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,18 +213,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             Event::TriggerUp { held_ms },
         ) => {
             if !toggled && is_toggle(held_ms, threshold_ms) {
-                if mode == SessionMode::Assistant {
-                    // 助手键短按 = 仅呼出面板，不录音（05 §7.1）
-                    return (
-                        State::Idle,
-                        vec![
-                            E::CancelRecording,
-                            E::ShowAssistantPanel,
-                            E::ReleaseAudio { session_id },
-                        ],
-                    );
-                }
-                // 短按 = toggle 开始：继续录音，等待第二次按键
+                // 短按 = toggle 开始：继续录音，等待第二次按键（三模式一致，含助手，ADR-23）
                 (
                     State::Recording {
                         session_id,
@@ -343,7 +330,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (State::Processing { session_id, .. }, Event::AssistantHandedOff { session_id: sid })
             if sid == session_id =>
         {
-            // F-3：转写完成后指令交给助手面板，主会话即结束（面板独立流式）
+            // F-3：回答型结果交给回答弹窗流式展示，主会话即结束（改写型走 ProcessResult → Inject）
             (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
         }
         (
@@ -625,6 +612,75 @@ mod tests {
         assert_eq!(s.phase(), SessionPhase::Transcribing);
         assert_eq!(s.session_id(), Some(1)); // 沿用原会话，不开新会话
         assert!(fx.contains(&Effect::CallStt { session_id: 1 }));
+    }
+
+    #[test]
+    fn assistant_short_press_enters_toggle_like_dictation() {
+        // ADR-23：助手键短按 = 切换式录音（「仅呼出面板」已废除）
+        let s0 = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            toggled: false,
+        };
+        let (s, fx) = advance(s0, Event::TriggerUp { held_ms: 100 }, T);
+        assert_eq!(
+            s,
+            State::Recording {
+                session_id: 1,
+                mode: SessionMode::Assistant,
+                toggled: true
+            }
+        );
+        assert!(!fx.contains(&Effect::CancelRecording));
+    }
+
+    // ── 助手分流（08 §3.1 / ADR-23）──
+
+    #[test]
+    fn assistant_handed_off_ends_session_and_releases_audio() {
+        let p = State::Processing {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            transcript: "总结一下".into(),
+        };
+        let (s, fx) = advance(p, Event::AssistantHandedOff { session_id: 1 }, T);
+        assert_eq!(s, State::Idle);
+        assert!(fx.contains(&Effect::ReleaseAudio { session_id: 1 }));
+    }
+
+    #[test]
+    fn stale_assistant_handed_off_is_dropped() {
+        let p = State::Processing {
+            session_id: 2,
+            mode: SessionMode::Assistant,
+            transcript: "x".into(),
+        };
+        let (s, fx) = advance(p.clone(), Event::AssistantHandedOff { session_id: 1 }, T);
+        assert_eq!(s, p);
+        assert!(fx.is_empty());
+    }
+
+    #[test]
+    fn assistant_rewrite_result_goes_to_inject() {
+        // 改写型：ProcessResult → Injecting（直接替换选区，不弹窗）
+        let p = State::Processing {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            transcript: "改正式一点".into(),
+        };
+        let (s, fx) = advance(
+            p,
+            Event::ProcessResult {
+                session_id: 1,
+                text: "改写后的正式文本。".into(),
+            },
+            T,
+        );
+        assert_eq!(s.phase(), SessionPhase::Injecting);
+        assert!(fx.contains(&Effect::Inject {
+            session_id: 1,
+            text: "改写后的正式文本。".into()
+        }));
     }
 
     // ── 组合键（场景 2）──
