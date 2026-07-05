@@ -1,7 +1,9 @@
 //! 文本注入：trait Injector + 后备链（07 §7.5）。
 pub mod paste;
+pub mod type_direct;
 
 use crate::error::Result;
+use crate::settings::schema::InjectMethod;
 
 pub trait Injector: Send + Sync {
     /// 把文本注入当前焦点位置。
@@ -19,14 +21,36 @@ impl InjectorChain {
         Self { backends }
     }
 
-    /// 平台默认链（07 §7.5）。
+    /// 平台默认链（07 §7.5）：paste 主路径 + type_direct 后备。
     pub fn platform_default(paste_delay_ms: u64) -> Self {
-        Self::new(vec![Box::new(paste::PasteInjector::new(paste_delay_ms))])
+        Self::new(vec![
+            Box::new(paste::PasteInjector::new(paste_delay_ms)),
+            Box::new(type_direct::TypeDirectInjector),
+        ])
     }
 
     pub fn inject(&self, text: &str) -> Result<()> {
+        self.inject_ordered(text, None)
+    }
+
+    /// 按设置选首选后端（CP-6.7）：首选排最前，其余保持默认序作后备。
+    pub fn inject_with(&self, text: &str, method: InjectMethod) -> Result<()> {
+        let preferred = match method {
+            InjectMethod::Auto => None,
+            InjectMethod::Paste => Some("paste"),
+            InjectMethod::TypeDirect => Some("type_direct"),
+        };
+        self.inject_ordered(text, preferred)
+    }
+
+    fn inject_ordered(&self, text: &str, preferred: Option<&str>) -> Result<()> {
         let mut last_err = None;
-        for backend in &self.backends {
+        let ordered = self
+            .backends
+            .iter()
+            .filter(|b| Some(b.name()) == preferred)
+            .chain(self.backends.iter().filter(|b| Some(b.name()) != preferred));
+        for backend in ordered {
             match backend.inject(text) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
@@ -68,6 +92,27 @@ mod tests {
         }
         fn name(&self) -> &'static str {
             "mock"
+        }
+    }
+
+    /// 具名 mock：验证 inject_with 的首选排序（CP-6.7）。
+    struct NamedInjector {
+        name: &'static str,
+        fail: bool,
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Injector for NamedInjector {
+        fn inject(&self, _text: &str) -> Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                Err(TypexError::new(ErrorCode::Internal, "mock fail"))
+            } else {
+                Ok(())
+            }
+        }
+        fn name(&self) -> &'static str {
+            self.name
         }
     }
 
@@ -117,5 +162,68 @@ mod tests {
             calls: c.clone(),
         })]);
         assert!(chain.inject("hi").is_err());
+    }
+
+    #[test]
+    fn inject_with_prefers_selected_backend() {
+        let paste = Arc::new(AtomicU32::new(0));
+        let typed = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![
+            Box::new(NamedInjector {
+                name: "paste",
+                fail: false,
+                calls: paste.clone(),
+            }),
+            Box::new(NamedInjector {
+                name: "type_direct",
+                fail: false,
+                calls: typed.clone(),
+            }),
+        ]);
+        chain.inject_with("hi", InjectMethod::TypeDirect).unwrap();
+        assert_eq!(typed.load(Ordering::SeqCst), 1);
+        assert_eq!(paste.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn inject_with_falls_back_when_preferred_fails() {
+        let paste = Arc::new(AtomicU32::new(0));
+        let typed = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![
+            Box::new(NamedInjector {
+                name: "paste",
+                fail: false,
+                calls: paste.clone(),
+            }),
+            Box::new(NamedInjector {
+                name: "type_direct",
+                fail: true,
+                calls: typed.clone(),
+            }),
+        ]);
+        chain.inject_with("hi", InjectMethod::TypeDirect).unwrap();
+        assert_eq!(typed.load(Ordering::SeqCst), 1);
+        assert_eq!(paste.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn inject_with_auto_keeps_default_order() {
+        let paste = Arc::new(AtomicU32::new(0));
+        let typed = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![
+            Box::new(NamedInjector {
+                name: "paste",
+                fail: false,
+                calls: paste.clone(),
+            }),
+            Box::new(NamedInjector {
+                name: "type_direct",
+                fail: false,
+                calls: typed.clone(),
+            }),
+        ]);
+        chain.inject_with("hi", InjectMethod::Auto).unwrap();
+        assert_eq!(paste.load(Ordering::SeqCst), 1);
+        assert_eq!(typed.load(Ordering::SeqCst), 0);
     }
 }

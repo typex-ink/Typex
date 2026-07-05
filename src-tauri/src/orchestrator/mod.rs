@@ -344,10 +344,11 @@ impl Orchestrator {
             Effect::Inject { session_id, text } => {
                 let injector = self.injector.clone();
                 let tx = exec.tx.clone();
+                let method = self.settings.get().dictation.inject_method;
                 *self.last_result.lock().unwrap() = Some(text.clone());
                 // enigo/剪贴板是阻塞调用 → blocking 线程
                 tokio::task::spawn_blocking(move || {
-                    let event = match injector.inject(&text) {
+                    let event = match injector.inject_with(&text, method) {
                         Ok(()) => Event::InjectDone { session_id },
                         Err(e) => Event::InjectFailed {
                             session_id,

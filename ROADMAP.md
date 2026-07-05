@@ -151,7 +151,7 @@
 
 **P1 缺口（可延 v1.x）**
 
-- [ ] **CP-6.7 逐字输入注入后端**（07 §7.5 备选 type_direct）
+- [x] **CP-6.7 逐字输入注入后端**（2026-07-06：TypeDirectInjector（enigo text()）· 默认链 paste→type_direct 双后端 · inject_with 按 dictation.inject_method 首选排序（Auto=默认序，失败自动落到后备）· 排序/回退/Auto 三条具名单测）
   设置里已有「逐字输入」选项但无对应后端（仅 paste）；enigo text() 实现 + 后备链接入。
 - [ ] **CP-6.8 目标应用识别**（02 F-7 历史字段 / F-11 预留）
   `platform/focus.rs`（NSWorkspace frontmostApplication）；历史记录 app_name 当前恒为空；HUD NoFocus 检测同源。
