@@ -181,6 +181,7 @@ impl Orchestrator {
                 if exec.state.mode() == Some(SessionMode::Assistant) {
                     let selection = self.selection.clone();
                     let pending = self.pending_selection.clone();
+                    *pending.lock().unwrap() = None;
                     tokio::task::spawn_blocking(move || {
                         let result = selection.read().ok().flatten();
                         *pending.lock().unwrap() = result;

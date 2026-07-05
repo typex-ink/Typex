@@ -49,7 +49,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 窗口 | 生命周期 | 特性 |
 |---|---|---|
 | **HUD** | 常驻（隐藏/显示切换，避免创建延迟） | 无边框、透明、置顶、**不可获得焦点**（macOS 必须用 NSPanel/nonactivating，否则注入目标失焦——经 `tauri-nspanel`）、忽略鼠标事件（除按钮区） |
-| **助手面板** | 按需显示，关闭即隐藏 | 无边框、置顶、可获得焦点、失焦自动隐藏（可 pin） |
+| **助手面板** | 按需显示，关闭即隐藏 | 无边框、透明、禁用原生窗口阴影、不可手动调整大小、原生窗口高度跟随内容、置顶、可获得焦点、优先贴近选区下方、失焦自动隐藏（可 pin） |
 | **设置** | 按需创建 | 常规窗口 720×520 |
 | **引导** | 首次启动 | 常规窗口 |
 | **主页** | 按需 | 常规窗口 880×560：侧边栏导航（首页/历史记录）+ 内容区（统计、最近记录、历史列表） |
@@ -295,7 +295,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 ### 7.6 读取选中文本（Selection 降级链）
 
-1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + 模拟 Cmd+C + 读剪贴板 + 恢复（get-selected-text 现成实现）。
+1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + CGEvent Cmd+C + 读剪贴板 + 恢复（禁止通过 enigo/rdev 查询输入法布局，避免 HIToolbox 主队列断言）；定位用 `AXSelectedTextRange` + `AXBoundsForRange`，不可得时回退居中。
 2. Windows：UIA `TextPattern.GetSelection()` → 失败：Ctrl+C 降级。
 3. Linux：X11 primary selection 直读；Wayland 下 primary selection 可用则用，否则明确降级提示。
 4. 降级链每步有 300 ms 超时；剪贴板法须处理「无选中时复制整行」的误触（对比复制前后剪贴板内容 + 长度启发式）。

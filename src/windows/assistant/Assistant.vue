@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // 助手面板（05 §4 / mockup §5）：560px 浮窗、上下文芯片、流式 Markdown、动作行
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import Button from "@/components/Button.vue";
 import { commands, events, type AnswerKind } from "@/ipc/bindings";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // LLM 输出视为不可信内容：禁 raw HTML（07 §11）
@@ -17,6 +18,8 @@ const errorText = ref("");
 const streaming = ref(false);
 const pinned = ref(false);
 const selection = ref<string | null>(null);
+const inputEl = ref<HTMLInputElement | null>(null);
+const panelEl = ref<HTMLElement | null>(null);
 const currentRequest = ref(0);
 const replaced = ref(false);
 
@@ -27,12 +30,16 @@ const rendered = computed(() => md.render(answer.value));
 // 流式渲染 30fps 节流（05 §4.3）
 let pendingDelta = "";
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+let resizeObserver: ResizeObserver | null = null;
+let lastWindowHeight = 0;
 
 const unlisteners: (() => void)[] = [];
 
 onMounted(async () => {
   // 呼出时读取选中文本作为上下文（F-3b）
   selection.value = await commands.readSelectionContext();
+  await syncWindowSize(true);
+  await focusInput();
 
   unlisteners.push(
     await events.assistantDeltaEvent.listen((e) => {
@@ -40,6 +47,7 @@ onMounted(async () => {
       currentRequest.value = e.payload.request_id;
       streaming.value = true;
       pendingDelta += e.payload.text_delta;
+      syncWindowSize();
     }),
     await events.assistantDoneEvent.listen(async (e) => {
       if (e.payload.request_id < currentRequest.value) return;
@@ -48,6 +56,7 @@ onMounted(async () => {
       answerKind.value = e.payload.kind;
       answerDone.value = true;
       streaming.value = false;
+      await syncWindowSize();
       // F-3a：改写型 + 自动替换设置 → 直接替换选区
       if (e.payload.kind === "rewrite" && selection.value) {
         const settings = await commands.getSettings();
@@ -59,23 +68,35 @@ onMounted(async () => {
     await events.assistantErrorEvent.listen((e) => {
       streaming.value = false;
       errorText.value = e.payload.error.message;
+      syncWindowSize();
     }),
   );
 
   flushTimer = setInterval(flushDelta, 33);
   window.addEventListener("keydown", onKey);
+  if (panelEl.value) {
+    resizeObserver = new ResizeObserver(() => syncWindowSize());
+    resizeObserver.observe(panelEl.value);
+  }
 
   // 失焦自动隐藏（05 §4.1；📌 固定时不隐藏）
   const win = getCurrentWindow();
   unlisteners.push(
-    await win.onFocusChanged(({ payload: focused }) => {
-      if (!focused && !pinned.value) win.hide();
+    await win.onFocusChanged(async ({ payload: focused }) => {
+      if (focused) {
+        selection.value = await commands.readSelectionContext();
+        await syncWindowSize(true);
+        await focusInput();
+      } else if (!pinned.value) {
+        win.hide();
+      }
     }),
   );
 });
 
 onUnmounted(() => {
   unlisteners.forEach((u) => u());
+  resizeObserver?.disconnect();
   if (flushTimer) clearInterval(flushTimer);
   window.removeEventListener("keydown", onKey);
 });
@@ -84,6 +105,7 @@ function flushDelta() {
   if (pendingDelta) {
     answer.value += pendingDelta;
     pendingDelta = "";
+    syncWindowSize();
   }
 }
 
@@ -97,6 +119,7 @@ async function submit() {
   errorText.value = "";
   replaced.value = false;
   input.value = "";
+  await syncWindowSize();
   const r = await commands.askAssistant(text, selection.value !== null);
   if (r.status === "error") errorText.value = r.error.message;
 }
@@ -112,6 +135,26 @@ async function doAction(action: "replace" | "insert" | "copy") {
 function removeSelection() {
   selection.value = null;
   commands.clearSelectionContext();
+  syncWindowSize();
+  focusInput();
+}
+
+async function syncWindowSize(force = false) {
+  await nextTick();
+  const panelRect = panelEl.value?.getBoundingClientRect();
+  const height = panelRect ? Math.ceil(panelRect.height) : 136;
+  if (!force && Math.abs(height - lastWindowHeight) < 2) return;
+  lastWindowHeight = height;
+  try {
+    await getCurrentWindow().setSize(new LogicalSize(560, height));
+  } catch {
+    // 窗口隐藏/销毁过程中可能拒绝 resize；下一次显示会重新同步。
+  }
+}
+
+async function focusInput() {
+  await nextTick();
+  inputEl.value?.focus();
 }
 
 function onKey(e: KeyboardEvent) {
@@ -130,18 +173,27 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <div class="panel-wrap">
-    <div class="panel" data-tauri-drag-region>
+    <div ref="panelEl" class="panel" data-tauri-drag-region>
       <!-- 上下文芯片 -->
       <div v-if="selection" class="chip-row">
         <span class="chip">
           ⌗ 选中内容 · {{ selectionChars }} 字
-          <button class="x" title="移除上下文" @click="removeSelection">✕</button>
+          <button
+            class="x"
+            title="移除上下文"
+            tabindex="-1"
+            @mousedown.prevent
+            @click="removeSelection"
+          >
+            ✕
+          </button>
         </span>
       </div>
 
       <!-- 输入行 -->
       <div class="in-row" :class="{ bordered: answer || errorText }">
         <input
+          ref="inputEl"
           v-model="input"
           class="input"
           placeholder="按住 右⌥ 说话，或输入问题…"
@@ -186,22 +238,23 @@ function onKey(e: KeyboardEvent) {
 <style scoped>
 .panel-wrap {
   width: 100vw;
-  height: 100vh;
+  min-height: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   background: transparent;
-  padding-top: 4px;
 }
 /* 面板：圆角 16 + 毛玻璃 + shadow（05 §4.1） */
 .panel {
-  width: 552px;
+  box-sizing: border-box;
+  width: 100vw;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-float);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   overflow: hidden;
 }
 @supports not (backdrop-filter: blur(20px)) {

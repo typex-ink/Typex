@@ -175,8 +175,8 @@ mod tests {
     fn cfg() -> HotkeyConfig {
         HotkeyConfig {
             dictation: vec!["MetaRight".into()],
-            assistant: vec!["AltRight".into()],
-            translation: vec!["MetaRight".into(), "AltRight".into()],
+            assistant: vec!["AltGr".into()],
+            translation: vec!["MetaRight".into(), "AltGr".into()],
         }
     }
 
@@ -219,7 +219,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            d.on_key("AltRight", true, 120),
+            d.on_key("AltGr", true, 120),
             vec![HotkeyEvent::ModeUpgraded {
                 mode: SessionMode::Translation
             }]
@@ -227,7 +227,7 @@ mod tests {
         // 先松一个不产生事件，全松才 Up
         assert_eq!(d.on_key("MetaRight", false, 900), vec![]);
         assert_eq!(
-            d.on_key("AltRight", false, 950),
+            d.on_key("AltGr", false, 950),
             vec![HotkeyEvent::TriggerUp { held_ms: 950 }]
         );
     }
@@ -236,7 +236,7 @@ mod tests {
     fn combo_order_does_not_matter() {
         let mut d = det();
         assert_eq!(
-            d.on_key("AltRight", true, 0),
+            d.on_key("AltGr", true, 0),
             vec![HotkeyEvent::TriggerDown {
                 mode: SessionMode::Assistant
             }]
@@ -276,17 +276,17 @@ mod tests {
 
     #[test]
     fn altgr_sequence_not_mistaken_for_translation() {
-        // Windows AltGr = ControlLeft + AltRight 连发；ControlLeft 非触发键。
+        // Windows AltGr = ControlLeft + AltGr 连发；ControlLeft 非触发键。
         let mut d = HotkeyDetector::new(HotkeyConfig {
             dictation: vec!["ControlRight".into()],
-            assistant: vec!["AltRight".into()],
-            translation: vec!["ControlRight".into(), "AltRight".into()],
+            assistant: vec!["AltGr".into()],
+            translation: vec!["ControlRight".into(), "AltGr".into()],
         });
         // ControlLeft down：无触发键按住 → 无事件
         assert_eq!(d.on_key("ControlLeft", true, 0), vec![]);
-        // AltRight down → 助手乐观启动（正常）
+        // AltGr down → 助手乐观启动（正常）
         assert_eq!(
-            d.on_key("AltRight", true, 1),
+            d.on_key("AltGr", true, 1),
             vec![HotkeyEvent::TriggerDown {
                 mode: SessionMode::Assistant
             }]
@@ -294,7 +294,7 @@ mod tests {
         // 用户接着打字母（AltGr+E 输特殊字符）→ 让路
         assert_eq!(d.on_key("KeyE", true, 60), vec![HotkeyEvent::Yielded]);
         assert_eq!(d.on_key("KeyE", false, 90), vec![]);
-        assert_eq!(d.on_key("AltRight", false, 120), vec![]);
+        assert_eq!(d.on_key("AltGr", false, 120), vec![]);
         assert_eq!(d.on_key("ControlLeft", false, 121), vec![]);
     }
 

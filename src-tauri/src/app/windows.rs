@@ -1,6 +1,9 @@
 //! 窗口创建/显隐/定位（07 §2）。HUD NSPanel 处理在 CP-1.3。
 
+use crate::app::AssistantSelection;
+use crate::selection::{SelectionBounds, SelectionReader};
 use crate::types::{SessionPhase, SessionSnapshot};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
@@ -123,25 +126,136 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 /// 助手面板：560px 浮窗，屏幕上 1/3 居中（05 §4）。CP-3.2 完善失焦隐藏。
 pub fn show_assistant<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    const ASSISTANT_W: f64 = 560.0;
+    const ASSISTANT_COMPACT_H: f64 = 136.0;
+
+    let selection = app.try_state::<Arc<dyn SelectionReader>>();
+    // 必须在助手窗口获得焦点前读取，否则焦点已变成助手输入框，目标应用选区会丢。
+    let selection_bounds = selection
+        .as_ref()
+        .and_then(|selection| selection.read_bounds().ok().flatten());
+    let selection_text = selection
+        .as_ref()
+        .and_then(|selection| selection.read().ok().flatten());
+    if let Some(store) = app.try_state::<AssistantSelection>() {
+        *store.0.lock().unwrap() = selection_text;
+    }
     if let Some(w) = app.get_webview_window("assistant") {
+        let _ = w.set_shadow(false);
+        let _ = w.set_resizable(false);
+        let was_visible = w.is_visible().unwrap_or(false);
+        if was_visible {
+            let _ = w.hide();
+        }
+        let _ = w.set_size(tauri::LogicalSize::new(ASSISTANT_W, ASSISTANT_COMPACT_H));
+        position_assistant(app, &w, selection_bounds);
         w.show()?;
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(
+    let w = WebviewWindowBuilder::new(
         app,
         "assistant",
         WebviewUrl::App("src/windows/assistant/index.html".into()),
     )
     .title("Typex 助手")
-    .inner_size(560.0, 320.0)
+    .inner_size(ASSISTANT_W, ASSISTANT_COMPACT_H)
     .decorations(false)
     .transparent(true)
+    .shadow(false)
+    .resizable(false)
     .always_on_top(true)
     .skip_taskbar(true)
-    .center()
+    .visible(false)
     .build()?;
+    position_assistant(app, &w, selection_bounds);
+    w.show()?;
+    w.set_focus()?;
     Ok(())
+}
+
+fn position_assistant<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+    selection_bounds: Option<SelectionBounds>,
+) {
+    const WINDOW_W: f64 = 560.0;
+    // 初始助手面板是紧凑输入态；原生窗口预留 320px 给回答态，但定位避让按可见面板算。
+    const VISIBLE_PANEL_H: f64 = 128.0;
+    const GAP: f64 = 8.0;
+    const MARGIN: f64 = 12.0;
+
+    let Some(bounds) = selection_bounds else {
+        position_assistant_fallback(app, assistant);
+        return;
+    };
+    let Ok(monitors) = app.available_monitors() else {
+        position_assistant_fallback(app, assistant);
+        return;
+    };
+    let center_x = bounds.x + bounds.width / 2.0;
+    let center_y = bounds.y + bounds.height / 2.0;
+    let Some(monitor) = monitors.iter().find(|m| {
+        let scale = m.scale_factor();
+        let pos = m.position();
+        let size = m.size();
+        let x = center_x * scale;
+        let y = center_y * scale;
+        x >= pos.x as f64
+            && x <= (pos.x + size.width as i32) as f64
+            && y >= pos.y as f64
+            && y <= (pos.y + size.height as i32) as f64
+    }) else {
+        position_assistant_fallback(app, assistant);
+        return;
+    };
+
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let left = work.position.x as f64 / scale;
+    let top = work.position.y as f64 / scale;
+    let right = left + work.size.width as f64 / scale;
+    let bottom = top + work.size.height as f64 / scale;
+    let min_x = left + MARGIN;
+    let max_x = right - WINDOW_W - MARGIN;
+    let min_y = top + MARGIN;
+    let max_y = bottom - VISIBLE_PANEL_H - MARGIN;
+
+    let x = (center_x - WINDOW_W / 2.0).clamp(min_x, max_x.max(min_x));
+    let below_y = bounds.y + bounds.height + GAP;
+    let above_y = bounds.y - VISIBLE_PANEL_H - GAP;
+    let y = if below_y <= max_y {
+        below_y
+    } else if above_y >= min_y {
+        above_y
+    } else {
+        below_y.clamp(min_y, max_y.max(min_y))
+    };
+
+    let _ = assistant.set_position(tauri::LogicalPosition::new(x, y));
+}
+
+fn position_assistant_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+) {
+    const WINDOW_W: f64 = 560.0;
+    const WINDOW_H: f64 = 136.0;
+    let monitor = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.available_monitors().ok().and_then(|mut m| m.pop()));
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let pos = monitor.position();
+        let size = monitor.size();
+        let x = pos.x as f64 / scale + (size.width as f64 / scale - WINDOW_W) / 2.0;
+        let y = pos.y as f64 / scale + (size.height as f64 / scale - WINDOW_H) / 3.0;
+        let _ = assistant.set_position(tauri::LogicalPosition::new(x, y));
+    } else {
+        let _ = assistant.center();
+    }
 }
 
 /// 首次启动引导：640×480，5 步向导（05 §6）。
@@ -161,7 +275,9 @@ pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     .resizable(false)
     .center();
     #[cfg(target_os = "macos")]
-    let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
     builder.build()?;
     Ok(())
 }

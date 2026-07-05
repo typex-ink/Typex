@@ -188,6 +188,9 @@ pub fn read_selection_context(
     selection: State<'_, Arc<dyn crate::selection::SelectionReader>>,
     selection_store: State<'_, crate::app::AssistantSelection>,
 ) -> Option<String> {
+    if let Some(text) = selection_store.0.lock().unwrap().clone() {
+        return Some(text);
+    }
     let result = selection.read().ok().flatten();
     *selection_store.0.lock().unwrap() = result.clone();
     result

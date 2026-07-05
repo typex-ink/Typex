@@ -4,7 +4,6 @@
 
 use super::Injector;
 use crate::error::{ErrorCode, Result, TypexError};
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::time::Duration;
 
 pub struct PasteInjector {
@@ -30,28 +29,31 @@ impl Injector for PasteInjector {
             .set_text(text)
             .map_err(|e| TypexError::new(ErrorCode::Internal, format!("写剪贴板失败: {e}")))?;
 
-        // 3. 模拟粘贴组合键
-        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {
-            TypexError::new(
-                ErrorCode::PermissionMissing,
-                format!("enigo 初始化失败（缺辅助功能权限？）: {e}"),
-            )
-        })?;
-        #[cfg(target_os = "macos")]
-        let modifier = Key::Meta;
-        #[cfg(not(target_os = "macos"))]
-        let modifier = Key::Control;
-
         // 写剪贴板到目标应用可读之间需要短暂延迟（平台坑 7.2-4）
         std::thread::sleep(Duration::from_millis(self.paste_delay_ms.max(10)));
 
-        enigo
-            .key(modifier, Direction::Press)
-            .and_then(|_| enigo.key(Key::Unicode('v'), Direction::Click))
-            .and_then(|_| enigo.key(modifier, Direction::Release))
-            .map_err(|e| {
-                TypexError::new(ErrorCode::PermissionMissing, format!("模拟按键失败: {e}"))
+        // 3. 模拟粘贴组合键
+        #[cfg(target_os = "macos")]
+        {
+            crate::platform::macos::post_command_shortcut(crate::platform::macos::KEY_CODE_V)?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+            let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {
+                TypexError::new(
+                    ErrorCode::PermissionMissing,
+                    format!("enigo 初始化失败（缺辅助功能权限？）: {e}"),
+                )
             })?;
+            enigo
+                .key(Key::Control, Direction::Press)
+                .and_then(|_| enigo.key(Key::Unicode('v'), Direction::Click))
+                .and_then(|_| enigo.key(Key::Control, Direction::Release))
+                .map_err(|e| {
+                    TypexError::new(ErrorCode::PermissionMissing, format!("模拟按键失败: {e}"))
+                })?;
+        }
 
         // 4. 等待目标应用读取后恢复剪贴板
         std::thread::sleep(Duration::from_millis(200));
