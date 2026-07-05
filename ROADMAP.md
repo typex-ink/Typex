@@ -196,11 +196,11 @@
   llama.cpp + Qwen3.5 0.8B/2B/4B Q4_K_M instruct；实现同一 `LlmProvider` trait（流式 delta 与云端一致）；运行时策略可选：常驻内存 / 录音时预热（冷加载 1–3s）；上下文 4K；**槽位限制：只允许绑定整理与翻译槽，问答槽默认不提供**（性能档设备允许设置中手动指向 4B，ADR-22）。
 - [x] **CP-8.6 零配置兜底 + 槽位混搭**（2026-07-06：ProviderKind 增 Local · registry `profile_for_slot` 未配置时合成本地档案（清单序取已下载最轻模型；Assistant 槽显式无兜底，具名单测×2）· build_stt/build_llm Local 分支按清单条目选引擎（sherpa/llama mtmd/llama LLM）· runner 注入 app_data_dir；本地与云端天然槽位级混搭（各槽独立 active_profile））
   STT/整理/翻译三槽在未配置任何档案时默认指向 local 档案（模型已下载前提）；本地与云端槽位级自由混搭；问答槽无兜底，未配置时助手面板显示配置引导。
-- [ ] **CP-8.7 设置 UI：本地 Provider 卡片 + 已下载模型管理**（05 §5.1 / mockup 2.7/2.9）
+- [x] **CP-8.7 设置 UI：本地 Provider 卡片 + 已下载模型管理**（2026-07-06：IPC commands ×5（list_local_models/get_hardware_tier/download_local_model/cancel_local_download/delete_local_model，双 feature 组合均编译，默认构建返回空/NotConfigured）+ `local://download-progress` 事件 · presets 加「本地 · 离线」（问答槽过滤）· ProfileEditor local 编辑态（模型下拉按槽位 purpose 过滤 + 加载策略存 options.load_policy + 行内下载）· ProvidersPage 本地副标题 + 「管理…」→ ModelManager 子页（已下载/可下载/硬件检测/占用合计；下载源切换 UI 因 schema 无字段暂缓）；05 §5.1 / mockup 2.7/2.9）
   预设列表加「本地 · 离线」（问答槽预设列表不出现）；卡片副标题显示引擎与模型状态（已下载·体积 / 未下载[下载] / 下载中进度条）；编辑态字段 = 模型下拉（来自模型库）+ 加载策略，无端点/密钥；「测试」= 本地跑内置样音/ping；「管理…」子页 = 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（行内硬件要求与本机检测结果）+ 占用合计 + 下载源切换。
-- [ ] **CP-8.8 Onboarding 第 3 步「使用本地模型」一键路径**（05 §6 / mockup 步骤 3/3b）
+- [x] **CP-8.8 Onboarding 第 3 步「使用本地模型」一键路径**（2026-07-06：推荐卡显示检测档位 + 档位内两模型合计体积 + 「更改档位 ▾」三档下拉 · 点击串行下载（进度条 = --text-1 实底；可取消/重试；不阻塞余下步骤）· 完成后建 local-<model_id> 档案并 activate STT/整理/翻译三槽（问答槽不指向，ADR-20）；跳过路径不受影响；05 §6 / mockup 步骤 3/3b）
   推荐卡显示检测出的档位与体积（可「更改档位 ▾」）；点击即下载（进度条、可后台继续、完成前可先走完余下步骤）；完成后 STT/整理/翻译三槽指向本地。
-- [ ] **CP-8.9 托盘/主菜单联动 + 回归**
+- [~] **CP-8.9 托盘/主菜单联动 + 回归**（2026-07-06：托盘「模型 ▸」按 profiles 列、local 档案入库自然出现（已验证无 kind 过滤）✓ · README 离线能力说明 ✓ · ⚠ 性能预算复核（整理短句 ≤500ms、常驻内存空闲预算）与 denoise 语料本地评测需真实模型下载 + 实机推理，留 v1.1 发布回归；manifest SHA-256 占位同期补齐）
   托盘「模型 ▸」子菜单含本地档案；性能预算复核（整理短句 ≤500ms、常驻内存模式的空闲内存新预算）；denoise 语料集对本地小模型跑一轮评测报告；README/文档更新离线能力说明。
 
 **v1.1 依赖增量**：`llama-cpp-2`、`sherpa-rs`（或官方 sherpa-onnx crate）、`sysinfo`——全部锁在 `local-models` feature 后；安装包体积增量预算 +30–60 MB（推理引擎静态链接，07 §1）。

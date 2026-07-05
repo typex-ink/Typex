@@ -28,6 +28,33 @@ impl Tier {
             Tier::Performance => "性能",
         }
     }
+
+    /// IPC / 前端使用的稳定 key（i18n 与档位下拉以此为键）。
+    pub fn key(self) -> &'static str {
+        match self {
+            Tier::Lightweight => "light",
+            Tier::Standard => "standard",
+            Tier::Performance => "performance",
+        }
+    }
+
+    /// 档位包含的模型（STT + LLM 各一，ADR-22 分档表）。
+    pub fn model_ids(self) -> [&'static str; 2] {
+        match self {
+            Tier::Lightweight => ["sense-voice-small-int8", "qwen3.5-0.8b-q4"],
+            Tier::Standard => ["qwen3-asr-0.6b-q4", "qwen3.5-2b-q4"],
+            Tier::Performance => ["qwen3-asr-1.7b-q4", "qwen3.5-4b-q4"],
+        }
+    }
+
+    pub const ALL: [Tier; 3] = [Tier::Lightweight, Tier::Standard, Tier::Performance];
+}
+
+/// 模型所属推荐档位（ADR-22 分档表的反查；不在任何档位的条目不存在）。
+pub fn tier_of_model(model_id: &str) -> Option<Tier> {
+    Tier::ALL
+        .into_iter()
+        .find(|t| t.model_ids().contains(&model_id))
 }
 
 /// 探测到的硬件信息。

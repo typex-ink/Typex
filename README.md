@@ -41,6 +41,18 @@ Tauri 2 · Rust（rdev / cpal / enigo / arboard …）· Vue 3 + TypeScript + Ta
 
 设计书（唯一事实来源）位于独立文档仓库；实现进度见 [`ROADMAP.md`](ROADMAP.md)。
 
+## 离线能力（v1.1 预览）
+
+无需任何 API 密钥，语音转写与整理/翻译可完全在本机推理（SenseVoice / Qwen3-ASR / Qwen3.5，Apache 2.0）：
+
+```bash
+cargo build --manifest-path src-tauri/Cargo.toml --features local-models
+```
+
+- 功能锁在 Cargo feature `local-models` 后，默认构建零依赖、零影响。
+- 模型不随安装包分发，应用内按需下载（HuggingFace / ModelScope 双源、断点续传、SHA-256 校验）；按设备硬件推荐轻量 / 标准 / 性能三档。
+- 模型下载是本地 Provider 唯一的网络行为——零上报承诺不变。
+
 ## 隐私
 
 - 音频只发往**你自己配置的端点**；除此之外（更新检查除外，可关）零网络请求、零遥测。

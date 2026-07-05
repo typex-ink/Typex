@@ -12,6 +12,8 @@ const props = defineProps<{
   active?: boolean;
   /** 该槽位全部可切换档案 */
   alternatives: ProviderProfile[];
+  /** 副标题覆盖（本地档案显示引擎与模型状态，CP-8.7；缺省显示 kind） */
+  subtitle?: string;
 }>();
 
 const emit = defineEmits<{
@@ -52,7 +54,7 @@ function errText(code: string): string {
       <div class="logo">{{ profile.label.charAt(0).toUpperCase() }}</div>
       <div class="meta">
         <b>{{ profile.label }}</b> · {{ profile.model }}<br />
-        <small>{{ profile.kind }}</small>
+        <small>{{ subtitle ?? profile.kind }}</small>
       </div>
       <span v-if="testResult" class="lat" :class="{ err: testError }">{{ testResult }}</span>
       <Button size="sm" :disabled="testing" @click="runTest">

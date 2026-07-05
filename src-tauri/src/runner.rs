@@ -40,6 +40,11 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::list_audio_devices,
             commands::toggle_verbatim,
             commands::export_diagnostics,
+            commands::list_local_models,
+            commands::get_hardware_tier,
+            commands::download_local_model,
+            commands::cancel_local_download,
+            commands::delete_local_model,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -50,6 +55,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::AssistantDoneEvent,
             events::AssistantErrorEvent,
             events::UpdateAvailableEvent,
+            events::LocalDownloadProgressEvent,
         ])
 }
 
@@ -190,6 +196,8 @@ pub fn run() {
             // 暂停状态（托盘切换）
             let (paused_tx, paused_rx) = tokio::sync::watch::channel(false);
             app.manage(PausedState(paused_tx));
+            // 本地模型下载任务表（v1.1；默认构建恒空）
+            app.manage(crate::app::LocalDownloads::default());
 
             // hotkey 线程（配置热更新：settings watch → HotkeyConfig watch 桥接）
             let hotkey_cfg = HotkeyConfig::from_settings(&s.hotkeys);

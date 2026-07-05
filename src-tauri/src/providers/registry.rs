@@ -317,10 +317,12 @@ impl ProviderRegistry {
                     .first()
                     .map(|f| dir.join("models").join(&entry.id).join(&f.name))
                     .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺模型文件"))?;
-                Ok(Arc::new(llm_llama::LlamaLlm::new(
-                    gguf,
-                    llm_llama::LoadPolicy::Resident,
-                )))
+                // 加载策略（05 §5.1：常驻 / 用完即卸；CP-8.7 编辑态下拉存 options.load_policy）
+                let policy = match profile.options.get("load_policy").and_then(|v| v.as_str()) {
+                    Some("unload_after_use") => llm_llama::LoadPolicy::UnloadAfterUse,
+                    _ => llm_llama::LoadPolicy::Resident,
+                };
+                Ok(Arc::new(llm_llama::LlamaLlm::new(gguf, policy)))
             }
             _ => Err(TypexError::new(
                 ErrorCode::InvalidRequest,

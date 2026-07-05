@@ -56,3 +56,20 @@ pub struct UpdateAvailableEvent {
     pub version: String,
     pub notes: String,
 }
+
+/// `local://download-progress` — 本地模型下载进度（v1.1 / CP-8.7/8.8）。
+/// 事件类型无条件定义（IPC 契约不随 feature 变化）；
+/// 默认构建下 download_local_model 返回错误，此事件不会发出。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+pub struct LocalDownloadProgressEvent {
+    /// 模型库条目 id（manifest）。
+    pub model_id: String,
+    /// 已下载字节（跨文件累计，含续传偏移）。
+    pub bytes_done: u64,
+    /// 全部文件合计字节（来自 manifest）。
+    pub bytes_total: u64,
+    /// true = 终态（成功或失败，见 error）。
+    pub done: bool,
+    /// 终态错误信息（None = 成功；"cancelled" = 用户取消）。
+    pub error: Option<String>,
+}

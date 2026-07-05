@@ -7,7 +7,8 @@ import AppIcon from "@/components/AppIcon.vue";
 import Kbd from "@/components/Kbd.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Input from "@/components/Input.vue";
-import { commands, events, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
+import { commands, events, type HardwareTier, type LocalModelInfo, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
+import { formatBytes } from "@/shared/format";
 import { useSettingsStore } from "@/stores/settings";
 
 const { t } = useI18n();
@@ -32,7 +33,7 @@ async function pollPerms() {
   perms.value = await commands.getPermissionStatus();
 }
 
-// ── 步骤 3：模型（云端直填两组表单，无厂商推荐——ADR-21）──
+// ── 步骤 3：模型（本地一键推荐卡 + 云端直填两组表单，无厂商推荐——ADR-20/21）──
 const sttUrl = ref("");
 const sttKey = ref("");
 const llmUrl = ref("");
@@ -41,6 +42,106 @@ const sttModel = ref("");
 const llmModel = ref("");
 const configuring = ref(false);
 const configError = ref("");
+
+// 本地路径（CP-8.8 / mockup 步骤 3/3b）：档位检测 → 一键下载 → 三槽指向 local 档案
+const hw = ref<HardwareTier | null>(null);
+const localModels = ref<LocalModelInfo[]>([]);
+const chosenTier = ref<string>("standard");
+const tierMenuOpen = ref(false);
+// idle → downloading → done | error（下载在后台继续，不阻塞「下一步」）
+const localPhase = ref<"idle" | "downloading" | "done" | "error">("idle");
+const localError = ref("");
+/** 当前正在下载的模型 id + 进度 */
+const dlCurrent = ref<string | null>(null);
+const dlDone = ref<number>(0);
+const dlTotal = ref<number>(0);
+let unlistenDl: (() => void) | null = null;
+
+const TIER_KEYS = ["light", "standard", "performance"] as const;
+/** 档位内两个模型（STT + LLM；按 tier 归属取，清单序 = STT 在前） */
+const tierModels = computed(() =>
+  localModels.value.filter((m) => m.tier === chosenTier.value),
+);
+const tierBytes = computed(() => tierModels.value.reduce((s, m) => s + m.bytes, 0));
+const localAvailable = computed(() => hw.value !== null && localModels.value.length > 0);
+
+function tierLabel(key: string): string {
+  return t(`onboarding.tier_${key}`);
+}
+
+async function startLocalDownload() {
+  const queue = tierModels.value.filter((m) => !m.downloaded);
+  if (!queue.length) {
+    await adoptLocalProfiles();
+    localPhase.value = "done";
+    return;
+  }
+  localPhase.value = "downloading";
+  localError.value = "";
+  await downloadNext(queue.map((m) => m.id));
+}
+
+/** 串行下载：完成一个再启动下一个；全部完成后落库三槽档案 */
+async function downloadNext(queue: string[]) {
+  const [head, ...rest] = queue;
+  if (!head) {
+    await adoptLocalProfiles();
+    localPhase.value = "done";
+    dlCurrent.value = null;
+    return;
+  }
+  dlCurrent.value = head;
+  dlDone.value = 0;
+  dlTotal.value = localModels.value.find((m) => m.id === head)?.bytes ?? 0;
+  pendingQueue = rest;
+  const r = await commands.downloadLocalModel(head);
+  if (r.status !== "ok") {
+    localPhase.value = "error";
+    localError.value = r.error.message;
+  }
+}
+
+let pendingQueue: string[] = [];
+
+async function cancelLocalDownload() {
+  if (dlCurrent.value) await commands.cancelLocalDownload(dlCurrent.value);
+  pendingQueue = [];
+  dlCurrent.value = null;
+  localPhase.value = "idle";
+}
+
+/** 下载完成 → STT/整理/翻译三槽指向合成的 local 档案（ADR-20；问答槽不指向） */
+async function adoptLocalProfiles() {
+  const stt = tierModels.value.find((m) => m.purpose === "stt");
+  const llm = tierModels.value.find((m) => m.purpose === "llm");
+  if (stt) {
+    await commands.upsertProfile({
+      id: `local-${stt.id}`, slots: ["stt"], kind: "local",
+      label: t("onboarding.local_profile_stt"), base_url: "",
+      model: stt.id, credentials: {}, extra_headers: {}, extra_form: {},
+      timeout_ms: 30000, options: {},
+    });
+    await commands.activateProfile("stt", `local-${stt.id}`);
+  }
+  if (llm) {
+    await commands.upsertProfile({
+      id: `local-${llm.id}`, slots: ["polish", "translate"], kind: "local",
+      label: t("onboarding.local_profile_llm"), base_url: "",
+      model: llm.id, credentials: {}, extra_headers: {}, extra_form: {},
+      timeout_ms: 30000, options: {},
+    });
+    for (const slot of ["polish", "translate"] as const) {
+      await commands.activateProfile(slot, `local-${llm.id}`);
+    }
+  }
+}
+
+async function loadLocal() {
+  hw.value = await commands.getHardwareTier();
+  if (hw.value) chosenTier.value = hw.value.tier;
+  const r = await commands.listLocalModels();
+  if (r.status === "ok") localModels.value = r.data;
+}
 
 async function saveModels(): Promise<boolean> {
   configError.value = "";
@@ -106,9 +207,33 @@ onMounted(async () => {
   pollPerms();
   pollTimer = setInterval(pollPerms, 1500);
   await events.sessionSnapshotEvent.listen(() => {});
+  await loadLocal();
+  // 本地模型下载进度（串行队列：一个 done 就启动下一个；下载不阻塞走完余下步骤）
+  unlistenDl = await events.localDownloadProgressEvent.listen((e) => {
+    const p = e.payload;
+    if (p.model_id !== dlCurrent.value) return;
+    if (p.done) {
+      if (p.error) {
+        if (p.error !== "cancelled") {
+          localPhase.value = "error";
+          localError.value = p.error;
+        }
+        pendingQueue = [];
+        dlCurrent.value = null;
+      } else {
+        const m = localModels.value.find((x) => x.id === p.model_id);
+        if (m) m.downloaded = true;
+        void downloadNext(pendingQueue);
+      }
+    } else if (p.bytes_total > 0) {
+      dlDone.value = p.bytes_done;
+      dlTotal.value = p.bytes_total;
+    }
+  });
 });
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer);
+  unlistenDl?.();
 });
 </script>
 
@@ -148,9 +273,71 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 步骤 3 · 模型：云端直填（STT + LLM 两组；LLM 三槽共用） -->
+    <!-- 步骤 3 · 模型：本地一键（推荐）或云端直填（STT + LLM 两组；LLM 三槽共用） -->
     <div v-else-if="step === 3" class="body">
       <h5>{{ t("onboarding.models_title") }}</h5>
+
+      <!-- 本地模型推荐卡（CP-8.8 / mockup 步骤 3/3b；local-models 未启用时不显示） -->
+      <div v-if="localAvailable && localPhase === 'idle'" class="prov on">
+        <div class="plogo">◉</div>
+        <div class="pmeta2">
+          <b>{{ t("onboarding.local_title") }}</b>
+          <span class="tag">{{ t("onboarding.local_recommended") }}</span><br />
+          <small>
+            {{ t("onboarding.local_detected", {
+              tier: tierLabel(chosenTier),
+              models: tierModels.map((m) => m.display_name).join(" + "),
+              size: formatBytes(tierBytes),
+            }) }}
+            <span class="tier-wrap">
+              <a @click="tierMenuOpen = !tierMenuOpen">{{ t("onboarding.local_change_tier") }}</a>
+              <span v-if="tierMenuOpen" class="tier-menu">
+                <a
+                  v-for="k in TIER_KEYS"
+                  :key="k"
+                  :class="{ cur: k === chosenTier }"
+                  @click="chosenTier = k; tierMenuOpen = false"
+                >{{ (k === chosenTier ? "✓ " : "　") + tierLabel(k) }}</a>
+              </span>
+            </span>
+          </small>
+        </div>
+        <Button size="sm" @click="startLocalDownload">{{ t("onboarding.local_download_use") }}</Button>
+      </div>
+
+      <!-- 下载中 / 完成 / 失败（mockup 步骤 3b：进度条 = --text-1 实底） -->
+      <div v-else-if="localAvailable" class="prov on">
+        <div class="plogo">◉</div>
+        <div class="pmeta2">
+          <b>{{ t("onboarding.local_title_tier", { tier: tierLabel(chosenTier) }) }}</b><br />
+          <template v-if="localPhase === 'downloading'">
+            <small>
+              {{ t("onboarding.local_downloading", {
+                name: localModels.find((m) => m.id === dlCurrent)?.display_name ?? "",
+                done: formatBytes(dlDone),
+                total: formatBytes(dlTotal),
+              }) }}
+            </small>
+            <span class="pbar"><i :style="{ width: dlTotal ? `${Math.round((dlDone / dlTotal) * 100)}%` : '0%' }" /></span>
+          </template>
+          <small v-else-if="localPhase === 'done'" class="ok">{{ t("onboarding.local_done") }}</small>
+          <small v-else class="err">{{ t("onboarding.local_failed", { err: localError }) }}</small>
+        </div>
+        <Button v-if="localPhase === 'downloading'" variant="ghost" size="sm" @click="cancelLocalDownload">
+          {{ t("onboarding.local_cancel") }}
+        </Button>
+        <Button v-else-if="localPhase === 'error'" size="sm" @click="startLocalDownload">
+          {{ t("onboarding.local_retry") }}
+        </Button>
+      </div>
+      <p v-if="localAvailable && localPhase === 'downloading'" class="bg-hint">
+        {{ t("onboarding.local_bg_hint") }}
+      </p>
+
+      <p v-if="localAvailable" class="divider">
+        <span /><span class="dtext">{{ t("onboarding.or_cloud") }}</span><span />
+      </p>
+
       <div class="slot-h">{{ t("onboarding.slot_stt") }}</div>
       <div class="frow"><span>{{ t("onboarding.api_endpoint") }}</span><span class="w250"><Input v-model="sttUrl" mono placeholder="https://api.example.com/v1" /></span></div>
       <div class="frow"><span>{{ t("onboarding.model_name") }}</span><span class="w250"><Input v-model="sttModel" mono placeholder="whisper-large-v3-turbo" /></span></div>
@@ -330,6 +517,123 @@ onUnmounted(() => {
   color: var(--error);
   font-size: 11px;
   margin-top: 8px;
+}
+/* 本地推荐卡（mockup 步骤 3/3b） */
+.prov {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 12.5px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.prov.on {
+  background: var(--sel-bg);
+  border-color: var(--border-2);
+}
+.plogo {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-3);
+}
+.pmeta2 {
+  flex: 1;
+  line-height: 1.5;
+  min-width: 0;
+}
+.pmeta2 small {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.pmeta2 small.ok {
+  color: var(--success);
+}
+.pmeta2 small.err {
+  color: var(--error);
+}
+.pmeta2 a {
+  text-decoration: underline;
+  cursor: pointer;
+}
+.tag {
+  font-size: 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 4px;
+  color: var(--text-2);
+}
+.tier-wrap {
+  position: relative;
+}
+.tier-menu {
+  position: absolute;
+  left: 0;
+  top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 90px;
+}
+.tier-menu a {
+  padding: 5px 10px;
+  border-radius: 5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tier-menu a:hover {
+  background: var(--sel-bg);
+}
+.tier-menu a.cur {
+  font-weight: 600;
+}
+/* 进度条 = --text-1 实底，无彩色（mockup 步骤 3b） */
+.pbar {
+  display: block;
+  width: 100%;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 7px;
+}
+.pbar i {
+  display: block;
+  height: 100%;
+  background: var(--text-1);
+  transition: width 0.3s;
+}
+.bg-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 2px 0 8px;
+}
+.divider {
+  font-size: 11px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+.divider > span:not(.dtext) {
+  flex: 1;
+  border-top: 1px solid var(--border);
 }
 .done-check {
   font-size: 28px;

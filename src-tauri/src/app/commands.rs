@@ -271,7 +271,13 @@ pub async fn test_profile(
         .find(|p| p.id == profile_id)
         .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
     let start = std::time::Instant::now();
-    if profile.kind.is_stt() {
+    // Local kind 同时覆盖 STT 与 LLM（is_stt 恒 true）——按档案槽位判定走向
+    let treat_as_stt = if profile.kind == crate::types::ProviderKind::Local {
+        profile.slots.contains(&SlotKind::Stt)
+    } else {
+        profile.kind.is_stt()
+    };
+    if treat_as_stt {
         let stt = registry.build_stt(profile)?;
         // 2 秒 440Hz 正弦波样音（内容不重要，只测连通）
         let samples: Vec<f32> = (0..32000)
@@ -457,4 +463,287 @@ pub fn export_diagnostics(
     zip.finish()
         .map_err(|e| TypexError::new(ErrorCode::Internal, format!("封包失败: {e}")))?;
     Ok(dest.display().to_string())
+}
+
+// ── 本地模型（v1.1 / F-12 / ADR-20/22；CP-8.7/8.8）─────────────────────────────
+//
+// IPC 契约（类型 + command 签名）无条件定义——collect_commands! 不能按 feature
+// 条件包含单项；实现在函数体内 #[cfg(feature = "local-models")] 分支，
+// 默认构建返回 NotConfigured「本地模型未启用」或空值。
+
+/// 模型库条目 + 本机状态（list_local_models 载荷）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct LocalModelInfo {
+    /// 模型库 id（= 存储子目录名 = local 档案的 model 字段）。
+    pub id: String,
+    pub display_name: String,
+    /// "stt" | "llm"
+    pub purpose: String,
+    /// "sherpa" | "llama"
+    pub engine: String,
+    /// 全部文件合计字节。
+    pub bytes: u64,
+    pub downloaded: bool,
+    /// 正在下载中（有进行中的下载任务）。
+    pub downloading: bool,
+    /// 最低推荐 RAM（GiB）。
+    pub min_ram_gb: u32,
+    pub requires_gpu: bool,
+    /// 本机是否满足硬件要求（RAM ≥ min_ram_gb 且（不需 GPU 或有 GPU））。
+    pub hardware_ok: bool,
+    /// 所属推荐档位 key："light" | "standard" | "performance"。
+    pub tier: String,
+}
+
+/// 硬件探测结果（get_hardware_tier 载荷）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct HardwareTier {
+    pub ram_gb: u32,
+    pub cores: u32,
+    /// GPU 加速可用（macOS = Metal）。
+    pub gpu: bool,
+    /// 推荐档位 key："light" | "standard" | "performance"。
+    pub tier: String,
+    /// 诊断页格式的摘要串，如 `RAM 24 GB · 10 核 · Metal ✓ · 推荐档位：性能`。
+    pub summary: String,
+}
+
+#[cfg(feature = "local-models")]
+fn local_models_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, TypexError> {
+    use tauri::Manager;
+    app.path()
+        .app_data_dir()
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("找不到数据目录: {e}")))
+}
+
+/// 模型库全量 + 每条的下载/硬件状态（默认构建返回空列表）。
+#[tauri::command]
+#[specta::specta]
+pub fn list_local_models(
+    app: tauri::AppHandle,
+    downloads: State<'_, crate::app::LocalDownloads>,
+) -> Result<Vec<LocalModelInfo>, TypexError> {
+    #[cfg(feature = "local-models")]
+    {
+        use crate::local::{download, hardware, manifest};
+        let data_dir = local_models_data_dir(&app)?;
+        let catalog = manifest::catalog();
+        let downloaded = download::list_downloaded(&data_dir, &catalog);
+        let hw = hardware::detect();
+        let active = downloads.0.lock().unwrap();
+        Ok(catalog
+            .into_iter()
+            .map(|e| LocalModelInfo {
+                downloaded: downloaded.contains(&e.id),
+                downloading: active.get(&e.id).is_some_and(|h| !h.inner().is_finished()),
+                purpose: match e.purpose {
+                    manifest::ModelPurpose::Stt => "stt".into(),
+                    manifest::ModelPurpose::Llm => "llm".into(),
+                },
+                engine: match e.engine {
+                    manifest::ModelEngine::Sherpa => "sherpa".into(),
+                    manifest::ModelEngine::Llama => "llama".into(),
+                },
+                bytes: e.files.iter().map(|f| f.bytes).sum(),
+                hardware_ok: hw.ram_gb >= e.min_ram_gb as u64
+                    && (!e.requires_gpu || hw.gpu_available),
+                tier: hardware::tier_of_model(&e.id)
+                    .map(|t| t.key().to_string())
+                    .unwrap_or_default(),
+                min_ram_gb: e.min_ram_gb,
+                requires_gpu: e.requires_gpu,
+                id: e.id,
+                display_name: e.display_name,
+            })
+            .collect())
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        let _ = (app, downloads);
+        Ok(Vec::new())
+    }
+}
+
+/// 硬件探测 + 推荐档位（默认构建返回 None）。
+#[tauri::command]
+#[specta::specta]
+pub fn get_hardware_tier() -> Option<HardwareTier> {
+    #[cfg(feature = "local-models")]
+    {
+        use crate::local::hardware;
+        let hw = hardware::detect();
+        let tier = hardware::recommend_tier(hw.ram_gb, hw.cpu_cores, hw.gpu_available);
+        Some(HardwareTier {
+            ram_gb: hw.ram_gb as u32,
+            cores: hw.cpu_cores as u32,
+            gpu: hw.gpu_available,
+            tier: tier.key().into(),
+            summary: hardware::diagnostics_string(),
+        })
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        None
+    }
+}
+
+/// 启动模型下载（tokio task 后台跑；进度经 `local://download-progress` 推送）。
+/// 已在下载中 / 已下载 → 幂等返回 Ok。
+#[tauri::command]
+#[specta::specta]
+pub fn download_local_model(
+    app: tauri::AppHandle,
+    downloads: State<'_, crate::app::LocalDownloads>,
+    model_id: String,
+) -> Result<(), TypexError> {
+    #[cfg(feature = "local-models")]
+    {
+        use crate::local::{download, manifest};
+        use tauri_specta::Event as _;
+        let data_dir = local_models_data_dir(&app)?;
+        let entry = manifest::catalog()
+            .into_iter()
+            .find(|m| m.id == model_id)
+            .ok_or_else(|| {
+                TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
+            })?;
+        let mut active = downloads.0.lock().unwrap();
+        if active
+            .get(&model_id)
+            .is_some_and(|h| !h.inner().is_finished())
+        {
+            return Ok(()); // 已在下载中，幂等
+        }
+        let bytes_total: u64 = entry.files.iter().map(|f| f.bytes).sum();
+        let handle = app.clone();
+        let id = model_id.clone();
+        let task = tauri::async_runtime::spawn(async move {
+            let client = reqwest::Client::new();
+            let dir = data_dir.join("models").join(&entry.id);
+            // 逐文件下载，跨文件累计进度（前一文件字节 + 当前文件进度）
+            let mut base: u64 = 0;
+            let mut err: Option<String> = None;
+            for file in &entry.files {
+                let emitted = {
+                    let handle = handle.clone();
+                    let id = id.clone();
+                    let fbytes = file.bytes;
+                    Box::new(move |p: download::Progress| {
+                        let _ = crate::app::events::LocalDownloadProgressEvent {
+                            model_id: id.clone(),
+                            bytes_done: base + p.downloaded.min(fbytes),
+                            bytes_total,
+                            done: false,
+                            error: None,
+                        }
+                        .emit(&handle);
+                    }) as download::ProgressFn
+                };
+                if let Err(e) = download::download_model_file(
+                    &client,
+                    &entry.sources,
+                    file,
+                    &dir,
+                    Some(emitted),
+                )
+                .await
+                {
+                    err = Some(e.to_string());
+                    break;
+                }
+                base += file.bytes;
+            }
+            let _ = crate::app::events::LocalDownloadProgressEvent {
+                model_id: id,
+                bytes_done: if err.is_none() { bytes_total } else { base },
+                bytes_total,
+                done: true,
+                error: err,
+            }
+            .emit(&handle);
+        });
+        active.insert(model_id, task);
+        Ok(())
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        let _ = (app, downloads, model_id);
+        Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
+    }
+}
+
+/// 取消进行中的下载（.part 保留，下次续传）。
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_local_download(
+    app: tauri::AppHandle,
+    downloads: State<'_, crate::app::LocalDownloads>,
+    model_id: String,
+) -> Result<(), TypexError> {
+    #[cfg(feature = "local-models")]
+    {
+        use tauri_specta::Event as _;
+        if let Some(task) = downloads.0.lock().unwrap().remove(&model_id) {
+            task.abort();
+            // 被 abort 的任务发不出终态事件，这里代发（error = "cancelled"）
+            let _ = crate::app::events::LocalDownloadProgressEvent {
+                model_id,
+                bytes_done: 0,
+                bytes_total: 0,
+                done: true,
+                error: Some("cancelled".into()),
+            }
+            .emit(&app);
+        }
+        Ok(())
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        let _ = (app, downloads, model_id);
+        Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
+    }
+}
+
+/// 删除已下载模型。被某个 local 档案引用且 !force → InvalidRequest（前端警告后带 force 重试）。
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_local_model(
+    app: tauri::AppHandle,
+    settings: SettingsState<'_>,
+    model_id: String,
+    force: bool,
+) -> Result<(), TypexError> {
+    #[cfg(feature = "local-models")]
+    {
+        use crate::local::{download, manifest};
+        let referenced: Vec<String> = settings
+            .get()
+            .profiles
+            .iter()
+            .filter(|p| p.kind == crate::types::ProviderKind::Local && p.model == model_id)
+            .map(|p| p.label.clone())
+            .collect();
+        if !referenced.is_empty() && !force {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("模型被档案引用：{}", referenced.join("、")),
+            ));
+        }
+        let entry = manifest::catalog()
+            .into_iter()
+            .find(|m| m.id == model_id)
+            .ok_or_else(|| {
+                TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
+            })?;
+        let data_dir = local_models_data_dir(&app)?;
+        download::delete_model(&data_dir, &entry)
+            .await
+            .map_err(|e| TypexError::new(ErrorCode::Internal, format!("删除失败: {e}")))?;
+        Ok(())
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        let _ = (app, settings, model_id, force);
+        Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
+    }
 }
