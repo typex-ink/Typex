@@ -1,0 +1,33 @@
+---
+source: tests/contract_snapshots.rs
+expression: captured
+---
+{
+  "body": {
+    "audio": {
+      "data": "UklGRndhdnN0dWIh",
+      "format": "wav"
+    },
+    "request": {
+      "enable_itn": true,
+      "enable_punc": true,
+      "model_name": "bigmodel"
+    },
+    "user": {
+      "uid": "typex"
+    }
+  },
+  "headers": [
+    "accept: */*",
+    "content-length: <len>",
+    "content-type: application/json",
+    "host: <host>",
+    "user-agent: Go-http-client/1.1",
+    "x-api-access-key: access-token-1",
+    "x-api-app-key: app-key-1",
+    "x-api-request-id: <uuid>",
+    "x-api-resource-id: volc.bigasr.auc_turbo"
+  ],
+  "method": "POST",
+  "path": "/"
+}

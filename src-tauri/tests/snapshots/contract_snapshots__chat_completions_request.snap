@@ -1,0 +1,33 @@
+---
+source: tests/contract_snapshots.rs
+expression: captured
+---
+{
+  "body": {
+    "max_tokens": 256,
+    "messages": [
+      {
+        "content": "系统提示",
+        "role": "system"
+      },
+      {
+        "content": "你好",
+        "role": "user"
+      }
+    ],
+    "model": "gpt-x",
+    "stream": true,
+    "temperature": 0.30000001192092896
+  },
+  "headers": [
+    "accept: */*",
+    "authorization: Bearer sk-test",
+    "content-length: <len>",
+    "content-type: application/json",
+    "host: <host>",
+    "user-agent: Go-http-client/1.1",
+    "x-org: typex"
+  ],
+  "method": "POST",
+  "path": "/v1/chat/completions"
+}

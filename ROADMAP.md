@@ -161,7 +161,7 @@
   `scripts/eval-prompts.ts`：读 `docs/fixtures/denoise-cases.md` → 真实 API → 要点断言 + 通过率报告；语料已备，脚本未写。
 - [x] **CP-6.11 日志 redact 层 + 诊断包导出**（2026-07-06：RedactWriter 写入层——所有日志行落盘/上屏前自动打码 Bearer token 与 sk- 形态密钥（4 条单测）· export_diagnostics command：环境自检 + 凭据剔除的 settings + 最近 3 个日志文件（再过一遍 redact）打 zip 到下载目录 · 诊断页「导出诊断包」按钮）
   当前靠编码纪律（日志语句不含内容/凭据）；补 tracing Layer 级自动脱敏与「导出诊断包」按钮。
-- [ ] **CP-6.12 契约快照测试**（08 §4.1）
+- [x] **CP-6.12 契约快照测试**（2026-07-06：`tests/contract_snapshots.rs`——wiremock 捕获四个 adapter（openai_compat/volcengine/chat_completions/responses）构造的完整 HTTP 请求（method/path/headers/body），boundary/request-id/host/content-length 归一化后 insta JSON 快照，任何请求形状漂移在 diff 显形）
   insta 依赖已加未使用；对四个 adapter 的完整 HTTP 请求形状做快照，防 AI 顺手重构漂移。
 - [ ] **CP-6.13 回答弹窗杂项**（05 §4）
   读不到选区时降级为普通提问的提示；打字基准 45 字/分 可调设置。

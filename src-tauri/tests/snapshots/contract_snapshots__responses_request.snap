@@ -1,0 +1,42 @@
+---
+source: tests/contract_snapshots.rs
+expression: captured
+---
+{
+  "body": {
+    "input": [
+      {
+        "content": [
+          {
+            "text": "系统提示",
+            "type": "input_text"
+          }
+        ],
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "你好",
+            "type": "input_text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "max_output_tokens": 256,
+    "model": "gpt-x",
+    "stream": true,
+    "temperature": 0.30000001192092896
+  },
+  "headers": [
+    "accept: */*",
+    "authorization: Bearer sk-test",
+    "content-length: <len>",
+    "content-type: application/json",
+    "host: <host>",
+    "user-agent: Go-http-client/1.1"
+  ],
+  "method": "POST",
+  "path": "/v1/responses"
+}
