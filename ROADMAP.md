@@ -184,9 +184,9 @@
 > 不进 v1.0 依赖树（07 §1）；模型不随安装包分发，应用内按需下载（03 §8）。
 > 顺序按收益排列：先本地 STT（收益最大、质量无折扣），本地 LLM 随后（ADR-20 节奏）。
 
-- [ ] **CP-8.1 模型库清单 + 硬件分档探测**
+- [x] **CP-8.1 模型库清单 + 硬件分档探测**（2026-07-06：`local/manifest.rs` 6 条目（id/用途/引擎/文件+字节+SHA-256 占位/许可证/HF+ModelScope 双源/min_ram/requires_gpu）· `local/hardware.rs` sysinfo RAM/核数 + Metal 探测 → 轻量/标准/性能推荐（分档边界单测）· 诊断报告加 hardware 字段；全部锁 `local-models` feature，默认构建零影响）
   内置 JSON 清单（id/用途/文件列表/字节数/SHA-256/许可证/双源 URL/最低硬件要求；v1.1 起始 6 个条目：SenseVoice-int8 230MB、Qwen3-ASR-0.6B/1.7B Q4、Qwen3.5-0.8B/2B/4B Q4）；`sysinfo` 探测 RAM/CPU 核数 + Metal/CUDA/Vulkan 可用性 → 轻量/标准/性能三档推荐（ADR-22 分档表）；探测结果进诊断页。
-- [ ] **CP-8.2 模型下载管理器**（03 §8）
+- [x] **CP-8.2 模型下载管理器**（2026-07-06：`local/download.rs`——HTTP Range 断点续传（.part 续传）+ SHA-256 校验 + 失败换源重试 + 进度回调；存储 `{data_dir}/models/{model_id}/`；list_downloaded/delete_model；wiremock 集成测试 9 例（Range 形状/续传/校验失败换源/进度单调）；Tauri commands 待 v1.1 开启 feature 时接入 runner）
   HuggingFace + ModelScope 双源（首包延迟自动择优，可固定）；HTTP Range 断点续传、SHA-256 校验、失败换源重试；进度经 Tauri event 推送；存储 `{app_data_dir}/models/{model_id}/`；下载是本地 Provider 唯一网络行为（零上报承诺不变）。
 - [ ] **CP-8.3 本地 STT Provider · SenseVoice 轻量档**
   sherpa-onnx 官方 crate 静态链接 + SenseVoice-Small int8；实现同一 `SttProvider` trait（`kind: local`，无 base_url/凭据）；`capabilities()` 报告不限音频时长；错误分类只剩 InvalidRequest/模型未下载。弱机器上唯一保证实时的选项（ADR-22）。

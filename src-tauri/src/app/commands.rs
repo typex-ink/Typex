@@ -186,6 +186,9 @@ pub struct DiagnosticsReport {
     pub permissions: Vec<crate::platform::permissions::PermissionStatus>,
     pub inject_backend: String,
     pub log_dir: String,
+    /// 硬件信息摘要（仅 feature = local-models 时填充；默认构建为 None）。
+    /// 格式示例：`RAM 24 GB · 10 核 · Metal ✓ · 推荐档位：性能`
+    pub hardware: Option<String>,
 }
 
 #[tauri::command]
@@ -201,6 +204,10 @@ pub fn get_diagnostics(app: tauri::AppHandle) -> DiagnosticsReport {
             .app_log_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
+        #[cfg(feature = "local-models")]
+        hardware: Some(crate::local::hardware::diagnostics_string()),
+        #[cfg(not(feature = "local-models"))]
+        hardware: None,
     }
 }
 
