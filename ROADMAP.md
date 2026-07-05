@@ -165,7 +165,7 @@
   insta 依赖已加未使用；对四个 adapter 的完整 HTTP 请求形状做快照，防 AI 顺手重构漂移。
 - [x] **CP-6.13 回答弹窗杂项**（2026-07-06：选区读取报错（≠无选区）经 selection_read_failed 标志传到 AssistantStartedEvent.degraded——弹窗芯片行提示「读取选区失败，已按普通提问处理」· history.typing_wpm 设置（默认 45，滑杆 15–120）——主页「节省时间」统计按其折算）
   读不到选区时降级为普通提问的提示；打字基准 45 字/分 可调设置。
-- [ ] **CP-6.14 release-checklist.md**（08 §7）
+- [x] **CP-6.14 release-checklist.md**（2026-07-06：`docs/release-checklist.md`——安装首启/F-1/F-2/F-3 验收逐条/注入矩阵/错误注入/主题界面/更新迁移/资源隐私/发布工程十节可勾选清单；当前范围仅 macOS，Windows/Linux 项随 CP-7.x 追加）
   按 02 章验收标准展开为可勾选人工回归清单（发布门槛）。
 
 **平台缺口（设计书要求、本机无法验证，随 Windows/Linux 环境补）**
