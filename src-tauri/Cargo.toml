@@ -55,6 +55,11 @@ objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMed
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 sysinfo = { version = "0.38.4", optional = true }
 sha2 = { version = "0.10", optional = true }
+sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
+# mtmd feature：Qwen3-ASR 音频输入需要 llama.cpp tools/mtmd（CP-8.4）
+llama-cpp-2 = { version = "0.1.150", features = ["metal", "mtmd"], optional = true }
+# llama-cpp-2 内部已依赖 encoding_rs；这里显式引用用于 token 增量 UTF-8 解码（CP-8.5）
+encoding_rs = { version = "0.8", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
@@ -81,4 +86,10 @@ rdev = { path = "vendor/rdev" }
 [features]
 default = []
 # v1.1 本地模型（F-12 / ADR-20/22）：推理引擎与探测依赖全部锁在此 flag 后（07 §1）
-local-models = ["dep:sysinfo", "dep:sha2"]
+local-models = [
+    "dep:sysinfo",
+    "dep:sha2",
+    "dep:sherpa-rs",
+    "dep:llama-cpp-2",
+    "dep:encoding_rs",
+]

@@ -76,11 +76,18 @@ pub fn catalog() -> Vec<ModelEntry> {
             display_name: "SenseVoice Small (int8)".into(),
             purpose: ModelPurpose::Stt,
             engine: ModelEngine::Sherpa,
-            files: vec![ModelFile {
-                name: "model.int8.onnx".into(),
-                bytes: 241_172_480, // ~230 MB
-                sha256: "".into(),  // TODO: 填入真实哈希
-            }],
+            files: vec![
+                ModelFile {
+                    name: "model.int8.onnx".into(),
+                    bytes: 241_172_480, // ~230 MB
+                    sha256: "".into(),  // TODO: 填入真实哈希
+                },
+                ModelFile {
+                    name: "tokens.txt".into(),
+                    bytes: 399_360, // ~390 KB
+                    sha256: "".into(),
+                },
+            ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
                 huggingface: "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main"
@@ -96,11 +103,18 @@ pub fn catalog() -> Vec<ModelEntry> {
             display_name: "Qwen3-ASR 0.6B Q4".into(),
             purpose: ModelPurpose::Stt,
             engine: ModelEngine::Llama,
-            files: vec![ModelFile {
-                name: "qwen3-asr-0.6b-q4_k_m.gguf".into(),
-                bytes: 536_870_912, // ~0.5 GB
-                sha256: "".into(),
-            }],
+            files: vec![
+                ModelFile {
+                    name: "qwen3-asr-0.6b-q4_k_m.gguf".into(),
+                    bytes: 536_870_912, // ~0.5 GB
+                    sha256: "".into(),
+                },
+                ModelFile {
+                    name: "mmproj-qwen3-asr-0.6b-f16.gguf".into(),
+                    bytes: 692_060_160, // ~660 MB（音频编码器投影，CP-8.4）
+                    sha256: "".into(),
+                },
+            ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
                 huggingface: "https://huggingface.co/Qwen/Qwen3-ASR-0.6B-GGUF/resolve/main".into(),
@@ -115,11 +129,18 @@ pub fn catalog() -> Vec<ModelEntry> {
             display_name: "Qwen3-ASR 1.7B Q4".into(),
             purpose: ModelPurpose::Stt,
             engine: ModelEngine::Llama,
-            files: vec![ModelFile {
-                name: "qwen3-asr-1.7b-q4_k_m.gguf".into(),
-                bytes: 1_181_116_006, // ~1.1 GB
-                sha256: "".into(),
-            }],
+            files: vec![
+                ModelFile {
+                    name: "qwen3-asr-1.7b-q4_k_m.gguf".into(),
+                    bytes: 1_181_116_006, // ~1.1 GB
+                    sha256: "".into(),
+                },
+                ModelFile {
+                    name: "mmproj-qwen3-asr-1.7b-f16.gguf".into(),
+                    bytes: 692_060_160, // ~660 MB（音频编码器投影，CP-8.4）
+                    sha256: "".into(),
+                },
+            ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
                 huggingface: "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-GGUF/resolve/main".into(),
