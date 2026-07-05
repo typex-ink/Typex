@@ -111,6 +111,17 @@ async fn translate(
         "{target_language}",
         settings.translation.target_language.clone(),
     );
+    // 双向翻译子句：开关关闭时不注入值 → 模板中该行按可选段规则整体省略
+    if settings.translation.bidirectional {
+        values.insert(
+            "{bidirectional_source}",
+            settings.translation.source_language.clone(),
+        );
+        values.insert(
+            "{bidirectional_target}",
+            settings.translation.target_language.clone(),
+        );
+    }
     let rendered = prompt::render(template, &values);
 
     let req = LlmRequest {

@@ -21,7 +21,7 @@ pub const TRANSLATE_TEMPLATE: &str = "\
 （忽略语气词、重复与中途改口），再将其从{source_language}翻译为{target_language}。
 规则：只输出译文本身；不解释、不加引号、不加任何前后缀；
 保留原文的段落、列表与换行结构；语气与正式程度与原文一致；
-若原文已经是{target_language}，则翻译为{source_language}（双向翻译）。
+若原文已经是{bidirectional_target}，则翻译为{bidirectional_source}（双向翻译）。
 【原文】{transcript}";
 
 /// 内置模板：文本处理（F-3a，「问答模型」槽）。
@@ -133,9 +133,24 @@ mod tests {
         v.insert("{transcript}", "这个 bug 我明天修".to_string());
         v.insert("{source_language}", "中文".to_string());
         v.insert("{target_language}", "English".to_string());
+        v.insert("{bidirectional_source}", "中文".to_string());
+        v.insert("{bidirectional_target}", "English".to_string());
         let out = render(TRANSLATE_TEMPLATE, &v);
         assert!(out.contains("从中文翻译为English"));
         assert!(out.contains("若原文已经是English，则翻译为中文"));
+    }
+
+    #[test]
+    fn translate_template_omits_bidirectional_line_when_disabled() {
+        let mut v = HashMap::new();
+        v.insert("{transcript}", "hello".to_string());
+        v.insert("{source_language}", "中文".to_string());
+        v.insert("{target_language}", "English".to_string());
+        // 不注入 {bidirectional_*} = 双向翻译关闭
+        let out = render(TRANSLATE_TEMPLATE, &v);
+        assert!(!out.contains("双向翻译"));
+        assert!(out.contains("从中文翻译为English"));
+        assert!(out.contains("【原文】hello"));
     }
 
     #[test]

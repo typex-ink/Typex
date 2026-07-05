@@ -155,6 +155,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 | | `{dictionary}` | 个人词典词表（F-10，未启用时该段整体省略） | — |
 | 翻译 | `{transcript}` | STT 原始转写文本 | ✅ |
 | | `{source_language}` / `{target_language}` | 源语言 / 目标语言（来自翻译设置） | ✅ |
+| | `{bidirectional_source}` / `{bidirectional_target}` | 双向翻译子句用的语言对（「双向翻译」关闭时值不注入 → 该行整体省略） | — |
 | 问答（F-3a/b） | `{instruction}` | 用户的语音指令 / 问题转写 | ✅ |
 | | `{selection}` | 选中文本（无选区时该段整体省略） | — |
 
@@ -180,9 +181,11 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 （忽略语气词、重复与中途改口），再将其从{source_language}翻译为{target_language}。
 规则：只输出译文本身；不解释、不加引号、不加任何前后缀；
 保留原文的段落、列表与换行结构；语气与正式程度与原文一致；
-若原文已经是{target_language}，则翻译为{source_language}（双向翻译）。
+若原文已经是{bidirectional_target}，则翻译为{bidirectional_source}（双向翻译）。
 【原文】{transcript}
 ```
+
+（双向子句独立使用 `{bidirectional_*}` 占位符：设置中关闭「双向翻译」时不注入这两个值，按可选段规则该行整体省略——开关由此生效。）
 
 **文本处理（F-3a，「问答模型」槽）**：
 
