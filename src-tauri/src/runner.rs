@@ -35,6 +35,8 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::open_settings_window,
             commands::get_diagnostics,
             commands::open_log_dir,
+            commands::check_update,
+            commands::install_update,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -44,6 +46,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::AssistantDeltaEvent,
             events::AssistantDoneEvent,
             events::AssistantErrorEvent,
+            events::UpdateAvailableEvent,
         ])
 }
 
@@ -60,6 +63,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -150,6 +154,27 @@ pub fn run() {
                             last = Some(on);
                             apply(&handle, on);
                         }
+                    }
+                });
+            }
+
+            // 自动更新（ADR-11：检查自动、安装需确认）——启动 10s 后后台检查一次
+            if s.general.check_updates && !cfg!(debug_assertions) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    use tauri_plugin_updater::UpdaterExt;
+                    use tauri_specta::Event;
+                    let Ok(updater) = handle.updater() else {
+                        return;
+                    };
+                    if let Ok(Some(u)) = updater.check().await {
+                        tracing::info!("发现新版本: {}", u.version);
+                        let _ = crate::app::events::UpdateAvailableEvent {
+                            version: u.version.clone(),
+                            notes: u.body.clone().unwrap_or_default(),
+                        }
+                        .emit(&handle);
                     }
                 });
             }

@@ -174,7 +174,29 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                         .mutate(|s| s.dictation.polish_enabled = !s.dictation.polish_enabled);
                     refresh(app);
                 }
-                "update" => { /* CP-5.1 updater */ }
+                "update" => {
+                    // 手动检查（ADR-11：安装需确认）：有新版本发事件 + 打开设置-关于页确认
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        use tauri_plugin_updater::UpdaterExt;
+                        use tauri_specta::Event;
+                        let Ok(updater) = handle.updater() else {
+                            return;
+                        };
+                        match updater.check().await {
+                            Ok(Some(u)) => {
+                                let _ = crate::app::events::UpdateAvailableEvent {
+                                    version: u.version.clone(),
+                                    notes: u.body.clone().unwrap_or_default(),
+                                }
+                                .emit(&handle);
+                                let _ = crate::app::windows::show_settings(&handle);
+                            }
+                            Ok(None) => tracing::info!("检查更新：已是最新版本"),
+                            Err(e) => tracing::warn!("检查更新失败: {e}"),
+                        }
+                    });
+                }
                 id if id.starts_with("target:") => {
                     let lang = id.trim_start_matches("target:").to_string();
                     let settings = app.state::<Arc<SettingsService>>();

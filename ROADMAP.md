@@ -140,7 +140,7 @@
   火山/豆包极速版 flash：双凭据 header、base64 JSON body、`X-Api-Status-Code` 判定（03 §2.2）；ProviderCard 编辑表单按 kind 渲染 AppKey/AccessToken 双字段；wiremock 集成测试。当前 `registry.rs` 为报错占位。
 - [x] **CP-6.2 开机自启**（2026-07-06：plugin 初始化（macOS LaunchAgent）· 启动时对齐设置 + settings watch 跟随开关 · onboarding 完成步骤加默认勾选的自启选项）
   `tauri-plugin-autostart` 已在依赖但未初始化；接通用页开关与 onboarding 完成步骤的默认开启。
-- [ ] **CP-6.3 自动更新**（02 F-6 / ADR-11）
+- [x] **CP-6.3 自动更新**（2026-07-06：plugin 接入 + createUpdaterArtifacts + endpoints（typex.ink 主源 / GitHub 备源，pubkey 待 CP-5.4 签名密钥）· 启动 10s 后自动检查（release 构建、可关）→ `update://available` 事件 · 托盘「检查更新」发事件并打开设置 · 关于页确认卡片（下载并安装→重启，ADR-11 安装需确认）· check_update/install_update commands）
   `tauri-plugin-updater` 接入：默认自动检查、手动确认安装；托盘「检查更新」当前是空操作；设置-关于「检查更新」按钮接真实逻辑。
 - [ ] **CP-6.4 麦克风权限检测 + 设备选择**（02 F-8 / 05 §5.2）
   权限检测目前仅辅助功能（`permissions.rs::check_all`）；补麦克风（AVCaptureDevice / tauri-plugin-macos-permissions）与输入监听（IOHIDCheckAccess）实时状态；听写页麦克风下拉接 cpal 设备枚举（当前只有「系统默认」占位）。

@@ -1,7 +1,51 @@
 <script setup lang="ts">
-// 关于页（mockup 2.13）：图标 + logotype + 版本
+// 关于页（mockup 2.13）：图标 + logotype + 版本 + 检查更新（CP-6.3 / ADR-11）
+import { onMounted, onUnmounted, ref } from "vue";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
+import { commands, events } from "@/ipc/bindings";
+
+const checking = ref(false);
+const installing = ref(false);
+const status = ref("");
+const available = ref<{ version: string; notes: string } | null>(null);
+
+async function check() {
+  checking.value = true;
+  status.value = "";
+  const r = await commands.checkUpdate();
+  checking.value = false;
+  if (r.status !== "ok") {
+    status.value = "检查更新失败——请检查网络";
+    return;
+  }
+  if (r.data) {
+    available.value = r.data;
+  } else {
+    status.value = "已是最新版本";
+  }
+}
+
+async function install() {
+  installing.value = true;
+  const r = await commands.installUpdate();
+  // 成功时应用会重启；走到这里说明失败
+  if (r.status !== "ok") {
+    installing.value = false;
+    status.value = "下载安装失败——请稍后再试";
+  }
+}
+
+const unlisteners: (() => void)[] = [];
+onMounted(async () => {
+  // 启动自动检查/托盘检查发现的新版本（ADR-11：安装需确认）
+  unlisteners.push(
+    await events.updateAvailableEvent.listen((e) => {
+      available.value = e.payload;
+    }),
+  );
+});
+onUnmounted(() => unlisteners.forEach((u) => u()));
 </script>
 
 <template>
@@ -12,10 +56,20 @@ import AppIcon from "@/components/AppIcon.vue";
       v0.1.0 · GPL-3.0 · typex.ink<br />
       你的声音只会发送到你自己配置的服务。
     </p>
+    <div v-if="available" class="update-card">
+      <p class="update-title">新版本 v{{ available.version }}</p>
+      <p v-if="available.notes" class="update-notes">{{ available.notes }}</p>
+      <Button variant="primary" size="sm" :disabled="installing" @click="install">
+        {{ installing ? "下载安装中…" : "下载并安装" }}
+      </Button>
+    </div>
     <div class="actions">
-      <Button size="sm">检查更新</Button>
+      <Button size="sm" :disabled="checking" @click="check">
+        {{ checking ? "检查中…" : "检查更新" }}
+      </Button>
       <Button variant="ghost" size="sm">开源许可</Button>
     </div>
+    <p v-if="status" class="status">{{ status }}</p>
   </div>
 </template>
 
@@ -45,5 +99,30 @@ import AppIcon from "@/components/AppIcon.vue";
 .actions {
   display: flex;
   gap: 8px;
+}
+.update-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+}
+.update-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.update-notes {
+  font-size: 11px;
+  color: var(--text-2);
+  max-height: 80px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.status {
+  font-size: 12px;
+  color: var(--text-2);
 }
 </style>

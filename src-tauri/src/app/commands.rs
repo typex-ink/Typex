@@ -299,3 +299,51 @@ pub async fn test_profile(
     }
     Ok(start.elapsed().as_millis() as u32)
 }
+
+/// 更新检查结果（CP-6.3 / ADR-11）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: String,
+}
+
+/// 检查更新：有新版本返回 Some（不下载）；安装需用户确认后调 install_update。
+#[tauri::command]
+#[specta::specta]
+pub async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, TypexError> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app
+        .updater()
+        .map_err(|e| TypexError::new(ErrorCode::NotConfigured, format!("updater 未配置: {e}")))?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(Some(UpdateInfo {
+            version: u.version.clone(),
+            notes: u.body.clone().unwrap_or_default(),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(TypexError::new(
+            ErrorCode::NetworkError,
+            format!("检查更新失败: {e}"),
+        )),
+    }
+}
+
+/// 下载并安装更新（用户已确认，ADR-11：安装需确认）；成功后重启应用。
+#[tauri::command]
+#[specta::specta]
+pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app
+        .updater()
+        .map_err(|e| TypexError::new(ErrorCode::NotConfigured, format!("updater 未配置: {e}")))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| TypexError::new(ErrorCode::NetworkError, format!("检查更新失败: {e}")))?
+        .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "当前已是最新版本"))?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| TypexError::new(ErrorCode::NetworkError, format!("下载安装失败: {e}")))?;
+    app.restart();
+}

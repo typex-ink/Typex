@@ -47,3 +47,10 @@ pub struct AssistantErrorEvent {
     pub request_id: u32,
     pub error: crate::error::TypexError,
 }
+
+/// `update://available` — 启动自动检查发现新版本（安装仍需用户确认，ADR-11）。
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]
+pub struct UpdateAvailableEvent {
+    pub version: String,
+    pub notes: String,
+}
