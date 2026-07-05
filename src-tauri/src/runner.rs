@@ -286,6 +286,21 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
+            // 托盘视觉状态（CP-6.9：snapshot/电平 → 图标动画）
+            let tray_visual = Arc::new(crate::app::tray_icon::TrayVisual::default());
+            app.manage(tray_visual.clone());
+            {
+                // 暂停开关 → 托盘图标 40% 透明 + 斜杠
+                let tv = tray_visual.clone();
+                let mut rx = app.state::<PausedState>().0.subscribe();
+                tauri::async_runtime::spawn(async move {
+                    while rx.changed().await.is_ok() {
+                        tv.set_paused(*rx.borrow_and_update());
+                    }
+                });
+            }
+            let tv_snap = tray_visual.clone();
+            let tv_level = tray_visual.clone();
             let orch = Arc::new(Orchestrator {
                 settings: settings.clone(),
                 audio,
@@ -295,10 +310,12 @@ pub fn run() {
                     use tauri_specta::Event as _;
                     crate::app::windows::sync_hud_visibility(&handle, &snap);
                     crate::app::tray::update_status(&handle, &snap);
+                    tv_snap.on_snapshot(&snap);
                     let _ = events::SessionSnapshotEvent(snap).emit(&handle);
                 }),
                 level_sink: Box::new(move |levels| {
                     use tauri_specta::Event as _;
+                    tv_level.on_levels(&levels);
                     let _ = events::AudioLevelEvent(levels).emit(&handle2);
                 }),
                 last_result: last_result.clone(),
@@ -325,6 +342,7 @@ pub fn run() {
 
             // 托盘
             crate::app::tray::setup(app.handle())?;
+            crate::app::tray_icon::spawn_animator(app.handle().clone());
             {
                 // 设置变更（含设置窗口改动）→ 托盘菜单重建 + 全窗口广播
                 let handle = app.handle().clone();

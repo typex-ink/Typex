@@ -2,6 +2,7 @@
 pub mod commands;
 pub mod events;
 pub mod tray;
+pub mod tray_icon;
 pub mod windows;
 
 /// 「暂停 Typex」全局状态（托盘切换；hotkey 线程订阅）。

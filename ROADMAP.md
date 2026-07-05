@@ -155,7 +155,7 @@
   设置里已有「逐字输入」选项但无对应后端（仅 paste）；enigo text() 实现 + 后备链接入。
 - [x] **CP-6.8 目标应用识别**（2026-07-06：`platform/focus.rs`（NSWorkspace frontmostApplication 本地化名）· 录音开始时采样注入目标 · 历史 app_name 真实写入；其他平台返回 None 留扩展位）
   `platform/focus.rs`（NSWorkspace frontmostApplication）；历史记录 app_name 当前恒为空；HUD NoFocus 检测同源。
-- [ ] **CP-6.9 托盘图标状态动画**（04 §2.4）
+- [x] **CP-6.9 托盘图标状态动画**（2026-07-06：运行时渲染 22×22 RGBA 帧——空闲静态五柱（template）/ 录音实时电平 8fps / 处理左→右呼吸 40%↔100% / 暂停 40% 透明+斜杠 / 错误红点角标（非 template 真彩帧）；空闲期零重绘；render 纯函数 5 条单测）
   录音中电平动画（8fps）+ 红点角标、处理中呼吸、暂停 40% 透明 + 斜杠、错误红点；当前仅静态图标 + 状态行文字。
 - [ ] **CP-6.10 提示词评测脚本**（08 §6）
   `scripts/eval-prompts.ts`：读 `docs/fixtures/denoise-cases.md` → 真实 API → 要点断言 + 通过率报告；语料已备，脚本未写。
