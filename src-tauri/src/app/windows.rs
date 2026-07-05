@@ -113,7 +113,7 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         "home",
         WebviewUrl::App("src/windows/home/index.html".into()),
     )
-    .title("Typex")
+    .title("")
     .inner_size(880.0, 560.0)
     .resizable(false)
     .center()

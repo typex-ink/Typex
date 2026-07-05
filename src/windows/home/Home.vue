@@ -28,11 +28,14 @@ const speed = computed(() =>
   totalMinutes.value > 0 ? Math.round(totalChars.value / totalMinutes.value) : 0,
 );
 
-function fmtDuration(minutes: number) {
+function durationParts(minutes: number) {
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
-  return h > 0 ? `${h}时${m}分` : `${m}分`;
+  return { h, m };
 }
+
+const totalDurationParts = computed(() => durationParts(totalMinutes.value));
+const savedDurationParts = computed(() => durationParts(savedMinutes.value));
 
 function fmtTime(ms: number) {
   const d = new Date(ms);
@@ -142,9 +145,21 @@ onMounted(async () => {
       </div>
 
       <div v-if="historyEnabled" class="stats">
-        <div class="stat"><b>{{ fmtDuration(totalMinutes) }}</b><span>总口述时长</span></div>
+        <div class="stat">
+          <b v-if="totalDurationParts.h > 0">
+            {{ totalDurationParts.h }}<small>时</small>{{ totalDurationParts.m }}<small>分</small>
+          </b>
+          <b v-else>{{ totalDurationParts.m }}<small>分</small></b>
+          <span>总口述时长</span>
+        </div>
         <div class="stat"><b>{{ totalChars.toLocaleString() }}<small>字</small></b><span>口述字数</span></div>
-        <div class="stat"><b>{{ fmtDuration(savedMinutes) }}</b><span>节省时间</span></div>
+        <div class="stat">
+          <b v-if="savedDurationParts.h > 0">
+            {{ savedDurationParts.h }}<small>时</small>{{ savedDurationParts.m }}<small>分</small>
+          </b>
+          <b v-else>{{ savedDurationParts.m }}<small>分</small></b>
+          <span>节省时间</span>
+        </div>
         <div class="stat"><b>{{ speed }}<small>字/分</small></b><span>平均语速</span></div>
       </div>
 
@@ -156,6 +171,7 @@ onMounted(async () => {
         <div v-for="item in recent" :key="item.id" class="hrow">
           <time>{{ fmtTime(item.created_at) }}</time>
           <span class="tag">{{ MODE_LABEL[item.mode] }}</span>
+          <span v-if="item.app_name" class="app">{{ item.app_name }}</span>
           <span class="sum">{{ item.result }}</span>
         </div>
       </div>
@@ -173,7 +189,7 @@ onMounted(async () => {
         <Button variant="danger" size="sm" @click="clearAll">清空全部</Button>
       </div>
       <p class="note">历史仅保存在本机，不含音频</p>
-      <div class="recent scroll">
+      <div class="recent scroll" :class="{ 'scroll-empty': !items.length }">
         <template v-for="item in items" :key="item.id">
           <div class="hrow clickable" @click="expanded = expanded === item.id ? null : item.id">
             <time>{{ fmtTime(item.created_at) }}</time>
@@ -192,7 +208,7 @@ onMounted(async () => {
             </div>
           </div>
         </template>
-        <div v-if="!items.length" class="empty" style="margin: 24px auto">
+        <div v-if="!items.length" class="empty hist-empty">
           <div class="glyph">⌀</div>
           没有匹配的记录
         </div>
@@ -210,12 +226,7 @@ onMounted(async () => {
   overflow: hidden;
 }
 .titlebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 28px;
-  z-index: 100;
+  display: none;
 }
 .side {
   width: 180px;
@@ -223,7 +234,7 @@ onMounted(async () => {
   background: var(--surface-2);
   display: flex;
   flex-direction: column;
-  padding: 40px 10px 12px; /* 顶部让位红绿灯 */
+  padding: 16px 10px 12px;
 }
 .brand {
   display: flex;
@@ -309,7 +320,7 @@ nav .on {
 }
 .main {
   flex: 1;
-  padding: 40px 28px 16px;
+  padding: 26px 28px 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -374,6 +385,13 @@ nav .on {
 .recent.scroll {
   overflow-y: auto;
   flex: 1;
+}
+.recent.scroll-empty {
+  border-style: dashed;
+  border-color: var(--border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .hrow {
   padding: 10px 14px;
@@ -473,5 +491,9 @@ nav .on {
 }
 .empty-hint {
   font-size: 11px;
+}
+.hist-empty {
+  border: none;
+  padding: 0;
 }
 </style>

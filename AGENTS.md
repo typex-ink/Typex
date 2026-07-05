@@ -1,6 +1,6 @@
 # AGENTS.md
 
-给所有编程智能体（Claude Code、Codex、Copilot 等）的项目工作指南。只保存长期有效的通用规则，不记录项目进度（进度看 `ROADMAP.md`）。
+给所有编程智能体（Claude Code、Codex、Copilot 等）的项目工作指南。
 
 ## 项目是什么
 
