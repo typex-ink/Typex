@@ -34,6 +34,8 @@ pub struct Orchestrator {
     pub assistant: Option<Arc<assistant::AssistantService>>,
     /// 助手键按下时读到的选中文本（录音开始时读取，处理阶段消费）
     pub pending_selection: Arc<std::sync::Mutex<Option<String>>>,
+    /// 选区读取是否失败（读取报错 ≠ 无选区；弹窗降级提示用，CP-6.13）
+    pub selection_read_failed: Arc<std::sync::atomic::AtomicBool>,
     /// 选中文本读取器
     pub selection: Arc<dyn crate::selection::SelectionReader>,
     /// 历史记录服务（None = 未启用）
@@ -235,18 +237,25 @@ impl Orchestrator {
                 // 重试路径（!was_recording）沿用首次读到的选区。
                 let assistant_read = (was_recording
                     && exec.state.mode() == Some(SessionMode::Assistant))
-                .then(|| (self.selection.clone(), self.pending_selection.clone()));
+                .then(|| {
+                    (
+                        self.selection.clone(),
+                        self.pending_selection.clone(),
+                        self.selection_read_failed.clone(),
+                    )
+                });
                 let registry = self.registry.clone();
                 let lang = self.settings.get().dictation.language.clone();
                 let tx = exec.tx.clone();
                 tokio::spawn(async move {
                     let selection_fut = async {
-                        if let Some((reader, pending)) = assistant_read {
-                            let result =
-                                tokio::task::spawn_blocking(move || reader.read().ok().flatten())
-                                    .await
-                                    .ok()
-                                    .flatten();
+                        if let Some((reader, pending, failed)) = assistant_read {
+                            let outcome = tokio::task::spawn_blocking(move || reader.read()).await;
+                            let (result, read_failed) = match outcome {
+                                Ok(Ok(sel)) => (sel, false),
+                                _ => (None, true), // 读取报错 → 降级为普通提问（05 §4）
+                            };
+                            failed.store(read_failed, std::sync::atomic::Ordering::Relaxed);
                             *pending.lock().unwrap() = result;
                         }
                     };
@@ -310,9 +319,12 @@ impl Orchestrator {
                     };
                     // clone 而非 take：失败重试时仍可携带同一选区上下文（下次录音开始时重置）
                     let selection = self.pending_selection.lock().unwrap().clone();
+                    let read_failed = self
+                        .selection_read_failed
+                        .load(std::sync::atomic::Ordering::Relaxed);
                     let tx = exec.tx.clone();
                     tokio::spawn(async move {
-                        let event = match assistant.run(transcript, selection).await {
+                        let event = match assistant.run(transcript, selection, read_failed).await {
                             Ok(assistant::AssistantOutcome::Rewrite(text)) => {
                                 Event::ProcessResult { session_id, text }
                             }

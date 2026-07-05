@@ -181,7 +181,9 @@
       "forever": "Forever",
       "clear": "Clear all history",
       "clear_btn": "Clear…",
-      "cleared": "✓ Cleared"
+      "cleared": "✓ Cleared",
+      "typing_wpm": "Typing baseline",
+      "typing_wpm_hint": "\"Time saved\" converts characters at this typing speed (chars/min)"
     },
     "diagnostics": {
       "platform": "Platform: {platform}",
@@ -270,7 +272,8 @@
   },
   "assistant": {
     "close": "Close",
-    "selection_chip": "⌗ Selection · {n} chars"
+    "selection_chip": "⌗ Selection · {n} chars",
+    "degraded_hint": "Couldn't read selection — treated as a plain question"
   },
   "components": {
     "hotkey": {

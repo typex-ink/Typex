@@ -217,6 +217,8 @@ pub struct HistorySettings {
     pub enabled: bool,
     /// 保留天数；0 = 永久
     pub retention_days: u32,
+    /// 打字基准（字/分）——统计卡「节省时间」折算用（05 §8）
+    pub typing_wpm: u32,
 }
 
 impl Default for HistorySettings {
@@ -224,6 +226,7 @@ impl Default for HistorySettings {
         Self {
             enabled: true,
             retention_days: 90,
+            typing_wpm: 45,
         }
     }
 }

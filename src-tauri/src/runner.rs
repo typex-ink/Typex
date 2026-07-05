@@ -221,11 +221,13 @@ pub fn run() {
                             request_id,
                             instruction,
                             selection_chars,
+                            degraded,
                         } => {
                             let _ = events::AssistantStartedEvent {
                                 request_id: request_id as u32,
                                 instruction,
                                 selection_chars,
+                                degraded,
                             }
                             .emit(&handle_a);
                         }
@@ -322,6 +324,7 @@ pub fn run() {
                 last_result: last_result.clone(),
                 assistant: Some(assistant.clone()),
                 pending_selection: pending_selection.clone(),
+                selection_read_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 selection: selection.clone(),
                 history: history.clone(),
             });

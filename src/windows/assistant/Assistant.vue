@@ -15,6 +15,7 @@ const md = new MarkdownIt({ html: false, linkify: true });
 
 const instruction = ref("");
 const selectionChars = ref<number | null>(null);
+const degraded = ref(false);
 const answer = ref("");
 const streaming = ref(false);
 const errorText = ref("");
@@ -40,6 +41,7 @@ onMounted(async () => {
       currentRequest.value = e.payload.request_id;
       instruction.value = e.payload.instruction;
       selectionChars.value = e.payload.selection_chars;
+      degraded.value = e.payload.degraded;
       answer.value = "";
       errorText.value = "";
       pendingDelta = "";
@@ -126,8 +128,9 @@ function onKey(e: KeyboardEvent) {
         <span class="ask">🎤 {{ instruction }}</span>
         <button class="x" :title="t('assistant.close')" @click="close">✕</button>
       </div>
-      <div v-if="selectionChars !== null" class="chip-row">
-        <span class="chip">{{ t("assistant.selection_chip", { n: selectionChars }) }}</span>
+      <div v-if="selectionChars !== null || degraded" class="chip-row">
+        <span v-if="selectionChars !== null" class="chip">{{ t("assistant.selection_chip", { n: selectionChars }) }}</span>
+        <span v-if="degraded" class="chip">{{ t("assistant.degraded_hint") }}</span>
       </div>
 
       <!-- 回答区（流式 Markdown，文本可选中复制） -->

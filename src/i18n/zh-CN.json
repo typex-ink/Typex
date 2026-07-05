@@ -181,7 +181,9 @@
       "forever": "永久",
       "clear": "清空全部历史",
       "clear_btn": "清空…",
-      "cleared": "✓ 已清空"
+      "cleared": "✓ 已清空",
+      "typing_wpm": "打字基准",
+      "typing_wpm_hint": "「节省时间」统计按此速度（字/分）折算打字耗时"
     },
     "diagnostics": {
       "platform": "平台：{platform}",
@@ -270,7 +272,8 @@
   },
   "assistant": {
     "close": "关闭",
-    "selection_chip": "⌗ 选中内容 · {n} 字"
+    "selection_chip": "⌗ 选中内容 · {n} 字",
+    "degraded_hint": "读取选区失败，已按普通提问处理"
   },
   "components": {
     "hotkey": {

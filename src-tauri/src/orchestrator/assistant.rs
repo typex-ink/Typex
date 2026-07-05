@@ -23,6 +23,8 @@ pub enum AssistantEvent {
         instruction: String,
         /// 选区字数（无选区 = None）
         selection_chars: Option<u32>,
+        /// 读取选区失败降级为普通提问（05 §4 / CP-6.13 提示行）
+        degraded: bool,
     },
     Delta {
         request_id: u64,
@@ -78,6 +80,7 @@ impl AssistantService {
         &self,
         instruction: String,
         selection: Option<String>,
+        selection_read_failed: bool,
     ) -> Result<AssistantOutcome> {
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let s = self.settings.get();
@@ -117,6 +120,7 @@ impl AssistantService {
             instruction,
             selection_chars: selection.as_ref().map(|s| s.chars().count() as u32),
             had_selection: selection.is_some(),
+            degraded: selection_read_failed && selection.is_none(),
             sink: self.sink.as_ref(),
             show_panel: self.show_panel.as_ref(),
         };
@@ -130,6 +134,7 @@ struct RunCtx<'a> {
     instruction: String,
     selection_chars: Option<u32>,
     had_selection: bool,
+    degraded: bool,
     sink: &'a (dyn Fn(AssistantEvent) + Send + Sync),
     show_panel: &'a (dyn Fn(bool) + Send + Sync),
 }
@@ -142,6 +147,7 @@ impl RunCtx<'_> {
             request_id: self.request_id,
             instruction: self.instruction.clone(),
             selection_chars: self.selection_chars,
+            degraded: self.degraded,
         });
     }
 }
@@ -300,6 +306,7 @@ mod tests {
                 instruction: "指令".into(),
                 selection_chars: had_selection.then_some(3),
                 had_selection,
+                degraded: false,
                 sink: &sink,
                 show_panel: &show_panel,
             };

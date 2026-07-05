@@ -22,9 +22,10 @@ const historyEnabled = computed(() => store.settings?.history.enabled ?? true);
 // 统计口径（05 §8）
 const totalMinutes = computed(() => (stats.value?.total_duration_ms ?? 0) / 60000);
 const totalChars = computed(() => stats.value?.total_chars ?? 0);
-/// 节省时间 = 打字耗时（45 字/分）− 口述时长，负值取 0
+/// 节省时间 = 打字耗时（打字基准可在设置-历史调整，默认 45 字/分）− 口述时长，负值取 0
+const typingWpm = computed(() => store.settings?.history.typing_wpm || 45);
 const savedMinutes = computed(() =>
-  Math.max(0, totalChars.value / 45 - totalMinutes.value),
+  Math.max(0, totalChars.value / typingWpm.value - totalMinutes.value),
 );
 const speed = computed(() =>
   totalMinutes.value > 0 ? Math.round(totalChars.value / totalMinutes.value) : 0,

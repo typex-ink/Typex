@@ -30,6 +30,11 @@ const retention = computed({
   get: () => String(retentionRaw.value),
   set: (v) => (retentionRaw.value = Number(v)),
 });
+// 打字基准（05 §8：统计卡「节省时间」折算，默认 45 字/分）
+const typingWpm = useSetting(
+  (s) => s.history.typing_wpm,
+  (s, v) => (s.history.typing_wpm = v),
+);
 </script>
 
 <template>
@@ -49,6 +54,17 @@ const retention = computed({
           { value: '0', label: t('settings.history.forever') },
         ]"
       />
+    </FormRow>
+    <FormRow :label="t('settings.history.typing_wpm')" :hint="t('settings.history.typing_wpm_hint')">
+      <input
+        v-model.number="typingWpm"
+        type="range"
+        min="15"
+        max="120"
+        step="5"
+        class="slider"
+      />
+      <span class="mono wpm-val">{{ typingWpm }}</span>
     </FormRow>
     <FormRow :label="t('settings.history.clear')">
       <span v-if="cleared" class="ok">{{ t("settings.history.cleared") }}</span>
@@ -71,5 +87,16 @@ const retention = computed({
 .ok {
   color: var(--success);
   font-size: 12px;
+}
+.slider {
+  width: 120px;
+  accent-color: var(--primary);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.wpm-val {
+  font-size: 11px;
+  color: var(--text-3);
 }
 </style>

@@ -25,6 +25,8 @@ pub struct AssistantStartedEvent {
     pub instruction: String,
     /// 选区字数（摘要行显示；None = 无选区）
     pub selection_chars: Option<u32>,
+    /// 读取选区失败降级为普通提问（弹窗提示行，05 §4）
+    pub degraded: bool,
 }
 
 /// `assistant://delta` — 回答弹窗流式渲染。
