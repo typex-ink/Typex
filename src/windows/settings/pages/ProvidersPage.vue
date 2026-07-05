@@ -27,7 +27,9 @@ const managing = ref(false);
 const profiles = computed(() => store.settings?.profiles ?? []);
 // 本地模型状态（本地卡片副标题：引擎 + 已下载·体积 / 未下载）
 const localModels = ref<LocalModelInfo[]>([]);
-const hasLocalProfiles = computed(() => profiles.value.some((p) => p.kind === "local"));
+// 底部摘要行（mockup 2.5）：已下载模型列表；feature 未启用时 localModels 恒空 → 整行隐藏
+const downloadedModels = computed(() => localModels.value.filter((m) => m.downloaded));
+const localAvailable = computed(() => localModels.value.length > 0);
 
 function activeProfileOf(slot: SlotKind): ProviderProfile | null {
   const id = store.settings?.slots[slot]?.active_profile;
@@ -94,13 +96,7 @@ onMounted(loadLocalModels);
   />
   <ModelManager v-else-if="managing" @back="managing = false; loadLocalModels()" />
   <div v-else>
-    <div class="head">
-      <h5 class="page-title">{{ t("settings.nav_providers") }}</h5>
-      <!-- 「管理…」入口（mockup 2.9 自此进入）：有本地档案或模型库可用时显示 -->
-      <a v-if="hasLocalProfiles || localModels.length" class="manage" @click="managing = true">
-        {{ t("settings.providers.manage_models") }}
-      </a>
-    </div>
+    <h5 class="page-title">{{ t("settings.nav_providers") }}</h5>
     <template v-for="{ slot, key } in SLOTS" :key="slot">
       <div class="slot-h">
         <span>{{ t(key) }}</span>
@@ -119,22 +115,31 @@ onMounted(loadLocalModels);
         @switch="(id) => switchProfile(slot, id)"
       />
     </template>
+    <!-- 底部摘要行（mockup 2.5）：已下载模型 + 「管理…」入口；feature 未启用时隐藏 -->
+    <p v-if="localAvailable" class="models-line">
+      <template v-if="downloadedModels.length">
+        {{ t("settings.providers.downloaded_prefix") }}
+        {{ downloadedModels.map((m) => `${m.display_name} ${formatBytes(m.bytes)}`).join(" · ") }}
+        ·
+      </template>
+      <template v-else>{{ t("settings.providers.no_downloaded") }} · </template>
+      <a class="manage" @click="managing = true">{{ t("settings.providers.manage_models") }}</a>
+    </p>
   </div>
 </template>
 
 <style scoped>
-.head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
 .page-title {
   font-size: 15px;
   font-weight: 600;
+  margin-bottom: 14px;
+}
+.models-line {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 12px;
 }
 .manage {
-  font-size: 12px;
   text-decoration: underline;
   cursor: pointer;
   color: var(--text-2);

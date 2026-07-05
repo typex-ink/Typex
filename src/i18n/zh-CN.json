@@ -141,7 +141,9 @@
       "local_subtitle_unknown": "local · 模型未知",
       "local_downloaded": "已下载 · {size}",
       "local_not_downloaded": "未下载",
-      "local_offline": "离线"
+      "local_offline": "离线",
+      "downloaded_prefix": "已下载模型：",
+      "no_downloaded": "尚未下载本地模型"
     },
     "profile": {
       "title_new": "新建连接",

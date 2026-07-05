@@ -141,7 +141,9 @@
       "local_subtitle_unknown": "local · unknown model",
       "local_downloaded": "downloaded · {size}",
       "local_not_downloaded": "not downloaded",
-      "local_offline": "offline"
+      "local_offline": "offline",
+      "downloaded_prefix": "Downloaded models:",
+      "no_downloaded": "No local models downloaded"
     },
     "profile": {
       "title_new": "New connection",
