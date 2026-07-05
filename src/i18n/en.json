@@ -190,7 +190,11 @@
       "perm_input_monitoring": "Input monitoring permission (hotkeys)",
       "inject_backend": "Typing backend: {backend}",
       "open_log_dir": "Open log directory",
-      "log_path": "Logs: {path}"
+      "log_path": "Logs: {path}",
+      "export": "Export diagnostics",
+      "exporting": "Exporting…",
+      "export_done": "Exported: {path}",
+      "export_failed": "Export failed"
     },
     "about": {
       "privacy": "Your voice is only ever sent to the services you configure.",

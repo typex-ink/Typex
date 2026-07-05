@@ -366,3 +366,88 @@ pub fn toggle_verbatim(settings: SettingsState<'_>) -> Result<bool, TypexError> 
     })?;
     Ok(verbatim)
 }
+
+/// 导出诊断包（05 §5.2 / CP-6.11）：环境自检 + 脱敏 settings + 最近日志 → zip 到下载目录；
+/// 返回生成的文件路径。密钥引用与凭据字段一律剔除。
+#[tauri::command]
+#[specta::specta]
+pub fn export_diagnostics(
+    app: tauri::AppHandle,
+    settings: SettingsState<'_>,
+) -> Result<String, TypexError> {
+    use std::io::Write;
+    use tauri::Manager;
+
+    let dest_dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("找不到导出目录: {e}")))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dest = dest_dir.join(format!("typex-diagnostics-{stamp}.zip"));
+    let file = std::fs::File::create(&dest)
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("创建诊断包失败: {e}")))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default();
+
+    // 1. 环境自检报告
+    let report = get_diagnostics(app.clone());
+    zip.start_file("diagnostics.json", opts)
+        .and_then(|_| {
+            zip.write_all(
+                serde_json::to_string_pretty(&report)
+                    .unwrap_or_default()
+                    .as_bytes(),
+            )
+            .map_err(zip::result::ZipError::Io)
+        })
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("写诊断包失败: {e}")))?;
+
+    // 2. 脱敏 settings：credentials 全剔除（keyring 引用路径含 profile 结构也不导出）
+    let mut s = settings.get();
+    for p in &mut s.profiles {
+        p.credentials.clear();
+    }
+    zip.start_file("settings.redacted.json", opts)
+        .and_then(|_| {
+            zip.write_all(
+                serde_json::to_string_pretty(&s)
+                    .unwrap_or_default()
+                    .as_bytes(),
+            )
+            .map_err(zip::result::ZipError::Io)
+        })
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("写诊断包失败: {e}")))?;
+
+    // 3. 最近日志（写入层已 redact；此处再过一遍以防旧日志）
+    if let Ok(log_dir) = app.path().app_log_dir()
+        && let Ok(entries) = std::fs::read_dir(&log_dir)
+    {
+        let mut logs: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("typex.log"))
+            .collect();
+        logs.sort_by_key(|e| e.file_name());
+        // 只带最近 3 个滚动文件
+        for entry in logs.iter().rev().take(3) {
+            if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                let redacted: String = content
+                    .lines()
+                    .map(|l| crate::logging::redact(l) + "\n")
+                    .collect();
+                let name = format!("logs/{}", entry.file_name().to_string_lossy());
+                let _ = zip.start_file(name, opts).and_then(|_| {
+                    zip.write_all(redacted.as_bytes())
+                        .map_err(zip::result::ZipError::Io)
+                });
+            }
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| TypexError::new(ErrorCode::Internal, format!("封包失败: {e}")))?;
+    Ok(dest.display().to_string())
+}

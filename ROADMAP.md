@@ -159,7 +159,7 @@
   录音中电平动画（8fps）+ 红点角标、处理中呼吸、暂停 40% 透明 + 斜杠、错误红点；当前仅静态图标 + 状态行文字。
 - [x] **CP-6.10 提示词评测脚本**（2026-07-06：`scripts/eval-prompts.ts`（`pnpm eval:prompts [denoise|translate|rewrite] [--limit N]`，TYPEX_EVAL_* 环境变量供密钥）——解析三套 fixtures markdown 表（65+44+25 例）→ 真实 API → 「含/不含/长度/无中文/ANSWER: 前缀」要点断言 → 通过率报告；提示词模板与 Rust 逐字同步；真实 API 全量跑归入发布前回归）
   `scripts/eval-prompts.ts`：读 `docs/fixtures/denoise-cases.md` → 真实 API → 要点断言 + 通过率报告；语料已备，脚本未写。
-- [ ] **CP-6.11 日志 redact 层 + 诊断包导出**（07 §5.5 / 05 §5.2）
+- [x] **CP-6.11 日志 redact 层 + 诊断包导出**（2026-07-06：RedactWriter 写入层——所有日志行落盘/上屏前自动打码 Bearer token 与 sk- 形态密钥（4 条单测）· export_diagnostics command：环境自检 + 凭据剔除的 settings + 最近 3 个日志文件（再过一遍 redact）打 zip 到下载目录 · 诊断页「导出诊断包」按钮）
   当前靠编码纪律（日志语句不含内容/凭据）；补 tracing Layer 级自动脱敏与「导出诊断包」按钮。
 - [ ] **CP-6.12 契约快照测试**（08 §4.1）
   insta 依赖已加未使用；对四个 adapter 的完整 HTTP 请求形状做快照，防 AI 顺手重构漂移。

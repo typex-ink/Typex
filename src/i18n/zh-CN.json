@@ -190,7 +190,11 @@
       "perm_input_monitoring": "输入监听权限（快捷键）",
       "inject_backend": "注入后端：{backend}",
       "open_log_dir": "打开日志目录",
-      "log_path": "日志：{path}"
+      "log_path": "日志：{path}",
+      "export": "导出诊断包",
+      "exporting": "导出中…",
+      "export_done": "已导出：{path}",
+      "export_failed": "导出失败"
     },
     "about": {
       "privacy": "你的声音只会发送到你自己配置的服务。",

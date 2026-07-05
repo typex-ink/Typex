@@ -7,6 +7,19 @@ import { commands, type DiagnosticsReport, type PermissionStatus } from "@/ipc/b
 
 const { t } = useI18n();
 const report = ref<DiagnosticsReport | null>(null);
+const exporting = ref(false);
+const exportResult = ref("");
+
+async function exportPack() {
+  exporting.value = true;
+  exportResult.value = "";
+  const r = await commands.exportDiagnostics();
+  exporting.value = false;
+  exportResult.value =
+    r.status === "ok"
+      ? t("settings.diagnostics.export_done", { path: r.data })
+      : t("settings.diagnostics.export_failed");
+}
 
 const PERM_KEY: Record<string, string> = {
   microphone: "settings.diagnostics.perm_microphone",
@@ -43,7 +56,11 @@ function openSettings(kind: PermissionStatus["kind"]) {
     </div>
     <div class="actions">
       <Button @click="commands.openLogDir()">{{ t("settings.diagnostics.open_log_dir") }}</Button>
+      <Button :disabled="exporting" @click="exportPack">
+        {{ exporting ? t("settings.diagnostics.exporting") : t("settings.diagnostics.export") }}
+      </Button>
     </div>
+    <p v-if="exportResult" class="log-path">{{ exportResult }}</p>
     <p class="log-path">{{ t("settings.diagnostics.log_path", { path: report.log_dir }) }}</p>
   </div>
 </template>
