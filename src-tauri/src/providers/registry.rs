@@ -274,22 +274,28 @@ impl ProviderRegistry {
     }
 
     pub fn build_llm(&self, profile: &ProviderProfile) -> Result<Arc<dyn LlmProvider>> {
-        let key = self.resolve_secret(profile, "api_key")?;
-        let client = self.http_client(profile.timeout_ms);
         match profile.kind {
-            ProviderKind::ChatCompletions => Ok(Arc::new(
-                ChatCompletionsLlm::new(
-                    client,
-                    profile.base_url.clone(),
-                    key,
-                    profile.model.clone(),
-                )
-                .with_headers(profile.extra_headers.clone()),
-            )),
-            ProviderKind::Responses => Ok(Arc::new(
-                ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
+            ProviderKind::ChatCompletions => {
+                let key = self.resolve_secret(profile, "api_key")?;
+                let client = self.http_client(profile.timeout_ms);
+                Ok(Arc::new(
+                    ChatCompletionsLlm::new(
+                        client,
+                        profile.base_url.clone(),
+                        key,
+                        profile.model.clone(),
+                    )
                     .with_headers(profile.extra_headers.clone()),
-            )),
+                ))
+            }
+            ProviderKind::Responses => {
+                let key = self.resolve_secret(profile, "api_key")?;
+                let client = self.http_client(profile.timeout_ms);
+                Ok(Arc::new(
+                    ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
+                        .with_headers(profile.extra_headers.clone()),
+                ))
+            }
             #[cfg(feature = "local-models")]
             ProviderKind::Local => {
                 use crate::local::{llm_llama, manifest};
@@ -447,5 +453,31 @@ mod tests {
             Ok(_) => panic!("未配置且无模型时不应成功"),
         };
         assert_eq!(err.code, ErrorCode::NotConfigured);
+    }
+
+    #[cfg(feature = "local-models")]
+    #[test]
+    fn local_llm_build_does_not_require_api_key() {
+        let secrets = Arc::new(MemoryStore::default());
+        let reg = ProviderRegistry::new(Settings::default(), secrets);
+        let data_dir = tempfile::tempdir().unwrap();
+        reg.set_models_data_dir(data_dir.path().to_path_buf());
+
+        let profile = ProviderProfile {
+            id: "local-llm".into(),
+            slots: vec![SlotKind::Translate],
+            kind: ProviderKind::Local,
+            label: "本地 · Qwen3.5".into(),
+            base_url: String::new(),
+            model: "qwen3.5-0.8b-q4".into(),
+            credentials: HashMap::new(),
+            extra_headers: HashMap::new(),
+            extra_form: HashMap::new(),
+            timeout_ms: 120_000,
+            options: HashMap::new(),
+        };
+
+        reg.build_llm(&profile)
+            .expect("本地 LLM 档案不应要求 api_key");
     }
 }
