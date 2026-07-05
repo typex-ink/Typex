@@ -185,12 +185,12 @@
 > 顺序按收益排列：先本地 STT（收益最大、质量无折扣），本地 LLM 随后（ADR-20 节奏）。
 
 - [x] **CP-8.1 模型库清单 + 硬件分档探测**（2026-07-06：`local/manifest.rs` 6 条目（id/用途/引擎/文件+字节+SHA-256 占位/许可证/HF+ModelScope 双源/min_ram/requires_gpu）· `local/hardware.rs` sysinfo RAM/核数 + Metal 探测 → 轻量/标准/性能推荐（分档边界单测）· 诊断报告加 hardware 字段；全部锁 `local-models` feature，默认构建零影响）
-  内置 JSON 清单（id/用途/文件列表/字节数/SHA-256/许可证/双源 URL/最低硬件要求；v1.1 起始 6 个条目：SenseVoice-int8 230MB、Qwen3-ASR-0.6B/1.7B Q4、Qwen3.5-0.8B/2B/4B Q4）；`sysinfo` 探测 RAM/CPU 核数 + Metal/CUDA/Vulkan 可用性 → 轻量/标准/性能三档推荐（ADR-22 分档表）；探测结果进诊断页。
+  内置 JSON 清单（id/用途/文件列表/字节数/SHA-256/许可证/双源 URL/最低硬件要求；v1.1 起始 6 个条目：SenseVoice-int8 230MB、Qwen3-ASR-0.6B/1.7B Q8_0、Qwen3.5-0.8B/2B/4B Q4）；`sysinfo` 探测 RAM/CPU 核数 + Metal/CUDA/Vulkan 可用性 → 轻量/标准/性能三档推荐（ADR-22 分档表）；探测结果进诊断页。
 - [x] **CP-8.2 模型下载管理器**（2026-07-06：`local/download.rs`——HTTP Range 断点续传（.part 续传）+ SHA-256 校验 + 失败换源重试 + 进度回调；存储 `{data_dir}/models/{model_id}/`；list_downloaded/delete_model；wiremock 集成测试 9 例（Range 形状/续传/校验失败换源/进度单调）；Tauri commands 待 v1.1 开启 feature 时接入 runner）
   HuggingFace + ModelScope 双源（首包延迟自动择优，可固定）；HTTP Range 断点续传、SHA-256 校验、失败换源重试；进度经 Tauri event 推送；存储 `{app_data_dir}/models/{model_id}/`；下载是本地 Provider 唯一网络行为（零上报承诺不变）。
 - [x] **CP-8.3 本地 STT Provider · SenseVoice 轻量档**（2026-07-06：`local/stt_sense_voice.rs`——sherpa-rs 静态链接，同一 SttProvider trait，惰性加载 + unload()；capabilities 不限音频时长；模型未下载 → InvalidRequest 不 panic；3 条单测；真实模型推理属人工回归）
   sherpa-onnx 官方 crate 静态链接 + SenseVoice-Small int8；实现同一 `SttProvider` trait（`kind: local`，无 base_url/凭据）；`capabilities()` 报告不限音频时长；错误分类只剩 InvalidRequest/模型未下载。弱机器上唯一保证实时的选项（ADR-22）。
-- [x] **CP-8.4 本地 STT Provider · Qwen3-ASR 标准/性能档**（2026-07-06：`local/stt_qwen_asr.rs`——llama-cpp-2 mtmd 音频路径（MtmdBitmap::from_audio_data → eval_chunks → 贪心解码）；主 GGUF + mmproj 双文件（manifest 已补 mmproj 条目）；max_bytes=10MB 强制 VAD 切片规避长音频 bug；1.7B 条目 requires_gpu；3 条单测）
+- [x] **CP-8.4 本地 STT Provider · Qwen3-ASR 标准/性能档**（2026-07-06：`local/stt_qwen_asr.rs`——llama-cpp-2 mtmd 音频路径（MtmdBitmap::from_audio_data → eval_chunks → 贪心解码）；主 GGUF + mmproj 双文件（manifest 已补官方 ggml-org Q8_0/mmproj 条目）；max_bytes=10MB 强制 VAD 切片规避长音频 bug；1.7B 条目 requires_gpu；3 条单测）
   llama.cpp（llama-cpp-2 绑定，qwen3vl 音频架构官方 GGUF）跑 0.6B/1.7B；1.7B 仅 GPU 加速可用时提供（纯 CPU 低于实时）；llama.cpp 音频长音频 bug 用现有 VAD 切片路径规避（短分段转写本来就是 F-1 路径）。
 - [x] **CP-8.5 本地 LLM Provider（整理/翻译槽）**（2026-07-06：`local/llm_llama.rs`——同一 LlmProvider trait，专属线程推理 → mpsc → BoxStream 流式 delta 与云端一致；n_ctx 4K；GGUF 内置 chat 模板 + ChatML 兜底；LoadPolicy 常驻/用完即卸 + unload()；LlamaBackend OnceLock 单例 + 日志静默；3 条单测；槽位限制在 CP-8.6 registry 层执行）
   llama.cpp + Qwen3.5 0.8B/2B/4B Q4_K_M instruct；实现同一 `LlmProvider` trait（流式 delta 与云端一致）；运行时策略可选：常驻内存 / 录音时预热（冷加载 1–3s）；上下文 4K；**槽位限制：只允许绑定整理与翻译槽，问答槽默认不提供**（性能档设备允许设置中手动指向 4B，ADR-22）。

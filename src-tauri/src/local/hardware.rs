@@ -13,9 +13,9 @@ use sysinfo::System;
 pub enum Tier {
     /// 轻量（<8 GB RAM 或无 GPU + 弱 CPU）：SenseVoice + 0.8B，~0.8 GB。
     Lightweight,
-    /// 标准（8–16 GB RAM）：Qwen3-ASR-0.6B + Qwen3.5-2B，~1.8 GB。
+    /// 标准（8–16 GB RAM）：Qwen3-ASR-0.6B + Qwen3.5-2B，~2.3 GB。
     Standard,
-    /// 性能（≥16 GB + GPU）：Qwen3-ASR-1.7B + Qwen3.5-4B，~3.6 GB。
+    /// 性能（≥16 GB + GPU）：Qwen3-ASR-1.7B + Qwen3.5-4B，~5.3 GB。
     Performance,
 }
 
@@ -42,8 +42,8 @@ impl Tier {
     pub fn model_ids(self) -> [&'static str; 2] {
         match self {
             Tier::Lightweight => ["sense-voice-small-int8", "qwen3.5-0.8b-q4"],
-            Tier::Standard => ["qwen3-asr-0.6b-q4", "qwen3.5-2b-q4"],
-            Tier::Performance => ["qwen3-asr-1.7b-q4", "qwen3.5-4b-q4"],
+            Tier::Standard => ["qwen3-asr-0.6b-q8", "qwen3.5-2b-q4"],
+            Tier::Performance => ["qwen3-asr-1.7b-q8", "qwen3.5-4b-q4"],
         }
     }
 

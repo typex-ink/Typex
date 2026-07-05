@@ -91,7 +91,7 @@ Content-Type: application/json
 
 不走 HTTP，进程内推理，实现同一个 `SttProvider` trait。按硬件档位提供两条引擎路线：
 
-- **Qwen3-ASR（标准/性能档）**：llama.cpp（qwen3vl 音频架构，官方 ggml-org GGUF）跑 `Qwen3-ASR-0.6B`（Q4 约 0.5 GB）/ `Qwen3-ASR-1.7B`（Q4 约 1.1 GB，仅 GPU 加速可用时提供——纯 CPU 低于实时）。52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA。**注意**：llama.cpp 音频支持仍标 experimental、长音频有已知 bug——所有音频先过 VAD 切片成短分段再转写（本来就是 F-1 的路径），规避该问题。
+- **Qwen3-ASR（标准/性能档）**：llama.cpp（qwen3vl 音频架构，官方 ggml-org GGUF）跑 `Qwen3-ASR-0.6B`（Q8_0 主模型 + mmproj 约 1.0 GB）/ `Qwen3-ASR-1.7B`（Q8_0 主模型 + mmproj 约 2.5 GB，仅 GPU 加速可用时提供——纯 CPU 低于实时）。52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA。**注意**：llama.cpp 音频支持仍标 experimental、长音频有已知 bug——所有音频先过 VAD 切片成短分段再转写（本来就是 F-1 的路径），规避该问题。
 - **SenseVoice（轻量档）**：sherpa-onnx（官方 Rust crate，静态链接）+ `SenseVoice-Small int8`（约 230 MB）。非自回归，CPU 实时数倍速——弱机器上唯一保证实时的选项；自带 VAD 可复用。热词经 sherpa hotwords 接口（F-10 预留）。
 - whisper.cpp 降为可选扩展（Qwen3-ASR 的语言覆盖已够长尾）。
 - `capabilities()` 报告：不限音频时长（本地无 25 MB 上限）；错误分类只剩 `InvalidRequest`/模型未下载。
@@ -286,7 +286,7 @@ F-3 不引入新的 Provider 类型：
     {
       "id": "local-qwen-asr", "slot": "stt", "kind": "local",
       "label": "本地 · Qwen3-ASR-0.6B",
-      "model": "qwen3-asr-0.6b-q4",           // 指向模型库中的条目，无 base_url、无凭据
+      "model": "qwen3-asr-0.6b-q8",           // 指向模型库中的条目，无 base_url、无凭据
       "options": { "language": "auto" }
     },
     {
@@ -325,8 +325,8 @@ F-3 不引入新的 Provider 类型：
 本地模型不随安装包分发（安装包只含推理引擎，约 +30–60 MB）；由下载管理器按需获取：
 
 - **模型库清单**（内置 JSON，随应用更新）：每个模型条目 = id、显示名、用途（stt/llm）、文件列表、字节数、SHA-256、许可证、双源 URL、**最低硬件要求（RAM/是否需 GPU 加速）**。
-  - v1.1 起始清单（[ADR-22](09-decisions.md)）：STT = `sense-voice-small-int8`（230 MB）/ `qwen3-asr-0.6b-q4`（约 0.5 GB）/ `qwen3-asr-1.7b-q4`（约 1.1 GB，要求 GPU 加速）；LLM = `qwen3.5-0.8b-q4`（约 0.6 GB）/ `qwen3.5-2b-q4`（约 1.3 GB）/ `qwen3.5-4b-q4`（约 2.5 GB）。
-- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 1.8 GB）/ 性能（ASR-1.7B + 4B，约 3.6 GB）；用户可改档或单选模型。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。
+  - v1.1 起始清单（[ADR-22](09-decisions.md)）：STT = `sense-voice-small-int8`（约 230 MB）/ `qwen3-asr-0.6b-q8`（Q8_0，约 1.0 GB）/ `qwen3-asr-1.7b-q8`（Q8_0，约 2.5 GB，要求 GPU 加速）；LLM = `qwen3.5-0.8b-q4`（约 0.5 GB）/ `qwen3.5-2b-q4`（约 1.3 GB）/ `qwen3.5-4b-q4`（约 2.7 GB）。
+- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。
 - **双源**：HuggingFace 与 ModelScope 镜像；首包探测延迟自动择优，可在设置中固定。
 - **下载行为**：断点续传（HTTP Range）、SHA-256 校验、失败换源重试；进度经 Tauri event 推送 UI（onboarding 第 3 步与设置-模型服务页共用同一进度组件）。
 - **存储**：`{app_data_dir}/models/{model_id}/`；设置-模型服务页显示占用体积、支持删除；删除被槽位引用的模型时警告。

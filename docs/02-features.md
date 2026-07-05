@@ -241,14 +241,14 @@
 
 **目标：消灭「必须先配 API 才能用」的上手门槛**（[ADR-20](09-decisions.md)）。本地模型以「本地 · 离线」预设的身份出现在模型服务列表中，与云端预设同列、槽位级自由混搭；**未配置任何 API 时作为默认兜底（零配置模式）**。
 
-- **选型：Qwen 全家桶为主（[ADR-22](09-decisions.md)，均 Apache 2.0，GGUF 走 llama.cpp 单引擎）**：STT = Qwen3-ASR（0.6B/1.7B，52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA）；整理/翻译 = Qwen3.5 小模型（0.8B/2B/4B）。SenseVoice-Small（sherpa-onnx，int8 约 230 MB，非自回归、CPU 实时数倍速）保留为轻量档 STT——弱机器上唯一能保证实时的选项。
+- **选型：Qwen 全家桶为主（[ADR-22](09-decisions.md)，均 Apache 2.0，GGUF 走 llama.cpp 单引擎）**：STT = Qwen3-ASR（0.6B/1.7B，52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA；官方 ggml-org GGUF 当前可用量化为 Q8_0/bf16，Typex 选 Q8_0）；整理/翻译 = Qwen3.5 小模型（0.8B/2B/4B，Q4_K_M）。SenseVoice-Small（sherpa-onnx，int8 约 230 MB，非自回归、CPU 实时数倍速）保留为轻量档 STT——弱机器上唯一能保证实时的选项。
 - **硬件分档推荐**：下载时按设备性能（RAM / CPU / GPU 加速）自动推荐档位，可手动改档；档位只影响首次下载组合，之后各槽位可在模型库自由换单个模型：
 
 | 档位 | 适用设备 | STT | 整理/翻译 LLM | 合计体积 |
 |---|---|---|---|---|
 | 轻量 | RAM < 8 GB 或弱 CPU 无 GPU | SenseVoice-Small int8（230 MB） | Qwen3.5-0.8B（约 0.6 GB） | 约 0.8 GB |
-| 标准 | 8–16 GB RAM | Qwen3-ASR-0.6B Q4（约 0.5 GB） | Qwen3.5-2B（约 1.3 GB） | 约 1.8 GB |
-| 性能 | ≥ 16 GB + GPU 加速 | Qwen3-ASR-1.7B Q4（约 1.1 GB） | Qwen3.5-4B（约 2.5 GB） | 约 3.6 GB |
+| 标准 | 8–16 GB RAM | Qwen3-ASR-0.6B Q8_0（主模型 + mmproj，约 1.0 GB） | Qwen3.5-2B Q4_K_M（约 1.3 GB） | 约 2.3 GB |
+| 性能 | ≥ 16 GB + GPU 加速 | Qwen3-ASR-1.7B Q8_0（主模型 + mmproj，约 2.5 GB） | Qwen3.5-4B Q4_K_M（约 2.7 GB） | 约 5.3 GB |
 
 - **问答槽不提供本地兜底**——小模型问答体验差,未配置时助手指令走 HUD 失败态显示配置引导（性能档设备允许在设置中手动指向本地大档模型）。
 - **模型管理**：不随安装包分发；应用内按需下载（HuggingFace + ModelScope 双源自动择优，校验和 + 断点续传），设置-模型服务页可删除已下载模型。

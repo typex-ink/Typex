@@ -79,73 +79,77 @@ pub fn catalog() -> Vec<ModelEntry> {
             files: vec![
                 ModelFile {
                     name: "model.int8.onnx".into(),
-                    bytes: 241_172_480, // ~230 MB
+                    bytes: 239_233_841, // ~228 MiB
                     sha256: "".into(),  // TODO: 填入真实哈希
                 },
                 ModelFile {
                     name: "tokens.txt".into(),
-                    bytes: 399_360, // ~390 KB
+                    bytes: 315_894,
                     sha256: "".into(),
                 },
             ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/FunAudioLLM/SenseVoiceSmall/resolve/main"
-                    .into(),
-                modelscope: "https://modelscope.cn/models/iic/SenseVoiceSmall/resolve/master"
-                    .into(),
+                huggingface: "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main".into(),
+                modelscope:
+                    "https://modelscope.cn/models/poloniumrock/SenseVoiceSmallOnnx/resolve/master"
+                        .into(),
             },
             min_ram_gb: 2,
             requires_gpu: false,
         },
         ModelEntry {
-            id: "qwen3-asr-0.6b-q4".into(),
-            display_name: "Qwen3-ASR 0.6B Q4".into(),
+            id: "qwen3-asr-0.6b-q8".into(),
+            display_name: "Qwen3-ASR 0.6B Q8_0".into(),
             purpose: ModelPurpose::Stt,
             engine: ModelEngine::Llama,
             files: vec![
                 ModelFile {
-                    name: "qwen3-asr-0.6b-q4_k_m.gguf".into(),
-                    bytes: 536_870_912, // ~0.5 GB
+                    name: "Qwen3-ASR-0.6B-Q8_0.gguf".into(),
+                    bytes: 804_749_248,
                     sha256: "".into(),
                 },
                 ModelFile {
-                    name: "mmproj-qwen3-asr-0.6b-f16.gguf".into(),
-                    bytes: 692_060_160, // ~660 MB（音频编码器投影，CP-8.4）
+                    name: "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf".into(),
+                    bytes: 214_392_480, // 音频编码器投影（CP-8.4）
                     sha256: "".into(),
                 },
             ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/Qwen/Qwen3-ASR-0.6B-GGUF/resolve/main".into(),
-                modelscope: "https://modelscope.cn/models/Qwen/Qwen3-ASR-0.6B-GGUF/resolve/master"
+                huggingface: "https://huggingface.co/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/main"
                     .into(),
+                modelscope:
+                    "https://modelscope.cn/models/ggml-org/Qwen3-ASR-0.6B-GGUF/resolve/master"
+                        .into(),
             },
             min_ram_gb: 4,
             requires_gpu: false,
         },
         ModelEntry {
-            id: "qwen3-asr-1.7b-q4".into(),
-            display_name: "Qwen3-ASR 1.7B Q4".into(),
+            id: "qwen3-asr-1.7b-q8".into(),
+            display_name: "Qwen3-ASR 1.7B Q8_0".into(),
             purpose: ModelPurpose::Stt,
             engine: ModelEngine::Llama,
             files: vec![
                 ModelFile {
-                    name: "qwen3-asr-1.7b-q4_k_m.gguf".into(),
-                    bytes: 1_181_116_006, // ~1.1 GB
+                    name: "Qwen3-ASR-1.7B-Q8_0.gguf".into(),
+                    bytes: 2_165_034_944,
                     sha256: "".into(),
                 },
                 ModelFile {
-                    name: "mmproj-qwen3-asr-1.7b-f16.gguf".into(),
-                    bytes: 692_060_160, // ~660 MB（音频编码器投影，CP-8.4）
+                    name: "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf".into(),
+                    bytes: 355_709_344, // 音频编码器投影（CP-8.4）
                     sha256: "".into(),
                 },
             ],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/Qwen/Qwen3-ASR-1.7B-GGUF/resolve/main".into(),
-                modelscope: "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B-GGUF/resolve/master"
+                huggingface: "https://huggingface.co/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/main"
                     .into(),
+                modelscope:
+                    "https://modelscope.cn/models/ggml-org/Qwen3-ASR-1.7B-GGUF/resolve/master"
+                        .into(),
             },
             min_ram_gb: 8,
             requires_gpu: true, // 纯 CPU 低于实时（RTFx≈0.49），需 GPU 加速（ADR-22）
@@ -157,15 +161,17 @@ pub fn catalog() -> Vec<ModelEntry> {
             purpose: ModelPurpose::Llm,
             engine: ModelEngine::Llama,
             files: vec![ModelFile {
-                name: "qwen3.5-0.8b-q4_k_m.gguf".into(),
-                bytes: 644_245_094, // ~0.6 GB
+                name: "Qwen3.5-0.8B-Q4_K_M.gguf".into(),
+                bytes: 532_517_120,
                 sha256: "".into(),
             }],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/Qwen/Qwen3.5-0.8B-GGUF/resolve/main".into(),
-                modelscope: "https://modelscope.cn/models/Qwen/Qwen3.5-0.8B-GGUF/resolve/master"
+                huggingface: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main"
                     .into(),
+                modelscope:
+                    "https://modelscope.cn/models/unsloth/Qwen3.5-0.8B-GGUF/resolve/master"
+                        .into(),
             },
             min_ram_gb: 4,
             requires_gpu: false,
@@ -176,14 +182,14 @@ pub fn catalog() -> Vec<ModelEntry> {
             purpose: ModelPurpose::Llm,
             engine: ModelEngine::Llama,
             files: vec![ModelFile {
-                name: "qwen3.5-2b-q4_k_m.gguf".into(),
-                bytes: 1_395_864_371, // ~1.3 GB
+                name: "Qwen3.5-2B-Q4_K_M.gguf".into(),
+                bytes: 1_280_835_840,
                 sha256: "".into(),
             }],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/Qwen/Qwen3.5-2B-GGUF/resolve/main".into(),
-                modelscope: "https://modelscope.cn/models/Qwen/Qwen3.5-2B-GGUF/resolve/master"
+                huggingface: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main".into(),
+                modelscope: "https://modelscope.cn/models/unsloth/Qwen3.5-2B-GGUF/resolve/master"
                     .into(),
             },
             min_ram_gb: 8,
@@ -195,14 +201,14 @@ pub fn catalog() -> Vec<ModelEntry> {
             purpose: ModelPurpose::Llm,
             engine: ModelEngine::Llama,
             files: vec![ModelFile {
-                name: "qwen3.5-4b-q4_k_m.gguf".into(),
-                bytes: 2_684_354_560, // ~2.5 GB
+                name: "Qwen3.5-4B-Q4_K_M.gguf".into(),
+                bytes: 2_740_937_888,
                 sha256: "".into(),
             }],
             license: "Apache-2.0".into(),
             sources: ModelSources {
-                huggingface: "https://huggingface.co/Qwen/Qwen3.5-4B-GGUF/resolve/main".into(),
-                modelscope: "https://modelscope.cn/models/Qwen/Qwen3.5-4B-GGUF/resolve/master"
+                huggingface: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main".into(),
+                modelscope: "https://modelscope.cn/models/unsloth/Qwen3.5-4B-GGUF/resolve/master"
                     .into(),
             },
             min_ram_gb: 16,
@@ -214,6 +220,17 @@ pub fn catalog() -> Vec<ModelEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry_by_id(id: &str) -> ModelEntry {
+        catalog()
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap_or_else(|| panic!("缺少模型条目：{id}"))
+    }
+
+    fn file_names(entry: &ModelEntry) -> Vec<String> {
+        entry.files.iter().map(|file| file.name.clone()).collect()
+    }
 
     #[test]
     fn catalog_has_six_entries() {
@@ -236,7 +253,7 @@ mod tests {
             .map(|e| e.id.clone())
             .collect();
         // ADR-22：1.7B STT 和 4B LLM 需要 GPU
-        assert!(gpu_required.contains(&"qwen3-asr-1.7b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3-asr-1.7b-q8".to_string()));
         assert!(gpu_required.contains(&"qwen3.5-4b-q4".to_string()));
         assert_eq!(gpu_required.len(), 2);
     }
@@ -245,6 +262,94 @@ mod tests {
     fn all_entries_have_apache_license() {
         for entry in catalog() {
             assert_eq!(entry.license, "Apache-2.0", "许可证不符：{}", entry.id);
+        }
+    }
+
+    #[test]
+    fn sense_voice_entry_uses_sherpa_compatible_files() {
+        let entry = entry_by_id("sense-voice-small-int8");
+        assert_eq!(entry.engine, ModelEngine::Sherpa);
+        assert_eq!(file_names(&entry), vec!["model.int8.onnx", "tokens.txt"]);
+        assert!(entry.sources.huggingface.contains("/csukuangfj/"));
+        assert!(entry.sources.modelscope.contains("/poloniumrock/"));
+    }
+
+    #[test]
+    fn qwen_asr_entries_use_official_ggml_q8_files() {
+        let cases = [
+            (
+                "qwen3-asr-0.6b-q8",
+                vec![
+                    "Qwen3-ASR-0.6B-Q8_0.gguf",
+                    "mmproj-Qwen3-ASR-0.6B-Q8_0.gguf",
+                ],
+            ),
+            (
+                "qwen3-asr-1.7b-q8",
+                vec![
+                    "Qwen3-ASR-1.7B-Q8_0.gguf",
+                    "mmproj-Qwen3-ASR-1.7B-Q8_0.gguf",
+                ],
+            ),
+        ];
+
+        for (id, expected_files) in cases {
+            let entry = entry_by_id(id);
+            assert_eq!(entry.engine, ModelEngine::Llama);
+            assert_eq!(file_names(&entry), expected_files);
+            assert!(entry.sources.huggingface.contains("/ggml-org/"));
+            assert!(entry.sources.modelscope.contains("/ggml-org/"));
+            assert!(entry.files.iter().all(|file| file.bytes > 0));
+        }
+    }
+
+    #[test]
+    fn qwen_llm_entries_use_unsloth_q4_k_m_files() {
+        let cases = [
+            ("qwen3.5-0.8b-q4", "Qwen3.5-0.8B-Q4_K_M.gguf"),
+            ("qwen3.5-2b-q4", "Qwen3.5-2B-Q4_K_M.gguf"),
+            ("qwen3.5-4b-q4", "Qwen3.5-4B-Q4_K_M.gguf"),
+        ];
+
+        for (id, expected_file) in cases {
+            let entry = entry_by_id(id);
+            assert_eq!(entry.engine, ModelEngine::Llama);
+            assert_eq!(file_names(&entry), vec![expected_file]);
+            assert!(entry.sources.huggingface.contains("/unsloth/"));
+            assert!(entry.sources.modelscope.contains("/unsloth/"));
+            assert!(entry.files.iter().all(|file| file.bytes > 0));
+        }
+    }
+
+    #[test]
+    fn source_prefixes_are_resolve_urls_and_avoid_removed_qwen_gguf_namespace() {
+        for entry in catalog() {
+            assert!(
+                entry
+                    .sources
+                    .huggingface
+                    .starts_with("https://huggingface.co/")
+                    && entry.sources.huggingface.contains("/resolve/main"),
+                "HuggingFace 源格式错误：{} -> {}",
+                entry.id,
+                entry.sources.huggingface
+            );
+            assert!(
+                entry
+                    .sources
+                    .modelscope
+                    .starts_with("https://modelscope.cn/models/")
+                    && entry.sources.modelscope.contains("/resolve/master"),
+                "ModelScope 源格式错误：{} -> {}",
+                entry.id,
+                entry.sources.modelscope
+            );
+            assert!(
+                !entry.sources.huggingface.contains("Qwen/Qwen3-ASR-")
+                    && !entry.sources.modelscope.contains("Qwen/Qwen3-ASR-"),
+                "Qwen ASR GGUF 不在 Qwen namespace：{}",
+                entry.id
+            );
         }
     }
 }
