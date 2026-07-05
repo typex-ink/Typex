@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // ProviderCard（04 §7 / mockup 2.5）：label + 模型 + 状态 + 测试/编辑/切换
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import { commands, type ProviderProfile } from "@/ipc/bindings";
+
+const { t, te } = useI18n();
 
 const props = defineProps<{
   profile: ProviderProfile | null;
@@ -38,15 +41,8 @@ async function runTest() {
 }
 
 function errText(code: string): string {
-  const map: Record<string, string> = {
-    auth_error: "密钥无效（401）",
-    network_error: "无法连接",
-    timeout: "超时",
-    not_configured: "未配置",
-    server_error: "服务端错误",
-    invalid_request: "请求被拒",
-  };
-  return `✗ ${map[code] ?? code}`;
+  const key = `components.provider_card.err_${code}`;
+  return `✗ ${te(key) ? t(key) : code}`;
 }
 </script>
 
@@ -59,14 +55,16 @@ function errText(code: string): string {
         <small>{{ profile.kind }}</small>
       </div>
       <span v-if="testResult" class="lat" :class="{ err: testError }">{{ testResult }}</span>
-      <Button size="sm" :disabled="testing" @click="runTest">{{ testing ? "测试中…" : "测试" }}</Button>
-      <Button size="sm" @click="emit('edit')">编辑</Button>
+      <Button size="sm" :disabled="testing" @click="runTest">
+        {{ testing ? t("components.provider_card.testing") : t("actions.test") }}
+      </Button>
+      <Button size="sm" @click="emit('edit')">{{ t("actions.edit") }}</Button>
       <span class="switch-wrap">
         <Button variant="ghost" size="sm" @click="switchOpen = !switchOpen">
-          切换 {{ switchOpen ? "▴" : "▾" }}
+          {{ t("actions.switch") }} {{ switchOpen ? "▴" : "▾" }}
         </Button>
         <div v-if="switchOpen" class="menu">
-          <div class="st">切换配置档案</div>
+          <div class="st">{{ t("components.provider_card.switch_menu") }}</div>
           <hr />
           <div
             v-for="alt in alternatives"
@@ -88,7 +86,7 @@ function errText(code: string): string {
               emit('create');
             "
           >
-            <span>＋ 新建配置…</span>
+            <span>{{ t("components.provider_card.new_config") }}</span>
           </div>
         </div>
       </span>
@@ -96,10 +94,10 @@ function errText(code: string): string {
     <template v-else>
       <div class="logo empty">?</div>
       <div class="meta">
-        <b class="unconfigured">未配置</b><br />
-        <small>此槽位尚未连接任何服务</small>
+        <b class="unconfigured">{{ t("components.provider_card.unconfigured") }}</b><br />
+        <small>{{ t("components.provider_card.unconfigured_hint") }}</small>
       </div>
-      <Button variant="primary" size="sm" @click="emit('create')">配置…</Button>
+      <Button variant="primary" size="sm" @click="emit('create')">{{ t("components.provider_card.configure") }}</Button>
     </template>
   </div>
 </template>

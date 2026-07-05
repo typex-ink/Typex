@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // 快捷键页（mockup 2.10）
+import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";
 import HotkeyRecorder from "@/components/HotkeyRecorder.vue";
 import { useSetting } from "@/composables/useSetting";
+
+const { t } = useI18n();
 
 const dictation = useSetting(
   (s) => s.hotkeys.dictation,
@@ -22,15 +25,15 @@ const assistant = useSetting(
 
 <template>
   <div>
-    <h5 class="page-title">快捷键</h5>
-    <p class="desc">听写与助手键位可改；翻译 = 两键同按（自动跟随）。</p>
-    <FormRow label="听写">
+    <h5 class="page-title">{{ t("settings.nav_hotkeys") }}</h5>
+    <p class="desc">{{ t("settings.hotkeys.desc") }}</p>
+    <FormRow :label="t('settings.nav_dictation')">
       <HotkeyRecorder v-model="dictation" />
     </FormRow>
-    <FormRow label="助手">
+    <FormRow :label="t('settings.nav_assistant')">
       <HotkeyRecorder v-model="assistant" />
     </FormRow>
-    <FormRow label="翻译" hint="听写键 + 助手键 同时按住">
+    <FormRow :label="t('settings.nav_translation')" :hint="t('settings.hotkeys.translation_hint')">
       <span class="combo">
         <HotkeyRecorder :model-value="dictation" style="pointer-events: none" />
         <span class="plus">+</span>

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // SecretInput（04 §7）：密钥专用——默认掩码、显隐切换、粘贴按钮
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 
+const { t } = useI18n();
 const model = defineModel<string>({ required: true });
 defineProps<{ placeholder?: string }>();
 const visible = ref(false);
@@ -24,10 +26,10 @@ async function paste() {
       spellcheck="false"
       autocomplete="off"
     />
-    <button type="button" :title="visible ? '隐藏' : '显示'" @click="visible = !visible">
+    <button type="button" :title="visible ? t('components.secret.hide') : t('components.secret.show')" @click="visible = !visible">
       {{ visible ? "🙈" : "👁" }}
     </button>
-    <button type="button" title="粘贴" @click="paste">📋</button>
+    <button type="button" :title="t('components.secret.paste')" @click="paste">📋</button>
   </span>
 </template>
 

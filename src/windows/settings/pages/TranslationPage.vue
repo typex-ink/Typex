@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 翻译页（mockup 2.3）
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";
 import Select from "@/components/Select.vue";
 import Toggle from "@/components/Toggle.vue";
@@ -27,6 +28,7 @@ const LANGS = [
   "Русский",
 ].map((l) => ({ value: l, label: l }));
 
+const { t } = useI18n();
 const store = useSettingsStore();
 const source = useSetting(
   (s) => s.translation.source_language,
@@ -60,33 +62,40 @@ function save() {
 
 <template>
   <div>
-    <h5 class="page-title">翻译</h5>
-    <FormRow label="源语言" hint="你说话使用的语言">
+    <h5 class="page-title">{{ t("settings.nav_translation") }}</h5>
+    <FormRow :label="t('settings.translation.source')" :hint="t('settings.translation.source_hint')">
       <Select v-model="source" :options="LANGS" />
     </FormRow>
-    <FormRow label="目标语言" hint="要翻译成的语言">
+    <FormRow :label="t('settings.translation.target')" :hint="t('settings.translation.target_hint')">
       <Select v-model="target" :options="LANGS" />
     </FormRow>
-    <FormRow label="双向翻译" :hint="`检测到你说的是 ${target} 时，自动译回 ${source}`">
+    <FormRow
+      :label="t('settings.translation.bidirectional')"
+      :hint="t('settings.translation.bidirectional_hint', { target, source })"
+    >
       <Toggle v-model="bidirectional" />
     </FormRow>
 
     <FormRow
       v-if="!promptOpen"
-      label="翻译提示词（高级）"
-      hint="占位符：{transcript} 原始转写 · {source_language} 源语言 · {target_language} 目标语言 · {bidirectional_source}/{bidirectional_target} 双向子句（开关关闭时该行省略）"
+      :label="t('settings.translation.prompt_label')"
+      :hint="t('settings.translation.prompt_hint')"
     >
-      <Button variant="ghost" size="sm" @click="openEditor">展开编辑 ▾</Button>
+      <Button variant="ghost" size="sm" @click="openEditor">{{ t("prompt.expand") }}</Button>
     </FormRow>
     <template v-else>
-      <FormRow label="翻译提示词（高级）">
-        <Button variant="ghost" size="sm" @click="promptOpen = false">收起 ▴</Button>
+      <FormRow :label="t('settings.translation.prompt_label')">
+        <Button variant="ghost" size="sm" @click="promptOpen = false">{{ t("prompt.collapse") }}</Button>
       </FormRow>
       <textarea v-model="draft" class="ta" rows="8" spellcheck="false" />
-      <p v-if="missing.length" class="ph-error">缺少必需占位符：{{ missing.join("、") }}</p>
+      <p v-if="missing.length" class="ph-error">
+        {{ t("settings.translation.ph_missing_list", { list: missing.join(" · ") }) }}
+      </p>
       <div class="editor-actions">
-        <Button variant="primary" size="sm" :disabled="missing.length > 0" @click="save">保存</Button>
-        <Button size="sm" @click="draft = TRANSLATE_DEFAULT">恢复默认</Button>
+        <Button variant="primary" size="sm" :disabled="missing.length > 0" @click="save">
+          {{ t("actions.save") }}
+        </Button>
+        <Button size="sm" @click="draft = TRANSLATE_DEFAULT">{{ t("actions.restore_default") }}</Button>
       </div>
     </template>
   </div>

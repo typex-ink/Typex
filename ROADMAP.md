@@ -146,7 +146,7 @@
   权限检测目前仅辅助功能（`permissions.rs::check_all`）；补麦克风（AVCaptureDevice / tauri-plugin-macos-permissions）与输入监听（IOHIDCheckAccess）实时状态；听写页麦克风下拉接 cpal 设备枚举（当前只有「系统默认」占位）。
 - [x] **CP-6.5 HUD 细节补齐**（2026-07-06：快照增 busy_hint 字段——重按忽略时 HUD 轻晃 0.35s + 「正在处理上一条…」微文案（reduced-motion 降级）· 录音超 10 分钟温和提示 · 听写模式点徽标一键切原样（toggle_verbatim command，02 F-9 双入口））
   录音超 10 分钟温和提示；重按忽略时的轻晃 +「正在处理上一条…」微文案（EmitBusyHint 已有 Effect，HUD 未渲染）；HUD 处一键切原样模式入口（02 F-9：HUD 与设置均可切换）。
-- [ ] **CP-6.6 i18n 全量化**（ADR-11 中英双语首发）
+- [x] **CP-6.6 i18n 全量化**（2026-07-06：i18n 资源 53→251 key（settings/home/onboarding/assistant/components 全节）· 4 窗口挂 vue-i18n + useLocale 跟随「界面语言」设置（system=系统语言）· onboarding 第 1 步语言切换直写设置即时生效全 UI · HUD 保持静态 JSON 极简纪律 · 新增 zh/en key 对齐契约测试；提示词模板/语言列表/厂商名按业务数据保留）
   当前仅 HUD 与错误码走 i18n 资源；设置/引导/主页/助手界面文案为硬编码中文——全部迁入 vue-i18n 并跟随「界面语言」设置（含 onboarding 第 1 步语言切换即时生效于全 UI）。
 
 **P1 缺口（可延 v1.x）**

@@ -2,9 +2,13 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import "@/styles/base.css";
 import { initTheme } from "@/composables/useTheme";
+import { makeI18n } from "@/i18n";
+import { syncLocale } from "@/composables/useLocale";
 
 document.documentElement.classList.add("solid-window");
 import Onboarding from "./Onboarding.vue";
 
-createApp(Onboarding).use(createPinia()).mount("#app");
+const i18n = makeI18n();
+createApp(Onboarding).use(createPinia()).use(i18n).mount("#app");
+syncLocale(i18n);
 initTheme();

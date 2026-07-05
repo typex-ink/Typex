@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // ProviderCard 编辑子页（mockup 2.6）：预设下拉 → 按 kind 动态字段 → 保存/测试/删除
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import FormRow from "@/components/FormRow.vue";
 import Input from "@/components/Input.vue";
@@ -19,11 +20,13 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ back: []; saved: [] }>();
 
-const SLOT_LABEL: Record<SlotKind, string> = {
-  stt: "语音转文字",
-  polish: "文本整理",
-  translate: "翻译模型",
-  assistant: "问答模型",
+const { t } = useI18n();
+
+const SLOT_LABEL_KEY: Record<SlotKind, string> = {
+  stt: "settings.providers.slot_stt",
+  polish: "settings.providers.slot_polish",
+  translate: "settings.providers.slot_translate",
+  assistant: "settings.providers.slot_assistant",
 };
 
 const presets = presetsForSlot(props.slotKind);
@@ -49,6 +52,10 @@ const hasExistingVolcKeys = computed(
     !!props.profile?.credentials?.["access_token"],
 );
 
+function displayLabel(p: (typeof presets)[number]): string {
+  return p.labelKey ? t(p.labelKey) : p.label;
+}
+
 function applyPreset(id: string) {
   presetId.value = id;
   const p = presets.find((x) => x.id === id);
@@ -56,7 +63,9 @@ function applyPreset(id: string) {
   if (p.base_url) baseUrl.value = p.base_url;
   kind.value = p.kind;
   if (p.models[0]) model.value = p.models[0];
-  if (!label.value || presets.some((x) => x.label === label.value)) label.value = p.label;
+  if (!label.value || presets.some((x) => displayLabel(x) === label.value || x.label === label.value)) {
+    label.value = displayLabel(p);
+  }
 }
 
 const valid = computed(() => {
@@ -118,26 +127,27 @@ async function saveAndBack() {
 }
 
 async function testConnection() {
-  testResult.value = "测试中…";
+  testResult.value = t("settings.profile.testing");
   testOk.value = false;
   const id = await save();
   if (!id) {
-    testResult.value = "请先完整填写表单";
+    testResult.value = t("settings.profile.fill_form");
     return;
   }
   const r = await commands.testProfile(id);
   if (r.status === "ok") {
-    testResult.value = `✓ 测试通过 · ${r.data}ms`;
+    testResult.value = t("settings.profile.test_pass", { ms: r.data });
     testOk.value = true;
   } else {
-    const map: Record<string, string> = {
-      auth_error: "密钥无效（401）——请检查 API 密钥",
-      network_error: "无法连接——请检查网络与端点地址",
-      timeout: "响应超时——端点可能不可达",
-      invalid_request: "请求被拒（404/400）——请检查 Base URL 与模型名",
-      server_error: "服务端错误（5xx）——稍后再试",
+    const KEYS: Record<string, string> = {
+      auth_error: "settings.profile.err_auth_error",
+      network_error: "settings.profile.err_network_error",
+      timeout: "settings.profile.err_timeout",
+      invalid_request: "settings.profile.err_invalid_request",
+      server_error: "settings.profile.err_server_error",
     };
-    testResult.value = `✗ ${map[r.error.code] ?? r.error.code}`;
+    const key = KEYS[r.error.code];
+    testResult.value = `✗ ${key ? t(key) : r.error.code}`;
     testOk.value = false;
   }
 }
@@ -151,54 +161,67 @@ async function deleteProfile() {
 
 <template>
   <div>
-    <p class="back"><a @click="emit('back')">← 模型服务</a></p>
-    <h5 class="page-title">{{ isNew ? "新建连接" : "编辑连接" }} — {{ SLOT_LABEL[slotKind] }}</h5>
+    <p class="back"><a @click="emit('back')">← {{ t("settings.nav_providers") }}</a></p>
+    <h5 class="page-title">
+      {{ isNew ? t("settings.profile.title_new") : t("settings.profile.title_edit") }} —
+      {{ t(SLOT_LABEL_KEY[slotKind]) }}
+    </h5>
 
-    <FormRow label="预设">
+    <FormRow :label="t('settings.profile.preset')">
       <Select
         :model-value="presetId"
-        :options="presets.map((p) => ({ value: p.id, label: p.label }))"
+        :options="presets.map((p) => ({ value: p.id, label: displayLabel(p) }))"
         @update:model-value="applyPreset"
       />
     </FormRow>
-    <FormRow label="名称">
-      <span class="w280"><Input v-model="label" placeholder="如 Groq · whisper-turbo" /></span>
+    <FormRow :label="t('settings.profile.name')">
+      <span class="w280"><Input v-model="label" :placeholder="t('settings.profile.name_ph')" /></span>
     </FormRow>
     <FormRow v-if="!isVolc" label="Base URL">
       <span class="w280"><Input v-model="baseUrl" mono placeholder="https://api.example.com/v1" /></span>
     </FormRow>
-    <FormRow v-else label="端点" hint="留空使用官方端点 openspeech.bytedance.com">
-      <span class="w280"><Input v-model="baseUrl" mono placeholder="（默认官方端点）" /></span>
+    <FormRow v-else :label="t('settings.profile.endpoint')" :hint="t('settings.profile.endpoint_hint')">
+      <span class="w280"><Input v-model="baseUrl" mono :placeholder="t('settings.profile.endpoint_ph')" /></span>
     </FormRow>
-    <FormRow label="模型">
-      <span class="w280"><Input v-model="model" mono placeholder="模型名" /></span>
+    <FormRow :label="t('settings.profile.model')">
+      <span class="w280"><Input v-model="model" mono :placeholder="t('settings.profile.model_ph')" /></span>
     </FormRow>
-    <FormRow v-if="slotKind !== 'stt'" label="接口格式">
+    <FormRow v-if="slotKind !== 'stt'" :label="t('settings.profile.api_format')">
       <Select
         v-model="kind"
         :options="[
-          { value: 'chat_completions', label: 'Chat Completions（OpenAI 兼容）' },
-          { value: 'responses', label: 'Responses（OpenAI 新协议）' },
+          { value: 'chat_completions', label: t('settings.profile.kind_chat') },
+          { value: 'responses', label: t('settings.profile.kind_responses') },
         ]"
       />
     </FormRow>
     <template v-if="isVolc">
-      <FormRow label="APP ID" :hint="hasExistingVolcKeys ? '已保存在系统凭据库；留空则不修改' : '火山控制台的 APP ID'">
+      <FormRow
+        label="APP ID"
+        :hint="hasExistingVolcKeys ? t('settings.profile.key_saved_hint') : t('settings.profile.app_id_hint')"
+      >
         <span class="w280"><SecretInput v-model="appKey" /></span>
       </FormRow>
-      <FormRow label="Access Token" :hint="hasExistingVolcKeys ? undefined : '火山控制台的 Access Token'">
+      <FormRow
+        label="Access Token"
+        :hint="hasExistingVolcKeys ? undefined : t('settings.profile.token_hint')"
+      >
         <span class="w280"><SecretInput v-model="accessToken" /></span>
       </FormRow>
     </template>
-    <FormRow v-else label="API 密钥" :hint="hasExistingKey ? '已保存在系统凭据库；留空则不修改' : undefined">
+    <FormRow
+      v-else
+      :label="t('settings.profile.api_key')"
+      :hint="hasExistingKey ? t('settings.profile.key_saved_hint') : undefined"
+    >
       <span class="w280"><SecretInput v-model="apiKey" /></span>
     </FormRow>
 
     <div class="actions">
-      <Button variant="primary" :disabled="!valid || saving" @click="saveAndBack">保存</Button>
-      <Button @click="testConnection">测试连接</Button>
+      <Button variant="primary" :disabled="!valid || saving" @click="saveAndBack">{{ t("actions.save") }}</Button>
+      <Button @click="testConnection">{{ t("settings.profile.test_connection") }}</Button>
       <span class="spacer" />
-      <Button v-if="!isNew" variant="danger" @click="deleteProfile">删除档案</Button>
+      <Button v-if="!isNew" variant="danger" @click="deleteProfile">{{ t("settings.profile.delete_profile") }}</Button>
     </div>
     <p v-if="testResult" class="test-result" :class="{ ok: testOk }">{{ testResult }}</p>
   </div>

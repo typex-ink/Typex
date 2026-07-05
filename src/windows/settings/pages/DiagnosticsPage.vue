@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // 诊断页（mockup 2.12）：环境自检 + 日志目录
 import { onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import { commands, type DiagnosticsReport, type PermissionStatus } from "@/ipc/bindings";
 
+const { t } = useI18n();
 const report = ref<DiagnosticsReport | null>(null);
 
-const LABEL: Record<string, string> = {
-  microphone: "麦克风权限",
-  accessibility: "辅助功能权限（注入 + 读选区）",
-  input_monitoring: "输入监听权限（快捷键）",
+const PERM_KEY: Record<string, string> = {
+  microphone: "settings.diagnostics.perm_microphone",
+  accessibility: "settings.diagnostics.perm_accessibility",
+  input_monitoring: "settings.diagnostics.perm_input_monitoring",
 };
 
 onMounted(async () => {
@@ -23,24 +25,26 @@ function openSettings(kind: PermissionStatus["kind"]) {
 
 <template>
   <div v-if="report">
-    <h5 class="page-title">诊断</h5>
+    <h5 class="page-title">{{ t("settings.nav_diagnostics") }}</h5>
     <div class="diag">
       <span class="ok">✓</span>
-      <span>平台：{{ report.platform }}</span>
+      <span>{{ t("settings.diagnostics.platform", { platform: report.platform }) }}</span>
     </div>
     <div v-for="p in report.permissions" :key="p.kind" class="diag">
       <span :class="p.granted ? 'ok' : 'bad'">{{ p.granted ? "✓" : "✗" }}</span>
-      <span>{{ LABEL[p.kind] ?? p.kind }}</span>
-      <Button v-if="!p.granted" size="sm" class="fix" @click="openSettings(p.kind)">去授权</Button>
+      <span>{{ PERM_KEY[p.kind] ? t(PERM_KEY[p.kind]) : p.kind }}</span>
+      <Button v-if="!p.granted" size="sm" class="fix" @click="openSettings(p.kind)">
+        {{ t("actions.grant_permission") }}
+      </Button>
     </div>
     <div class="diag">
       <span class="ok">✓</span>
-      <span>注入后端：{{ report.inject_backend }}</span>
+      <span>{{ t("settings.diagnostics.inject_backend", { backend: report.inject_backend }) }}</span>
     </div>
     <div class="actions">
-      <Button @click="commands.openLogDir()">打开日志目录</Button>
+      <Button @click="commands.openLogDir()">{{ t("settings.diagnostics.open_log_dir") }}</Button>
     </div>
-    <p class="log-path">日志：{{ report.log_dir }}</p>
+    <p class="log-path">{{ t("settings.diagnostics.log_path", { path: report.log_dir }) }}</p>
   </div>
 </template>
 

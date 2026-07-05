@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 设置窗口 720×520：左导航 160px + 内容区（05 §5 / mockup §2）
 import { onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/settings";
 import GeneralPage from "./pages/GeneralPage.vue";
 import DictationPage from "./pages/DictationPage.vue";
@@ -12,16 +13,18 @@ import HistoryPage from "./pages/HistoryPage.vue";
 import DiagnosticsPage from "./pages/DiagnosticsPage.vue";
 import AboutPage from "./pages/AboutPage.vue";
 
+const { t } = useI18n();
+
 const pages = [
-  { id: "general", label: "通用", comp: GeneralPage },
-  { id: "dictation", label: "听写", comp: DictationPage },
-  { id: "translation", label: "翻译", comp: TranslationPage },
-  { id: "assistant", label: "助手", comp: AssistantPage },
-  { id: "providers", label: "模型服务", comp: ProvidersPage },
-  { id: "hotkeys", label: "快捷键", comp: HotkeysPage },
-  { id: "history", label: "历史", comp: HistoryPage },
-  { id: "diagnostics", label: "诊断", comp: DiagnosticsPage },
-  { id: "about", label: "关于", comp: AboutPage },
+  { id: "general", key: "settings.nav_general", comp: GeneralPage },
+  { id: "dictation", key: "settings.nav_dictation", comp: DictationPage },
+  { id: "translation", key: "settings.nav_translation", comp: TranslationPage },
+  { id: "assistant", key: "settings.nav_assistant", comp: AssistantPage },
+  { id: "providers", key: "settings.nav_providers", comp: ProvidersPage },
+  { id: "hotkeys", key: "settings.nav_hotkeys", comp: HotkeysPage },
+  { id: "history", key: "settings.nav_history", comp: HistoryPage },
+  { id: "diagnostics", key: "settings.nav_diagnostics", comp: DiagnosticsPage },
+  { id: "about", key: "settings.nav_about", comp: AboutPage },
 ] as const;
 
 const active = ref<string>("general");
@@ -42,7 +45,7 @@ onMounted(() => store.load());
         :class="{ on: active === p.id }"
         @click="active = p.id"
       >
-        {{ p.label }}
+        {{ t(p.key) }}
       </div>
     </nav>
     <main class="content">

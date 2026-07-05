@@ -5,8 +5,11 @@ import Select from "@/components/Select.vue";
 import Toggle from "@/components/Toggle.vue";
 import Button from "@/components/Button.vue";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { commands } from "@/ipc/bindings";
 import { useSetting } from "@/composables/useSetting";
+
+const { t } = useI18n();
 
 const cleared = ref(false);
 async function clearAll() {
@@ -31,25 +34,25 @@ const retention = computed({
 
 <template>
   <div>
-    <h5 class="page-title">历史</h5>
-    <p class="desc">历史仅保存在本机，不含音频。</p>
-    <FormRow label="保存历史记录">
+    <h5 class="page-title">{{ t("settings.nav_history") }}</h5>
+    <p class="desc">{{ t("settings.history.desc") }}</p>
+    <FormRow :label="t('settings.history.save_toggle')">
       <Toggle v-model="enabled" />
     </FormRow>
-    <FormRow label="保留期限">
+    <FormRow :label="t('settings.history.retention')">
       <Select
         v-model="retention"
         :options="[
-          { value: '7', label: '7 天' },
-          { value: '30', label: '30 天' },
-          { value: '90', label: '90 天' },
-          { value: '0', label: '永久' },
+          { value: '7', label: t('settings.history.days', { n: 7 }) },
+          { value: '30', label: t('settings.history.days', { n: 30 }) },
+          { value: '90', label: t('settings.history.days', { n: 90 }) },
+          { value: '0', label: t('settings.history.forever') },
         ]"
       />
     </FormRow>
-    <FormRow label="清空全部历史">
-      <span v-if="cleared" class="ok">✓ 已清空</span>
-      <Button v-else variant="danger" size="sm" @click="clearAll">清空…</Button>
+    <FormRow :label="t('settings.history.clear')">
+      <span v-if="cleared" class="ok">{{ t("settings.history.cleared") }}</span>
+      <Button v-else variant="danger" size="sm" @click="clearAll">{{ t("settings.history.clear_btn") }}</Button>
     </FormRow>
   </div>
 </template>

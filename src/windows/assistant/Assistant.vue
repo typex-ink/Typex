@@ -2,10 +2,13 @@
 // 回答弹窗（05 §4 / ADR-23）：只读展示——指令回显 + 流式 Markdown 回答 + ✕ 关闭。
 // 仅回答型结果经 assistant:// 事件到达此窗；改写型结果直接注入替换选区，不经过这里。
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
 import { events } from "@/ipc/bindings";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+
+const { t } = useI18n();
 
 // LLM 输出视为不可信内容：禁 raw HTML（07 §11）
 const md = new MarkdownIt({ html: false, linkify: true });
@@ -121,10 +124,10 @@ function onKey(e: KeyboardEvent) {
       <!-- 指令回显行 + 关闭按钮 -->
       <div class="ask-row">
         <span class="ask">🎤 {{ instruction }}</span>
-        <button class="x" title="关闭" @click="close">✕</button>
+        <button class="x" :title="t('assistant.close')" @click="close">✕</button>
       </div>
       <div v-if="selectionChars !== null" class="chip-row">
-        <span class="chip">⌗ 选中内容 · {{ selectionChars }} 字</span>
+        <span class="chip">{{ t("assistant.selection_chip", { n: selectionChars }) }}</span>
       </div>
 
       <!-- 回答区（流式 Markdown，文本可选中复制） -->

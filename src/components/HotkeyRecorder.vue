@@ -2,15 +2,17 @@
 // HotkeyRecorder（04 §7 / 05 §7）：录制快捷键专用控件。
 // 浏览器 keydown 的 e.code 可捕获单个修饰键（MetaRight 等），映射到 rdev 键名存储。
 import { onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Kbd from "@/components/Kbd.vue";
 import Button from "@/components/Button.vue";
 import Callout from "@/components/Callout.vue";
 
+const { t, te } = useI18n();
 const model = defineModel<string[]>({ required: true });
 
 const recording = ref(false);
 const pressed = ref<Set<string>>(new Set());
-const warning = ref<string | null>(null);
+const warningKey = ref<string | null>(null);
 
 // e.code → rdev Debug 键名（settings.json 存储形态）
 const CODE_TO_RDEV: Record<string, string> = {
@@ -26,24 +28,16 @@ const CODE_TO_RDEV: Record<string, string> = {
   F13: "F13", F14: "F14", F15: "F15", F16: "F16", F17: "F17", F18: "F18", F19: "F19",
 };
 
-// rdev 键名 → 展示标签（macOS 惯例）
-const RDEV_LABEL: Record<string, string> = {
-  MetaLeft: "左 ⌘", MetaRight: "右 ⌘",
-  Alt: "左 ⌥", AltGr: "右 ⌥",
-  ControlLeft: "左 Ctrl", ControlRight: "右 Ctrl",
-  ShiftLeft: "左 ⇧", ShiftRight: "右 ⇧",
-  CapsLock: "CapsLock",
-};
-
+// rdev 键名 → 展示标签（macOS 惯例，keys.* i18n 资源）
 function labelOf(key: string) {
-  return RDEV_LABEL[key] ?? key;
+  return te(`keys.${key}`) ? t(`keys.${key}`) : key;
 }
 
-// 已知冲突警告表（05 §7.1）
+// 已知冲突警告表（05 §7.1）：键名 → i18n key
 const CONFLICTS: Record<string, string> = {
-  CapsLock: "CapsLock 与 macOS 中文输入法的中英切换冲突，不推荐。",
-  MetaLeft: "左 ⌘ 参与大量系统组合键，误触发风险高。",
-  Alt: "左 ⌥ 常用于输入特殊字符，可能干扰日常输入。",
+  CapsLock: "components.hotkey.conflict_capslock",
+  MetaLeft: "components.hotkey.conflict_meta_left",
+  Alt: "components.hotkey.conflict_alt",
 };
 
 function onKeyDown(e: KeyboardEvent) {
@@ -63,7 +57,7 @@ function onKeyUp(e: KeyboardEvent) {
   if (pressed.value.size > 0) {
     const keys = [...pressed.value];
     model.value = keys;
-    warning.value = keys.map((k) => CONFLICTS[k]).find(Boolean) ?? null;
+    warningKey.value = keys.map((k) => CONFLICTS[k]).find(Boolean) ?? null;
     stop();
   }
 }
@@ -91,13 +85,13 @@ onUnmounted(stop);
       <Kbd>{{ labelOf(k) }}</Kbd>
     </template>
     <Button size="sm" @click="recording ? stop() : start()">
-      {{ recording ? "按下键位…" : "更改" }}
+      {{ recording ? t("components.hotkey.press") : t("components.hotkey.change") }}
     </Button>
   </span>
   <Callout v-if="recording" icon="⌨" class="rec-hint">
-    <b>正在录制…</b> 按下想要的键位（支持单个修饰键）；Esc 取消。
+    <b>{{ t("components.hotkey.recording") }}</b> {{ t("components.hotkey.recording_hint") }}
   </Callout>
-  <Callout v-if="warning" variant="warn" class="rec-hint">{{ warning }}</Callout>
+  <Callout v-if="warningKey" variant="warn" class="rec-hint">{{ t(warningKey) }}</Callout>
 </template>
 
 <style scoped>

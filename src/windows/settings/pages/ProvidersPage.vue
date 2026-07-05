@@ -1,19 +1,21 @@
 <script setup lang="ts">
 // 模型服务页（05 §5.1 / mockup 2.5–2.8）：四槽位 ProviderCard + 编辑子页 + 共用开关
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Toggle from "@/components/Toggle.vue";
 import ProviderCard from "@/components/ProviderCard.vue";
 import ProfileEditor from "./ProfileEditor.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { commands, type SlotKind, type ProviderProfile } from "@/ipc/bindings";
 
+const { t } = useI18n();
 const store = useSettingsStore();
 
-const SLOTS: { slot: SlotKind; label: string }[] = [
-  { slot: "stt", label: "语音转文字" },
-  { slot: "polish", label: "文本整理" },
-  { slot: "translate", label: "翻译模型" },
-  { slot: "assistant", label: "问答模型" },
+const SLOTS: { slot: SlotKind; key: string }[] = [
+  { slot: "stt", key: "settings.providers.slot_stt" },
+  { slot: "polish", key: "settings.providers.slot_polish" },
+  { slot: "translate", key: "settings.providers.slot_translate" },
+  { slot: "assistant", key: "settings.providers.slot_assistant" },
 ];
 
 // 编辑子页状态（05 §5.1：同一内容区内切换，顶部 ← 返回）
@@ -65,12 +67,12 @@ function onSaved() {
     @saved="onSaved"
   />
   <div v-else>
-    <h5 class="page-title">模型服务</h5>
-    <template v-for="{ slot, label } in SLOTS" :key="slot">
+    <h5 class="page-title">{{ t("settings.nav_providers") }}</h5>
+    <template v-for="{ slot, key } in SLOTS" :key="slot">
       <div class="slot-h">
-        <span>{{ label }}</span>
+        <span>{{ t(key) }}</span>
         <span v-if="slot === 'polish'" class="share">
-          与翻译共用 <Toggle v-model="polishSharesTranslate" />
+          {{ t("settings.providers.share_with_translate") }} <Toggle v-model="polishSharesTranslate" />
         </span>
       </div>
       <ProviderCard

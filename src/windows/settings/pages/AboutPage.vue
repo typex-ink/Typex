@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 关于页（mockup 2.13）：图标 + logotype + 版本 + 检查更新（CP-6.3 / ADR-11）
 import { onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
 import { commands, events } from "@/ipc/bindings";
 
+const { t } = useI18n();
 const checking = ref(false);
 const installing = ref(false);
 const status = ref("");
@@ -16,13 +18,13 @@ async function check() {
   const r = await commands.checkUpdate();
   checking.value = false;
   if (r.status !== "ok") {
-    status.value = "检查更新失败——请检查网络";
+    status.value = t("settings.about.check_failed");
     return;
   }
   if (r.data) {
     available.value = r.data;
   } else {
-    status.value = "已是最新版本";
+    status.value = t("settings.about.up_to_date");
   }
 }
 
@@ -32,7 +34,7 @@ async function install() {
   // 成功时应用会重启；走到这里说明失败
   if (r.status !== "ok") {
     installing.value = false;
-    status.value = "下载安装失败——请稍后再试";
+    status.value = t("settings.about.install_failed");
   }
 }
 
@@ -54,20 +56,20 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
     <div class="logotype">Typex</div>
     <p class="meta">
       v0.1.0 · GPL-3.0 · typex.ink<br />
-      你的声音只会发送到你自己配置的服务。
+      {{ t("settings.about.privacy") }}
     </p>
     <div v-if="available" class="update-card">
-      <p class="update-title">新版本 v{{ available.version }}</p>
+      <p class="update-title">{{ t("settings.about.new_version", { version: available.version }) }}</p>
       <p v-if="available.notes" class="update-notes">{{ available.notes }}</p>
       <Button variant="primary" size="sm" :disabled="installing" @click="install">
-        {{ installing ? "下载安装中…" : "下载并安装" }}
+        {{ installing ? t("settings.about.installing") : t("settings.about.install") }}
       </Button>
     </div>
     <div class="actions">
       <Button size="sm" :disabled="checking" @click="check">
-        {{ checking ? "检查中…" : "检查更新" }}
+        {{ checking ? t("settings.about.checking") : t("settings.about.check") }}
       </Button>
-      <Button variant="ghost" size="sm">开源许可</Button>
+      <Button variant="ghost" size="sm">{{ t("settings.about.licenses") }}</Button>
     </div>
     <p v-if="status" class="status">{{ status }}</p>
   </div>

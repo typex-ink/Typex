@@ -1,25 +1,31 @@
 <script setup lang="ts">
 // 首次启动引导 640×480，5 步（05 §6 / mockup §6）
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
 import Kbd from "@/components/Kbd.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Input from "@/components/Input.vue";
-import { commands, events, type PermissionStatus } from "@/ipc/bindings";
+import { commands, events, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
 import { useSettingsStore } from "@/stores/settings";
 
+const { t } = useI18n();
 const store = useSettingsStore();
 const step = ref(1);
-const lang = ref<"zh_cn" | "en">("zh_cn");
+// 第 1 步语言下拉：直接写 settings.general.language，全 UI 即时切换（syncLocale 订阅）
+const lang = computed<UiLanguage>({
+  get: () => store.settings?.general.language ?? "system",
+  set: (v) => void store.mutate((s) => (s.general.language = v)),
+});
 
 // ── 步骤 2：权限（实时轮询）──
 const perms = ref<PermissionStatus[]>([]);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-const PERM_META: Record<string, { icon: string; label: string; why: string }> = {
-  microphone: { icon: "🎙", label: "麦克风", why: "录下你说的话" },
-  accessibility: { icon: "⌨", label: "辅助功能", why: "把文字输入到光标处、读取选中文本" },
-  input_monitoring: { icon: "👂", label: "输入监听", why: "监听全局快捷键（按住说话）" },
+const PERM_META: Record<string, { icon: string; labelKey: string; whyKey: string }> = {
+  microphone: { icon: "🎙", labelKey: "onboarding.perm_microphone", whyKey: "onboarding.perm_microphone_why" },
+  accessibility: { icon: "⌨", labelKey: "onboarding.perm_accessibility", whyKey: "onboarding.perm_accessibility_why" },
+  input_monitoring: { icon: "👂", labelKey: "onboarding.perm_input_monitoring", whyKey: "onboarding.perm_input_monitoring_why" },
 };
 
 async function pollPerms() {
@@ -46,7 +52,7 @@ async function saveModels(): Promise<boolean> {
     if (hasStt) {
       await commands.upsertProfile({
         id: "onboarding-stt", slots: ["stt"], kind: "openai_compat",
-        label: "语音转文字", base_url: sttUrl.value.trim().replace(/\/+$/, ""),
+        label: t("onboarding.stt_profile_label"), base_url: sttUrl.value.trim().replace(/\/+$/, ""),
         model: sttModel.value.trim(), credentials: {},
         extra_headers: {}, extra_form: {}, timeout_ms: 30000, options: {},
       });
@@ -57,7 +63,7 @@ async function saveModels(): Promise<boolean> {
       // 三 LLM 槽共用同一连接（02 F-4）
       await commands.upsertProfile({
         id: "onboarding-llm", slots: ["polish", "translate", "assistant"],
-        kind: "chat_completions", label: "大语言模型",
+        kind: "chat_completions", label: t("onboarding.llm_profile_label"),
         base_url: llmUrl.value.trim().replace(/\/+$/, ""),
         model: llmModel.value.trim(), credentials: {},
         extra_headers: {}, extra_form: {}, timeout_ms: 30000, options: {},
@@ -118,62 +124,68 @@ onUnmounted(() => {
     <div v-if="step === 1" class="body center">
       <AppIcon :size="88" />
       <div class="logotype">Typex</div>
-      <p class="slogan">{{ lang === "zh_cn" ? "说，即所得。" : "Speak. It types." }}</p>
+      <p class="slogan">{{ t("onboarding.slogan") }}</p>
     </div>
 
     <!-- 步骤 2 · 权限 -->
     <div v-else-if="step === 2" class="body">
-      <h5>{{ lang === "zh_cn" ? "需要几项系统权限" : "A few system permissions" }}</h5>
+      <h5>{{ t("onboarding.perms_title") }}</h5>
       <div v-for="p in perms" :key="p.kind" class="perm">
         <span class="ic">{{ PERM_META[p.kind]?.icon }}</span>
         <span class="pmeta">
-          {{ PERM_META[p.kind]?.label }}<br />
-          <small>{{ PERM_META[p.kind]?.why }}</small>
+          {{ PERM_META[p.kind] ? t(PERM_META[p.kind].labelKey) : p.kind }}<br />
+          <small>{{ PERM_META[p.kind] ? t(PERM_META[p.kind].whyKey) : "" }}</small>
         </span>
-        <span v-if="p.granted" class="granted">✓ 已授权</span>
-        <Button v-else size="sm" @click="commands.openPermissionSettings(p.kind)">去授权</Button>
+        <span v-if="p.granted" class="granted">{{ t("onboarding.granted") }}</span>
+        <Button v-else size="sm" @click="commands.openPermissionSettings(p.kind)">
+          {{ t("actions.grant_permission") }}
+        </Button>
       </div>
       <div v-if="!perms.length" class="perm">
         <span class="ic">🎙</span>
-        <span class="pmeta">麦克风<br /><small>首次录音时系统将弹出授权</small></span>
+        <span class="pmeta">{{ t("onboarding.perm_microphone") }}<br /><small>{{ t("onboarding.mic_pending") }}</small></span>
         <span class="granted">—</span>
       </div>
     </div>
 
     <!-- 步骤 3 · 模型：云端直填（STT + LLM 两组；LLM 三槽共用） -->
     <div v-else-if="step === 3" class="body">
-      <h5>连接模型服务</h5>
-      <div class="slot-h">语音转文字</div>
-      <div class="frow"><span>API 端点</span><span class="w250"><Input v-model="sttUrl" mono placeholder="https://api.example.com/v1" /></span></div>
-      <div class="frow"><span>模型名</span><span class="w250"><Input v-model="sttModel" mono placeholder="whisper-large-v3-turbo" /></span></div>
-      <div class="frow"><span>API 密钥</span><span class="w250"><SecretInput v-model="sttKey" /></span></div>
-      <div class="slot-h">大语言模型（整理 · 翻译 · 问答共用，可在设置中分开）</div>
-      <div class="frow"><span>API 端点</span><span class="w250"><Input v-model="llmUrl" mono placeholder="https://api.example.com/v1" /></span></div>
-      <div class="frow"><span>模型名</span><span class="w250"><Input v-model="llmModel" mono placeholder="deepseek-chat" /></span></div>
-      <div class="frow"><span>API 密钥</span><span class="w250"><SecretInput v-model="llmKey" /></span></div>
+      <h5>{{ t("onboarding.models_title") }}</h5>
+      <div class="slot-h">{{ t("onboarding.slot_stt") }}</div>
+      <div class="frow"><span>{{ t("onboarding.api_endpoint") }}</span><span class="w250"><Input v-model="sttUrl" mono placeholder="https://api.example.com/v1" /></span></div>
+      <div class="frow"><span>{{ t("onboarding.model_name") }}</span><span class="w250"><Input v-model="sttModel" mono placeholder="whisper-large-v3-turbo" /></span></div>
+      <div class="frow"><span>{{ t("onboarding.api_key") }}</span><span class="w250"><SecretInput v-model="sttKey" /></span></div>
+      <div class="slot-h">{{ t("onboarding.slot_llm") }}</div>
+      <div class="frow"><span>{{ t("onboarding.api_endpoint") }}</span><span class="w250"><Input v-model="llmUrl" mono placeholder="https://api.example.com/v1" /></span></div>
+      <div class="frow"><span>{{ t("onboarding.model_name") }}</span><span class="w250"><Input v-model="llmModel" mono placeholder="deepseek-chat" /></span></div>
+      <div class="frow"><span>{{ t("onboarding.api_key") }}</span><span class="w250"><SecretInput v-model="llmKey" /></span></div>
       <p v-if="configError" class="cfg-err">{{ configError }}</p>
     </div>
 
     <!-- 步骤 4 · 快捷键 + 练习 -->
     <div v-else-if="step === 4" class="body">
-      <h5>试试你的快捷键</h5>
-      <div class="frow"><span>听写</span><Kbd>右 ⌘</Kbd></div>
-      <div class="frow"><span>助手</span><Kbd>右 ⌥</Kbd></div>
-      <div class="frow"><span>翻译</span><span><Kbd>右 ⌘</Kbd> + <Kbd>右 ⌥</Kbd></span></div>
+      <h5>{{ t("onboarding.hotkeys_title") }}</h5>
+      <div class="frow"><span>{{ t("modes.dictation") }}</span><Kbd>{{ t("keys.MetaRight") }}</Kbd></div>
+      <div class="frow"><span>{{ t("modes.assistant") }}</span><Kbd>{{ t("keys.AltGr") }}</Kbd></div>
+      <div class="frow"><span>{{ t("modes.translation") }}</span><span><Kbd>{{ t("keys.MetaRight") }}</Kbd> + <Kbd>{{ t("keys.AltGr") }}</Kbd></span></div>
       <div class="practice">
-        <p>练习：按住 <Kbd>右 ⌘</Kbd> 说「你好，Typex」</p>
-        <Input v-model="practiceText" placeholder="文字会出现在这里…" @input="practiceDone = practiceText.length > 0" />
-        <p v-if="practiceDone" class="aha">✓ 成功！这就是 Typex 的全部使用方式。</p>
+        <p>
+          <i18n-t keypath="onboarding.practice" scope="global">
+            <template #key><Kbd>{{ t("keys.MetaRight") }}</Kbd></template>
+          </i18n-t>
+        </p>
+        <Input v-model="practiceText" :placeholder="t('onboarding.practice_ph')" @input="practiceDone = practiceText.length > 0" />
+        <p v-if="practiceDone" class="aha">{{ t("onboarding.practice_done") }}</p>
       </div>
     </div>
 
     <!-- 步骤 5 · 完成 -->
     <div v-else class="body center">
       <span class="done-check">✓</span>
-      <h5>一切就绪</h5>
+      <h5>{{ t("onboarding.done_title") }}</h5>
       <label class="autostart-row">
         <input v-model="autostartOn" type="checkbox" />
-        <span>{{ lang === "zh_cn" ? "登录时自动启动 Typex" : "Launch Typex at login" }}</span>
+        <span>{{ t("onboarding.autostart") }}</span>
       </label>
     </div>
 
@@ -181,18 +193,19 @@ onUnmounted(() => {
     <div class="foot">
       <template v-if="step === 1">
         <select v-model="lang" class="lang-select">
+          <option value="system">{{ t("onboarding.lang_system") }}</option>
           <option value="zh_cn">简体中文</option>
           <option value="en">English</option>
         </select>
-        <Button variant="primary" @click="step = 2">{{ lang === "zh_cn" ? "开始 →" : "Start →" }}</Button>
+        <Button variant="primary" @click="step = 2">{{ t("onboarding.start") }}</Button>
       </template>
       <template v-else-if="step === 5">
         <span />
-        <Button variant="primary" @click="finish">完成</Button>
+        <Button variant="primary" @click="finish">{{ t("onboarding.finish") }}</Button>
       </template>
       <template v-else>
-        <Button variant="ghost" @click="step += 1">{{ step === 3 ? "稍后配置" : "跳过" }}</Button>
-        <Button variant="primary" :disabled="configuring" @click="next">继续 →</Button>
+        <Button variant="ghost" @click="step += 1">{{ step === 3 ? t("onboarding.later") : t("onboarding.skip") }}</Button>
+        <Button variant="primary" :disabled="configuring" @click="next">{{ t("onboarding.next") }}</Button>
       </template>
     </div>
   </div>

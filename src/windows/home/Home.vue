@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // 主页窗口 880×560（05 §8 / ADR-19 / mockup §1）：侧边栏 + 首页/历史记录页签
 import { computed, onMounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import Kbd from "@/components/Kbd.vue";
 import Button from "@/components/Button.vue";
 import Input from "@/components/Input.vue";
 import { commands, events, type HistoryItem, type HistoryStats } from "@/ipc/bindings";
 import { useSettingsStore } from "@/stores/settings";
 
+const { t, te } = useI18n();
 const store = useSettingsStore();
 const tab = ref<"overview" | "history">("overview");
 const stats = ref<HistoryStats | null>(null);
@@ -44,15 +46,13 @@ function fmtTime(ms: number) {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
   const yesterday = new Date(today.getTime() - 86400000);
-  if (d.toDateString() === yesterday.toDateString()) return "昨天";
+  if (d.toDateString() === yesterday.toDateString()) return t("home.yesterday");
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-const MODE_LABEL: Record<string, string> = {
-  dictation: "听写",
-  translation: "翻译",
-  assistant: "助手",
-};
+function modeLabel(mode: string): string {
+  return te(`modes.${mode}`) ? t(`modes.${mode}`) : mode;
+}
 
 async function refresh() {
   const s = await commands.getStats();
@@ -98,11 +98,11 @@ function toggleTheme() {
 
 const dictKey = computed(() => {
   const k = store.settings?.hotkeys.dictation[0] ?? "MetaRight";
-  return k === "MetaRight" ? "右 ⌘" : k === "ControlRight" ? "右 Ctrl" : k;
+  return te(`keys.${k}`) ? t(`keys.${k}`) : k;
 });
 const assistKey = computed(() => {
   const k = store.settings?.hotkeys.assistant[0] ?? "AltGr";
-  return k === "AltGr" ? "右 ⌥" : k;
+  return te(`keys.${k}`) ? t(`keys.${k}`) : k;
 });
 
 onMounted(async () => {
@@ -128,88 +128,93 @@ onMounted(async () => {
         <b>Typex</b>
       </div>
       <nav>
-        <div :class="{ on: tab === 'overview' }" @click="tab = 'overview'">⌂ 首页</div>
-        <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">◷ 历史记录</div>
+        <div :class="{ on: tab === 'overview' }" @click="tab = 'overview'">⌂ {{ t("home.nav_overview") }}</div>
+        <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">◷ {{ t("home.nav_history") }}</div>
       </nav>
       <div class="mfoot">
-        <button type="button" title="设置" aria-label="设置" @click="openSettings">⚙</button>
-        <button type="button" title="切换深浅色" aria-label="切换深浅色" @click="toggleTheme">◐</button>
+        <button type="button" :title="t('home.settings')" :aria-label="t('home.settings')" @click="openSettings">⚙</button>
+        <button type="button" :title="t('home.toggle_theme')" :aria-label="t('home.toggle_theme')" @click="toggleTheme">◐</button>
       </div>
     </aside>
 
     <!-- 首页页签 -->
     <main v-if="tab === 'overview'" class="main">
       <div class="hero">
-        <h4>说，即所得。</h4>
-        <p>按住 <Kbd>{{ dictKey }}</Kbd> 开始语音输入 · <Kbd>{{ assistKey }}</Kbd> 向助手说指令</p>
+        <h4>{{ t("home.hero_title") }}</h4>
+        <p>
+          <i18n-t keypath="home.hero_hint" scope="global">
+            <template #dict><Kbd>{{ dictKey }}</Kbd></template>
+            <template #assist><Kbd>{{ assistKey }}</Kbd></template>
+          </i18n-t>
+        </p>
       </div>
 
       <div v-if="historyEnabled" class="stats">
         <div class="stat">
           <b v-if="totalDurationParts.h > 0">
-            {{ totalDurationParts.h }}<small>时</small>{{ totalDurationParts.m }}<small>分</small>
+            {{ totalDurationParts.h }}<small>{{ t("home.unit_hour") }}</small>{{ totalDurationParts.m }}<small>{{ t("home.unit_min") }}</small>
           </b>
-          <b v-else>{{ totalDurationParts.m }}<small>分</small></b>
-          <span>总口述时长</span>
+          <b v-else>{{ totalDurationParts.m }}<small>{{ t("home.unit_min") }}</small></b>
+          <span>{{ t("home.stat_duration") }}</span>
         </div>
-        <div class="stat"><b>{{ totalChars.toLocaleString() }}<small>字</small></b><span>口述字数</span></div>
+        <div class="stat"><b>{{ totalChars.toLocaleString() }}<small>{{ t("home.unit_char") }}</small></b><span>{{ t("home.stat_chars") }}</span></div>
         <div class="stat">
           <b v-if="savedDurationParts.h > 0">
-            {{ savedDurationParts.h }}<small>时</small>{{ savedDurationParts.m }}<small>分</small>
+            {{ savedDurationParts.h }}<small>{{ t("home.unit_hour") }}</small>{{ savedDurationParts.m }}<small>{{ t("home.unit_min") }}</small>
           </b>
-          <b v-else>{{ savedDurationParts.m }}<small>分</small></b>
-          <span>节省时间</span>
+          <b v-else>{{ savedDurationParts.m }}<small>{{ t("home.unit_min") }}</small></b>
+          <span>{{ t("home.stat_saved") }}</span>
         </div>
-        <div class="stat"><b>{{ speed }}<small>字/分</small></b><span>平均语速</span></div>
+        <div class="stat"><b>{{ speed }}<small>{{ t("home.unit_cpm") }}</small></b><span>{{ t("home.stat_speed") }}</span></div>
       </div>
 
       <div class="sec-h">
-        <h6>最近</h6>
-        <a @click="tab = 'history'; doSearch()">查看全部历史 →</a>
+        <h6>{{ t("home.recent") }}</h6>
+        <a @click="tab = 'history'; doSearch()">{{ t("home.view_all") }}</a>
       </div>
       <div v-if="recent.length" class="recent">
         <div v-for="item in recent" :key="item.id" class="hrow">
           <time>{{ fmtTime(item.created_at) }}</time>
-          <span class="tag">{{ MODE_LABEL[item.mode] }}</span>
+          <span class="tag">{{ modeLabel(item.mode) }}</span>
           <span v-if="item.app_name" class="app">{{ item.app_name }}</span>
           <span class="sum">{{ item.result }}</span>
         </div>
       </div>
       <div v-else class="empty">
         <div class="glyph">⌀</div>
-        还没有记录<br />
-        <span class="empty-hint">按住 {{ dictKey }} 说第一句话吧</span>
+        {{ t("home.empty") }}<br />
+        <span class="empty-hint">{{ t("home.empty_hint", { key: dictKey }) }}</span>
       </div>
     </main>
 
     <!-- 历史记录页签 -->
     <main v-else class="main hist">
       <div class="hist-top">
-        <Input v-model="search" placeholder="搜索历史…" @keydown.enter="doSearch" />
-        <Button variant="danger" size="sm" @click="clearAll">清空全部</Button>
+        <Input v-model="search" :placeholder="t('home.search_ph')" @keydown.enter="doSearch" />
+        <Button variant="danger" size="sm" @click="clearAll">{{ t("home.clear_all") }}</Button>
       </div>
       <div class="recent scroll" :class="{ 'scroll-empty': !items.length }">
         <template v-for="item in items" :key="item.id">
           <div class="hrow clickable" @click="expanded = expanded === item.id ? null : item.id">
             <time>{{ fmtTime(item.created_at) }}</time>
-            <span class="tag">{{ MODE_LABEL[item.mode] }}</span>
+            <span class="tag">{{ modeLabel(item.mode) }}</span>
             <span v-if="item.app_name" class="app">{{ item.app_name }}</span>
             <span class="sum">{{ item.result }}</span>
           </div>
           <div v-if="expanded === item.id" class="hexp">
             <div class="cols">
-              <div><small>原始转写</small>{{ item.transcript }}</div>
-              <div><small>{{ item.mode === "translation" ? "译文" : "整理后" }}</small>{{ item.result }}</div>
+              <div><small>{{ t("home.transcript") }}</small>{{ item.transcript }}</div>
+              <div><small>{{ item.mode === "translation" ? t("home.result_translated") : t("home.result_polished") }}</small>{{ item.result }}</div>
             </div>
             <div class="hexp-actions">
-              <Button size="sm" @click="copyItem(item)">复制</Button>
-              <Button variant="ghost" size="sm" @click="deleteItem(item)">删除</Button>
+              <Button size="sm" @click="copyItem(item)">{{ t("actions.copy") }}</Button>
+              <Button variant="ghost" size="sm" @click="deleteItem(item)">{{ t("actions.delete") }}</Button>
             </div>
           </div>
         </template>
         <div v-if="!items.length" class="empty hist-empty">
           <div class="glyph">⌀</div>
-          没有匹配的记录
+          {{ t("home.no_match") }}
         </div>
       </div>
     </main>
