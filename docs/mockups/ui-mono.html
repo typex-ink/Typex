@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Typex UI Mockup · 全界面 · 纯墨 Monochrome</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { font-size:13px; }
+  body { font-family: Inter, "SF Pro Text", "Segoe UI Variable", system-ui, "PingFang SC", sans-serif; background:#CFCFCD; padding:32px; }
+  .page-head { max-width:1560px; margin:0 auto 24px; }
+  .page-head h1 { font-size:22px; }
+  .page-head p { font-size:13px; color:#444; margin-top:4px; line-height:1.7; max-width:960px; }
+
+  /* ============ 主题容器 ============ */
+  .theme { max-width:1560px; margin:0 auto 40px; border-radius:18px; padding:32px; background:var(--bg); color:var(--text-1); border:1px solid rgba(0,0,0,.10); }
+  .theme a { color:inherit; text-decoration:underline; text-underline-offset:3px; text-decoration-color:var(--text-3); }
+  .theme > h2 { font-size:16px; color:var(--text-2); margin-bottom:24px; font-weight:600; }
+  .light {
+    --bg:#F8F8F7; --surface:#FFFFFF; --surface-2:#EFEFEE;
+    --border:rgba(23,23,25,.10); --border-2:rgba(23,23,25,.18);
+    --text-1:#171719; --text-2:#5C5C62; --text-3:#8E8E94;
+    --primary:#171719; --primary-hover:#2E2E33; --on-primary:#FFFFFF;
+    --sel-bg:#E4E4E2;
+    --voice:#171719;
+    --recording:#D6453D; --recording-soft:#FBEAE9;
+    --success:#3B3B40; --warning:#5C5C62; --error:#C93B34;
+    --focus-ring:rgba(23,23,25,.40);
+    --shadow:0 8px 24px rgba(23,23,25,.10);
+    --icon-bg:#000000; --icon-fg:#FFFFFF; --logo:#000000;
+  }
+  .dark {
+    --bg:#111113; --surface:#19191C; --surface-2:#232327;
+    --border:rgba(242,242,244,.10); --border-2:rgba(242,242,244,.20);
+    --text-1:#F2F2F4; --text-2:#A2A2AA; --text-3:#68686F;
+    --primary:#F2F2F4; --primary-hover:#FFFFFF; --on-primary:#111113;
+    --sel-bg:rgba(242,242,244,.13);
+    --voice:#F2F2F4;
+    --recording:#F2555A; --recording-soft:rgba(242,85,90,.14);
+    --success:#C9C9CF; --warning:#A2A2AA; --error:#F26D6D;
+    --focus-ring:rgba(242,242,244,.45);
+    --shadow:0 8px 24px rgba(0,0,0,.50);
+    --icon-bg:#FFFFFF; --icon-fg:#000000; --logo:#FFFFFF;
+  }
+
+  .sec { margin-bottom:36px; }
+  .sec > h3 { font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--text-3); margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+  .row { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start; }
+  .lbl { font-size:10.5px; color:var(--text-3); margin-top:6px; }
+
+  /* ============ 基础组件 ============ */
+  .btn { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 14px; border-radius:8px; font-size:13px; font-weight:500; border:none; cursor:pointer; }
+  .btn-primary { background:var(--primary); color:var(--on-primary); }
+  .btn-secondary { background:transparent; color:var(--text-1); border:1px solid var(--border-2); }
+  .btn-ghost { background:transparent; color:var(--text-2); text-decoration:underline; text-underline-offset:3px; }
+  .btn-danger { background:transparent; color:var(--error); border:1px solid currentColor; }
+  .btn-sm { height:26px; font-size:12px; padding:0 10px; }
+  .btn-focus { outline:2px solid var(--focus-ring); outline-offset:2px; }
+  .btn[disabled] { opacity:.45; cursor:default; }
+  .input { height:32px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-1); padding:0 10px; font-size:13px; width:100%; }
+  .input::placeholder { color:var(--text-3); }
+  .input:focus { outline:2px solid var(--focus-ring); outline-offset:1px; }
+  .secret { display:flex; gap:0; align-items:center; border:1px solid var(--border); background:var(--surface-2); border-radius:8px; height:32px; padding-right:4px; }
+  .secret input { flex:1; border:none; background:transparent; color:var(--text-1); padding:0 10px; font-family:monospace; font-size:12px; outline:none; min-width:0; }
+  .secret button { border:none; background:transparent; color:var(--text-3); font-size:12px; padding:4px 6px; cursor:pointer; }
+  .select { display:inline-flex; align-items:center; justify-content:space-between; gap:12px; height:32px; padding:0 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); font-size:13px; min-width:150px; }
+  .select .arr { color:var(--text-3); font-size:10px; }
+  .toggle { display:inline-block; width:36px; height:20px; border-radius:99px; background:var(--border-2); position:relative; vertical-align:middle; }
+  .toggle::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--surface); }
+  .toggle.on { background:var(--primary); }
+  .toggle.on::after { left:18px; background:var(--on-primary); }
+  .kbd { font-family:monospace; font-size:11px; border:1px solid var(--border); border-bottom-width:2px; border-radius:5px; padding:2px 7px; background:var(--surface-2); white-space:nowrap; }
+  .tag { display:inline-block; padding:3px 10px; border-radius:99px; font-size:11px; background:var(--sel-bg); color:var(--text-1); font-weight:600; }
+  .tag-plain { background:var(--surface-2); color:var(--text-2); font-weight:400; border:1px solid var(--border); }
+  .tag-rec { background:var(--recording-soft); color:var(--recording); font-weight:600; }
+  .callout { display:flex; gap:8px; align-items:flex-start; border:1px solid var(--border); border-left:3px solid var(--text-2); background:var(--surface-2); border-radius:8px; padding:10px 12px; font-size:12px; color:var(--text-2); }
+  .callout.err { border-left-color:var(--error); color:var(--error); }
+  .slider { width:120px; height:4px; border-radius:2px; background:var(--border-2); position:relative; display:inline-block; vertical-align:middle; }
+  .slider::after { content:""; position:absolute; left:60%; top:-5px; width:14px; height:14px; border-radius:50%; background:var(--primary); }
+  .ta { border:1px solid var(--border); background:var(--surface-2); border-radius:8px; padding:9px 11px; font-family:monospace; font-size:11px; line-height:1.7; color:var(--text-2); white-space:pre-wrap; }
+  .ta .ph { color:var(--text-1); font-weight:600; }
+
+  /* ============ 窗口容器 ============ */
+  .win { background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); overflow:hidden; }
+  .win-tb { display:flex; align-items:center; gap:6px; height:34px; padding:0 12px; border-bottom:1px solid var(--border); background:var(--surface-2); }
+  .win-tb i { width:10px; height:10px; border-radius:50%; background:var(--border-2); display:block; }
+  .win-tb span { font-size:11.5px; color:var(--text-2); margin-left:8px; }
+
+  /* ============ HUD ============ */
+  .hud { display:inline-flex; align-items:center; gap:9px; background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:8px 16px 8px 13px; box-shadow:var(--shadow); font-size:12.5px; height:44px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--recording); animation:pulse 1.2s infinite; flex-shrink:0; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  .bars { display:flex; align-items:center; gap:3px; height:18px; }
+  .bars i { width:3.5px; border-radius:2px; background:var(--voice); display:block; }
+  .b1{height:6px}.b2{height:11px}.b3{height:17px}.b4{height:11px}.b5{height:6px}
+  .anim .b1{animation:eq .9s ease-in-out infinite}
+  .anim .b2{animation:eq .9s .15s ease-in-out infinite}
+  .anim .b3{animation:eq .9s .3s ease-in-out infinite}
+  .anim .b4{animation:eq .9s .45s ease-in-out infinite}
+  .anim .b5{animation:eq .9s .6s ease-in-out infinite}
+  @keyframes eq { 50% { transform:scaleY(.4); } }
+  .hud .x { color:var(--text-3); margin-left:2px; cursor:pointer; }
+  .hud .mode { font-size:10.5px; border:1px solid var(--border-2); border-radius:99px; padding:1px 8px; color:var(--text-2); white-space:nowrap; }
+  .hud .hint { color:var(--text-3); font-size:11.5px; }
+
+  /* ============ 托盘菜单 ============ */
+  .menu { width:230px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow); padding:5px; font-size:12.5px; }
+  .menu .st { padding:6px 10px; color:var(--text-2); font-size:12px; }
+  .menu hr { border:none; border-top:1px solid var(--border); margin:4px 6px; }
+  .menu .it { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-radius:6px; }
+  .menu .it.hov { background:var(--sel-bg); }
+  .menu .it .sc { color:var(--text-3); font-size:11px; }
+  .menu .it .sub { color:var(--text-3); }
+
+  /* ============ 助手面板 ============ */
+  .panel-a { width:560px; background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
+  .panel-a .chip-row { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 0; }
+  .chip { display:inline-flex; gap:6px; align-items:center; font-size:11.5px; color:var(--text-2); background:var(--surface-2); border:1px solid var(--border); border-radius:99px; padding:3px 10px; }
+  .chip .x { color:var(--text-3); cursor:pointer; }
+  .panel-a .in-row { display:flex; gap:8px; align-items:center; padding:10px 14px 12px; border-bottom:1px solid var(--border); }
+  .panel-a .ans { padding:14px; font-size:13px; line-height:1.6; }
+  .panel-a .ans .bubble { border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-top:8px; }
+  .panel-a .ans code { display:block; font-family:monospace; font-size:11.5px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:8px; color:var(--text-2); }
+  .panel-a .act { display:flex; gap:8px; align-items:center; padding:12px 14px; border-top:1px solid var(--border); }
+  .panel-a .pin { margin-left:auto; color:var(--text-3); }
+
+  /* ============ 设置窗口 ============ */
+  .settings { width:720px; }
+  .set-body { display:flex; min-height:420px; }
+  .nav { width:160px; flex-shrink:0; background:var(--surface-2); padding:10px 8px; font-size:12.5px; }
+  .nav div { padding:7px 12px; border-radius:8px; color:var(--text-2); margin-bottom:2px; }
+  .nav .on { background:var(--sel-bg); color:var(--text-1); font-weight:600; }
+  .content { flex:1; padding:18px 20px; }
+  .content h5 { font-size:15px; margin-bottom:14px; }
+  .content .desc { font-size:12px; color:var(--text-2); margin:-10px 0 16px; }
+  .slot-h { font-size:11px; color:var(--text-3); letter-spacing:.06em; margin:16px 0 8px; display:flex; justify-content:space-between; align-items:center; }
+  .prov { border:1px solid var(--border); border-radius:10px; padding:11px 13px; font-size:12.5px; margin-bottom:8px; display:flex; align-items:center; gap:10px; }
+  .prov.on { background:var(--sel-bg); border-color:var(--border-2); }
+  .prov .logo { width:26px; height:26px; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--text-3); }
+  .prov .meta { flex:1; line-height:1.45; }
+  .prov .meta small { color:var(--text-3); font-size:11px; }
+  .prov .lat { font-size:11px; color:var(--text-2); border:1px solid var(--border-2); padding:2px 8px; border-radius:99px; font-family:monospace; }
+  .pbar { height:4px; border-radius:2px; background:var(--surface-2); overflow:hidden; }
+  .pbar i { display:block; height:100%; border-radius:2px; background:var(--text-1); }
+  .frow { display:flex; align-items:center; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--border); font-size:12.5px; gap:16px; }
+  .frow:last-child { border-bottom:none; }
+  .frow .l { color:var(--text-1); }
+  .frow .l small { display:block; color:var(--text-3); font-size:11px; margin-top:2px; }
+  .diag { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
+  .diag .ok { color:var(--success); } .diag .bad { color:var(--error); }
+  .diag .fix { margin-left:auto; }
+
+  /* ============ 引导 ============ */
+  .onb { width:640px; min-height:430px; display:flex; flex-direction:column; }
+  .onb .body { flex:1; padding:28px 32px; display:flex; flex-direction:column; }
+  .steps { display:flex; gap:6px; justify-content:center; padding:14px 0 0; }
+  .steps i { width:6px; height:6px; border-radius:50%; background:var(--border-2); display:block; }
+  .steps i.on { background:var(--primary); }
+  .onb .foot { display:flex; justify-content:space-between; align-items:center; padding:14px 32px 18px; }
+  .perm { display:flex; align-items:center; gap:12px; border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:8px; font-size:12.5px; }
+  .perm .s { margin-left:auto; }
+
+  /* ============ 主页(主窗口) ============ */
+  .mwin { width:880px; }
+  .mbody { display:flex; min-height:520px; }
+  .mside { width:180px; flex-shrink:0; background:var(--surface-2); display:flex; flex-direction:column; padding:16px 10px 12px; }
+  .mside .brand { display:flex; align-items:center; gap:8px; padding:0 10px 16px; }
+  .mside .brand .mini { width:26px; height:26px; border-radius:7px; background:var(--icon-bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.5px; }
+  .mside .brand .mini .g { display:flex; gap:1.5px; align-items:center; }
+  .mside .brand .mini .g i { width:2px; border-radius:1px; background:var(--icon-fg); display:block; }
+  .mside .brand .mini .g .m1 { height:4px; } .mside .brand .mini .g .m2 { height:7px; } .mside .brand .mini .g .m3 { height:10px; }
+  .mside .brand .mini .g .m4 { height:7px; } .mside .brand .mini .g .m5 { height:4px; }
+  .mside .brand .mini .s { width:2px; height:7px; background:var(--icon-fg); border-radius:1px; }
+  .mside .brand b { font-size:15px; letter-spacing:-.01em; }
+  .mside nav div { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; color:var(--text-2); font-size:13px; margin-bottom:2px; }
+  .mside nav .on { background:var(--sel-bg); color:var(--text-1); font-weight:600; }
+  .mside .mfoot { margin-top:auto; display:flex; gap:4px; padding:0 6px; }
+  .mside .mfoot span { width:28px; height:28px; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--text-3); font-size:13px; }
+  .mmain { flex:1; padding:26px 28px 16px; display:flex; flex-direction:column; }
+  .mhero h4 { font-size:21px; letter-spacing:-.01em; margin-bottom:8px; }
+  .mhero p { font-size:13px; color:var(--text-2); }
+  .mstats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:22px 0; }
+  .mstat { border:1px solid var(--border); border-radius:12px; padding:16px 16px 13px; }
+  .mstat b { display:block; font-size:24px; font-weight:600; letter-spacing:-.02em; }
+  .mstat b small { font-size:13px; font-weight:500; color:var(--text-2); margin-left:2px; }
+  .mstat span { font-size:11.5px; color:var(--text-3); }
+  .msec-h { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
+  .msec-h h6 { font-size:13px; font-weight:600; }
+  .msec-h a { font-size:12px; color:var(--text-2); text-decoration:underline; text-underline-offset:3px; }
+  .mrecent { border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .mrecent .hrow:last-child { border-bottom:none; }
+
+  /* ============ 历史(主窗口页签) ============ */
+  .hist { width:640px; }
+  .hist .top { display:flex; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); align-items:center; }
+  .hist .note { font-size:11px; color:var(--text-3); padding:6px 14px; border-bottom:1px solid var(--border); }
+  .hrow { padding:10px 14px; border-bottom:1px solid var(--border); font-size:12.5px; display:flex; gap:10px; align-items:baseline; }
+  .hrow time { color:var(--text-3); font-size:11px; white-space:nowrap; }
+  .hrow .app { color:var(--text-3); font-size:11px; }
+  .hrow .sum { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hexp { background:var(--surface-2); border-bottom:1px solid var(--border); padding:12px 14px; }
+  .hexp .cols { display:flex; gap:12px; font-size:12px; line-height:1.6; }
+  .hexp .cols > div { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  .hexp .cols small { display:block; color:var(--text-3); font-size:10.5px; margin-bottom:4px; }
+
+  /* ============ 图标 & 色板 ============ */
+  .appicon { width:88px; height:88px; border-radius:20px; background:var(--icon-bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; box-shadow:var(--shadow); }
+  .appicon .bars { gap:5px; height:34px; }
+  .appicon .bars i { width:6px; border-radius:3px; background:var(--icon-fg); }
+  .appicon .ib1{height:14px}.appicon .ib2{height:23px}.appicon .ib3{height:34px}.appicon .ib4{height:23px}.appicon .ib5{height:14px}
+  .appicon .stem { width:6px; height:27px; background:var(--icon-fg); border-radius:3px; position:relative; }
+  .appicon .stem::after { content:""; position:absolute; bottom:-1px; left:-5px; right:-5px; height:5px; background:var(--icon-fg); border-radius:3px; }
+  .logotype { font-size:26px; font-weight:600; letter-spacing:-0.01em; color:var(--logo); }
+  .sw { border-radius:10px; overflow:hidden; border:1px solid var(--border); background:var(--surface); width:104px; }
+  .sw .cchip { height:44px; }
+  .sw .meta { padding:6px 8px; font-size:10px; line-height:1.5; }
+  .sw .meta b { display:block; font-size:10.5px; }
+  .sw .meta span { color:var(--text-3); font-family:monospace; }
+  .empty { text-align:center; padding:28px; color:var(--text-3); font-size:12.5px; border:1px dashed var(--border-2); border-radius:12px; width:280px; }
+  .empty .glyph { font-size:22px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="page-head">
+  <h1>Typex UI Mockup · 全界面 · 纯墨 Monochrome</h1>
+  <p>本页是 <b>docs/04-design-system.md</b>(token)与 <b>docs/05-ux-spec.md</b>(界面规格)的可视化定稿,覆盖软件全部界面 × 亮/暗双主题。
+  实现任何界面前先在此找到对应 mock。规则速记:全部颜色引用 token;界面只有黑白灰,唯一彩色是录音红/错误红;选中态 = 灰底 + 字重,禁止反色实底;链接用下划线;每页只有主按钮一处实底反色。</p>
+</div>
+
+<div class="theme light" id="t-light"></div>
+<div class="theme dark" id="t-dark"></div>
+
+<template id="all-ui">
+  <h2 class="theme-name"></h2>
+
+  <!-- ═══════ 1. 主页(主窗口) ═══════ -->
+  <div class="sec">
+    <h3>1 · 主页(主窗口 880×560,侧边栏导航;从托盘/Dock 打开,不常驻)</h3>
+    <div class="row">
+      <div>
+        <div class="win mwin">
+          <div class="win-tb"><i></i><i></i><i></i></div>
+          <div class="mbody">
+            <div class="mside">
+              <div class="brand"><span class="mini"><span class="g"><i class="m1"></i><i class="m2"></i><i class="m3"></i><i class="m4"></i><i class="m5"></i></span><span class="s"></span></span><b>Typex</b></div>
+              <nav>
+                <div class="on">⌂ 首页</div>
+                <div>◷ 历史记录</div>
+              </nav>
+              <div class="mfoot"><span title="设置">⚙</span><span title="切换深浅色">◐</span></div>
+            </div>
+            <div class="mmain">
+              <div class="mhero">
+                <h4>说,即所得。</h4>
+                <p>按住 <span class="kbd">右 ⌘</span> 开始语音输入 · <span class="kbd">右 ⌥</span> 呼出助手</p>
+              </div>
+              <div class="mstats">
+                <div class="mstat"><b>2<small>时</small>33<small>分</small></b><span>总口述时长</span></div>
+                <div class="mstat"><b>17,542<small>字</small></b><span>口述字数</span></div>
+                <div class="mstat"><b>8<small>时</small>24<small>分</small></b><span>节省时间</span></div>
+                <div class="mstat"><b>172<small>字/分</small></b><span>平均语速</span></div>
+              </div>
+              <div class="msec-h"><h6>最近</h6><a href="#">查看全部历史 →</a></div>
+              <div class="mrecent">
+                <div class="hrow"><time>14:32</time><span class="tag tag-plain">听写</span><span class="app">微信</span><span class="sum">今晚的会改到八点半,你们先吃饭不用等我</span></div>
+                <div class="hrow"><time>11:07</time><span class="tag tag-plain">中→EN</span><span class="app">Slack</span><span class="sum">I'll fix this bug tomorrow morning; for today…</span></div>
+                <div class="hrow"><time>昨天</time><span class="tag tag-plain">助手</span><span class="app">VS Code</span><span class="sum">这个错误一般是什么原因?</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">首页页签:标题 + 快捷键提示 + 统计卡组 + 最近记录。版本/检查更新在「设置 → 关于」。侧边栏底部图标:设置(独立窗口)/深浅色切换 ◐</p>
+      </div>
+      <div>
+        <div class="win mwin">
+          <div class="win-tb"><i></i><i></i><i></i></div>
+          <div class="mbody">
+            <div class="mside">
+              <div class="brand"><span class="mini"><span class="g"><i class="m1"></i><i class="m2"></i><i class="m3"></i><i class="m4"></i><i class="m5"></i></span><span class="s"></span></span><b>Typex</b></div>
+              <nav>
+                <div>⌂ 首页</div>
+                <div class="on">◷ 历史记录</div>
+              </nav>
+              <div class="mfoot"><span>⚙</span><span>◐</span></div>
+            </div>
+            <div class="mmain" style="padding:18px 20px">
+              <div style="display:flex;gap:10px;margin-bottom:4px"><input class="input" placeholder="搜索历史…" style="flex:1"><button class="btn btn-danger btn-sm">清空全部</button></div>
+              <p style="font-size:11px;color:var(--text-3);padding:6px 0">历史仅保存在本机,不含音频</p>
+              <div class="mrecent">
+                <div class="hrow"><time>14:32</time><span class="tag tag-plain">听写</span><span class="app">微信</span><span class="sum">今晚的会改到八点半,你们先吃饭不用等我</span></div>
+                <div class="hexp" style="border-bottom:1px solid var(--border)">
+                  <div class="cols">
+                    <div><small>原始转写</small>嗯…今晚的会改到八点、呃不对、八点半,你们先吃饭不用等我</div>
+                    <div><small>整理后</small>今晚的会改到八点半,你们先吃饭不用等我</div>
+                  </div>
+                  <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-secondary btn-sm">复制</button><button class="btn btn-ghost btn-sm">删除</button></div>
+                </div>
+                <div class="hrow"><time>11:07</time><span class="tag tag-plain">中→EN</span><span class="app">Slack</span><span class="sum">I'll fix this bug tomorrow morning; for today…</span></div>
+                <div class="hrow"><time>昨天</time><span class="tag tag-plain">助手</span><span class="app">VS Code</span><span class="sum">这个错误一般是什么原因?</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">历史记录页签:搜索 + 展开双栏对照(展开行 = --surface-2 底)</p>
+      </div>
+      <div>
+        <div class="win mwin" style="width:520px">
+          <div class="win-tb"><i></i><i></i><i></i></div>
+          <div class="mbody" style="min-height:380px">
+            <div class="mside" style="width:150px">
+              <div class="brand"><span class="mini"><span class="g"><i class="m1"></i><i class="m2"></i><i class="m3"></i><i class="m4"></i><i class="m5"></i></span><span class="s"></span></span><b>Typex</b></div>
+              <nav>
+                <div class="on">⌂ 首页</div>
+                <div>◷ 历史记录</div>
+              </nav>
+            </div>
+            <div class="mmain" style="padding:22px">
+              <div class="mstats" style="grid-template-columns:repeat(2,1fr);margin:0 0 16px">
+                <div class="mstat"><b>0<small>字</small></b><span>口述字数</span></div>
+                <div class="mstat"><b>0<small>分</small></b><span>节省时间</span></div>
+              </div>
+              <div class="empty" style="width:auto"><div class="glyph">⌀</div>还没有记录<br><span style="font-size:11px">按住 右⌘ 说第一句话吧</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">首次使用:统计归零 + EmptyState</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 2. 设置窗口(全部 9 页 + 编辑/切换/模型管理状态) ═══════ -->
+  <div class="sec">
+    <h3>2 · 设置窗口 720×520(左导航 160px;全部 9 页 + 编辑/切换/模型管理状态)</h3>
+    <div class="row">
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div class="on">通用</div><div>听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>通用</h5>
+              <div class="frow"><span class="l">界面语言</span><span class="select">跟随系统 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">主题</span><span class="select">跟随系统 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">开机自启</span><span class="toggle on"></span></div>
+              <div class="frow"><span class="l">提示音<small>开始 / 成功 / 错误 三枚,可关</small></span><span><span class="toggle on"></span> <span class="slider"></span></span></div>
+              <div class="frow"><span class="l">网络代理</span><span class="select">跟随系统 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">更新通道</span><span class="select">稳定版 <span class="arr">▾</span></span></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.1 通用</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div class="on">听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>听写</h5>
+              <div class="frow"><span class="l">文本整理<small>去语气词、修标点、保留改口后的最终意图</small></span><span class="toggle on"></span></div>
+              <div class="frow"><span class="l">整理提示词(高级)<small>占位符:{transcript} 原始转写 · {dictionary} 个人词典</small></span><button class="btn btn-ghost btn-sm">展开编辑 ▾</button></div>
+              <div class="frow"><span class="l">注入方式</span><span class="select">自动(推荐) <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">粘贴延迟</span><span><span class="slider"></span> <span style="font-family:monospace;font-size:11px;color:var(--text-3)">60ms</span></span></div>
+              <div class="frow"><span class="l">麦克风</span><span class="select">系统默认 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">电平预览</span><div class="bars anim"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.2 听写</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div class="on">听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>听写</h5>
+              <div class="frow"><span class="l">整理提示词(高级)</span><button class="btn btn-ghost btn-sm">收起 ▴</button></div>
+              <div class="ta" style="margin-top:4px">你是语音转写的后处理引擎。输入是一段语音识别原始文本,
+输出整理后的文本。删除语气词与无意义重复;修复标点与断句;
+识别说话人的自我修正,只保留最终意图;只输出结果本身。
+
+【原始转写】<span class="ph">{transcript}</span></div>
+              <p style="font-size:11px;color:var(--text-3);margin:8px 0 10px">可用占位符:<span style="font-family:monospace"><b>{transcript}</b></span> 原始转写文本(必需) · <span style="font-family:monospace">{dictionary}</span> 个人词典(可选,F-10)</p>
+              <div style="display:flex;gap:8px"><button class="btn btn-primary btn-sm">保存</button><button class="btn btn-secondary btn-sm">恢复默认</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.2b 整理提示词展开编辑:占位符 {transcript} 高亮加粗;缺失必需占位符时保存禁用 + 行内报错;「恢复默认」一键回内置模板</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div class="on">翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>翻译</h5>
+              <div class="frow"><span class="l">源语言<small>你说话使用的语言</small></span><span class="select">中文(简体) <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">目标语言<small>要翻译成的语言</small></span><span class="select">English <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">双向翻译<small>检测到你说的是 English 时,自动译回 中文(简体)</small></span><span class="toggle on"></span></div>
+              <div class="frow"><span class="l">翻译提示词(高级)<small>占位符:{transcript} 原始转写 · {source_language} 源语言 · {target_language} 目标语言</small></span><button class="btn btn-ghost btn-sm">展开编辑 ▾</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.3 翻译</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div class="on">助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>助手</h5>
+              <div class="frow"><span class="l">改写结果处置</span><span class="select">自动替换选区 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">问答提示词(高级)<small>占位符:{instruction} 语音指令 · {selection} 选中文本(可选)</small></span><button class="btn btn-ghost btn-sm">展开编辑 ▾</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.4 助手</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div>
+              <div class="on">模型服务</div>
+              <div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>模型服务</h5>
+              <div class="slot-h"><span>语音转文字</span></div>
+              <div class="prov on"><div class="logo">G</div><div class="meta"><b>Groq</b> · whisper-large-v3-turbo<br><small>openai_compat · 已连接</small></div><span class="lat">✓ 320ms</span><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
+              <div class="slot-h"><span>文本整理</span><span style="font-size:11.5px;color:var(--text-2)">与翻译共用 <span class="toggle on"></span></span></div>
+              <div class="slot-h"><span>翻译模型</span></div>
+              <div class="prov"><div class="logo">◉</div><div class="meta"><b>本地 · Qwen3.5-2B</b><br><small>local · 已下载 · 1.3 GB · 离线</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
+              <div class="slot-h"><span>问答模型</span></div>
+              <div class="prov"><div class="logo">C</div><div class="meta"><b>Claude</b> · claude-fable-5<br><small>responses · 已连接</small></div><span class="lat">✓ 640ms</span><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
+              <p style="font-size:11px;color:var(--text-3);margin-top:12px">已下载模型:Qwen3-ASR-0.6B 512 MB · Qwen3.5-2B 1.3 GB · <a href="#">管理…</a></p>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.5 模型服务(选中 ProviderCard = 灰底;翻译槽演示本地模型混搭;问答槽无本地选项)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div class="on">模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <p style="font-size:12px;margin-bottom:10px"><a href="#">← 模型服务</a></p>
+              <h5>编辑连接 — 语音转文字</h5>
+              <div class="frow"><span class="l">预设</span><span class="select">Groq <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">Base URL</span><input class="input" style="width:280px" value="https://api.groq.com/openai/v1"></div>
+              <div class="frow"><span class="l">模型</span><span class="select">whisper-large-v3-turbo <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">API 密钥</span><div class="secret" style="width:280px"><input value="gsk_••••••••••••••••••••"><button>👁</button><button>📋</button></div></div>
+              <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-primary">保存</button><button class="btn btn-secondary">测试连接</button><span style="flex:1"></span><button class="btn btn-danger">删除档案</button></div>
+              <p style="margin-top:10px;font-size:12px;color:var(--success)">✓ 测试通过 · 320ms</p>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.6 ProviderCard 编辑态 — 云端(子页,顶部 ← 返回;SecretInput:掩码 + 显隐 + 粘贴)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div class="on">模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <p style="font-size:12px;margin-bottom:10px"><a href="#">← 模型服务</a></p>
+              <h5>编辑连接 — 翻译模型</h5>
+              <div class="frow"><span class="l">预设</span><span class="select">本地 · 离线 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">模型</span><span class="select">Qwen3.5-2B(已下载 · 1.3 GB) <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">加载策略<small>常驻更快;录音时预热更省内存</small></span><span class="select">录音时预热 <span class="arr">▾</span></span></div>
+              <p style="font-size:11.5px;color:var(--text-3);margin-top:6px">本地推理,无需 API 端点与密钥;模型未下载时此处显示 [下载] 按钮。</p>
+              <div style="display:flex;gap:8px;margin-top:16px"><button class="btn btn-primary">保存</button><button class="btn btn-secondary">测试</button><span style="flex:1"></span><button class="btn btn-danger">删除档案</button></div>
+              <p style="margin-top:10px;font-size:12px;color:var(--success)">✓ 测试通过 · 首 token 210ms</p>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.7 ProviderCard 编辑态 — 本地(子页,顶部 ← 返回;模型下拉来自模型库;无端点/密钥字段)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div class="on">模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>模型服务</h5>
+              <div class="slot-h"><span>翻译模型</span></div>
+              <div class="prov on"><div class="logo">◉</div><div class="meta"><b>本地 · Qwen3.5-2B</b><br><small>local · 已下载 · 1.3 GB · 离线</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▴</button></div>
+              <div style="position:relative;z-index:2;height:0">
+                <div class="menu" style="width:250px;position:absolute;right:0;top:-4px">
+                  <div class="st">切换配置档案</div>
+                  <hr>
+                  <div class="it hov"><span style="font-weight:600">✓ 本地 · Qwen3.5-2B</span><span class="sc">离线</span></div>
+                  <div class="it"><span>&nbsp;&nbsp;&nbsp;DeepSeek V3</span></div>
+                  <div class="it"><span>&nbsp;&nbsp;&nbsp;OpenAI · gpt-5</span></div>
+                  <hr>
+                  <div class="it"><span>＋ 新建配置…</span></div>
+                </div>
+              </div>
+              <div class="slot-h"><span>问答模型</span></div>
+              <div class="prov"><div class="logo">C</div><div class="meta"><b>Claude</b> · claude-fable-5<br><small>responses · 已连接</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.8 「切换 ▾」下拉:该槽全部已存档案,✓ + 加粗 = 当前;新建不覆盖旧档案(ADR-21;与托盘「模型 ▸」同一组数据)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div class="on">模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <p style="font-size:12px;margin-bottom:10px"><a href="#">← 模型服务</a></p>
+              <h5>已下载模型</h5>
+              <p class="desc">本机模型文件管理;删除被槽位使用中的模型会先警告。</p>
+              <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3-ASR-0.6B</b> <span class="tag tag-plain" style="margin-left:4px">STT</span><br><small>512 MB · 使用中:语音转文字</small></div><button class="btn btn-danger btn-sm">删除</button></div>
+              <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3.5-2B</b> <span class="tag tag-plain" style="margin-left:4px">LLM</span><br><small>1.3 GB · 使用中:文本整理 · 翻译</small></div><button class="btn btn-danger btn-sm">删除</button></div>
+              <div class="slot-h"><span>可下载(模型库)</span></div>
+              <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3-ASR-1.7B</b> <span class="tag tag-plain" style="margin-left:4px">STT</span><br><small>1.1 GB · 需 GPU 加速(本机 ✓ Metal)</small></div><button class="btn btn-secondary btn-sm">下载</button></div>
+              <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3.5-4B</b> <span class="tag tag-plain" style="margin-left:4px">LLM</span><br><small>2.5 GB · 建议 ≥ 16 GB 内存(本机 ✓ 24 GB)</small></div><button class="btn btn-secondary btn-sm">下载</button></div>
+              <p style="font-size:11px;color:var(--text-3);margin-top:12px">占用合计 1.8 GB · 下载源:自动(HuggingFace / ModelScope) · <a href="#">更改…</a></p>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.9 已下载模型管理(子页,自 2.5「管理…」进入,顶部 ← 返回;模型库行内显示硬件要求与本机检测结果,ADR-22)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div class="on">快捷键</div><div>历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>快捷键</h5>
+              <div class="frow"><span class="l">听写</span><span><span class="kbd">右 ⌘</span> <button class="btn btn-secondary btn-sm">更改</button></span></div>
+              <div class="frow"><span class="l">助手</span><span><span class="kbd">右 ⌥</span> <button class="btn btn-secondary btn-sm">更改</button></span></div>
+              <div class="frow"><span class="l">翻译</span><span><span class="kbd">右 ⌘</span> + <span class="kbd">右 ⌥</span> <button class="btn btn-secondary btn-sm">更改</button></span></div>
+              <div style="margin-top:12px" class="callout"><span>⌨</span><span><b>正在录制…</b> 按下想要的键位(支持单个修饰键);Esc 取消。</span></div>
+              <div style="margin-top:8px" class="callout"><span>⚠</span><span>CapsLock 与 macOS 中文输入法的中英切换冲突,不推荐。</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.10 快捷键(HotkeyRecorder 录制态 + 冲突警告)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div class="on">历史</div><div>诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>历史</h5>
+              <p class="desc">历史仅保存在本机,不含音频。</p>
+              <div class="frow"><span class="l">保存历史记录</span><span class="toggle on"></span></div>
+              <div class="frow"><span class="l">保留期限</span><span class="select">90 天 <span class="arr">▾</span></span></div>
+              <div class="frow"><span class="l">清空全部历史</span><button class="btn btn-danger btn-sm">清空…</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.11 历史(设置页)</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div class="on">诊断</div><div>关于</div>
+            </div>
+            <div class="content">
+              <h5>诊断</h5>
+              <div class="diag"><span class="ok">✓</span><span>麦克风权限</span></div>
+              <div class="diag"><span class="ok">✓</span><span>辅助功能权限(注入 + 读选区)</span></div>
+              <div class="diag"><span class="bad">✗</span><span>输入监听权限(快捷键)</span><button class="btn btn-secondary btn-sm fix">去授权</button></div>
+              <div class="diag"><span class="ok">✓</span><span>注入后端:剪贴板粘贴(CGEvent)</span></div>
+              <div class="diag"><span class="ok">✓</span><span>compositor:—(macOS)</span></div>
+              <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-secondary">打开日志目录</button><button class="btn btn-secondary">导出诊断包(自动脱敏)</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.12 诊断</p>
+      </div>
+      <div>
+        <div class="win settings">
+          <div class="win-tb"><i></i><i></i><i></i><span>Typex 设置</span></div>
+          <div class="set-body">
+            <div class="nav">
+              <div>通用</div><div>听写</div><div>翻译</div><div>助手</div><div>模型服务</div><div>快捷键</div><div>历史</div><div>诊断</div><div class="on">关于</div>
+            </div>
+            <div class="content" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
+              <div class="appicon"><div class="bars"><i class="ib1"></i><i class="ib2"></i><i class="ib3"></i><i class="ib4"></i><i class="ib5"></i></div><div class="stem"></div></div>
+              <div class="logotype">Typex</div>
+              <p style="font-size:12px;color:var(--text-2)">v1.0.0 · GPL-3.0 · typex.ink<br>你的声音只会发送到你自己配置的服务。</p>
+              <div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm">检查更新</button><button class="btn btn-ghost btn-sm">开源许可</button></div>
+            </div>
+          </div>
+        </div>
+        <p class="lbl">2.13 关于</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 3. HUD 全状态 ═══════ -->
+  <div class="sec">
+    <h3>3 · HUD 状态胶囊(屏幕底部居中,距底边 48px,高 44px;全部状态)</h3>
+    <div class="row">
+      <div><div class="hud"><span class="dot"></span><span style="font-family:monospace;font-size:11px">0:07</span><div class="bars anim"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div><span class="mode">听写</span><span class="x">✕</span></div><p class="lbl">录音中 · 听写</p></div>
+      <div><div class="hud"><span class="dot"></span><span style="font-family:monospace;font-size:11px">0:12</span><div class="bars anim"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div><span class="mode">中 → EN</span><span class="x">✕</span></div><p class="lbl">录音中 · 翻译</p></div>
+      <div><div class="hud"><span class="dot"></span><span style="font-family:monospace;font-size:11px">0:03</span><div class="bars anim"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div><span class="mode">助手</span><span class="x">✕</span></div><p class="lbl">录音中 · 助手</p></div>
+      <div><div class="hud"><span class="dot"></span><span style="font-family:monospace;font-size:11px">0:05</span><div class="bars anim"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div><span class="mode">听写 · 原样</span><span class="x">✕</span></div><p class="lbl">整理层关闭时加「原样」小字</p></div>
+      <div><div class="hud"><span class="dot"></span><span style="font-family:monospace;font-size:11px">0:04</span><span class="hint">没有听到声音</span><span class="x">✕</span></div><p class="lbl">收不到声音 3 秒</p></div>
+      <div><div class="hud"><div class="bars" style="opacity:.5"><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i></div><span style="color:var(--text-2)">正在整理…</span><span class="hint" style="font-family:monospace">6s</span></div><p class="lbl">处理中(超 5s 显示耗时)</p></div>
+      <div><div class="hud"><span style="color:var(--success)">✓</span><span>已输入</span></div><p class="lbl">成功(600ms 后淡出)</p></div>
+      <div><div class="hud"><span style="color:var(--error)">⚠</span><span>转写失败:无法连接 API</span><button class="btn btn-secondary btn-sm">重试</button><button class="btn btn-ghost btn-sm">复制原文</button><span class="x">✕</span></div><p class="lbl">失败(不自动消失;复制原文 = 不丢话兜底)</p></div>
+      <div><div class="hud"><span style="color:var(--error)">⚠</span><span>API 密钥无效(401)</span><button class="btn btn-secondary btn-sm">打开模型设置</button><span class="x">✕</span></div><p class="lbl">AuthError 示例</p></div>
+      <div><div class="hud"><span style="color:var(--text-2)">ⓘ</span><span>当前没有输入焦点,结果已复制</span></div><p class="lbl">NoFocus(注入失败自动转剪贴板)</p></div>
+    </div>
+  </div>
+
+  <!-- ═══════ 4. 托盘菜单 ═══════ -->
+  <div class="sec">
+    <h3>4 · 托盘菜单(系统原生菜单的视觉基准)</h3>
+    <div class="row">
+      <div>
+        <div class="menu">
+          <div class="st">● Typex 就绪</div>
+          <hr>
+          <div class="it hov"><span>打开助手</span><span class="sc">按住 右⌥</span></div>
+          <div class="it"><span>复制上次结果</span></div>
+          <hr>
+          <div class="it"><span>文本整理</span><span class="sc">✓ 开</span></div>
+          <div class="it"><span>翻译目标</span><span class="sub">EN ▸</span></div>
+          <div class="it"><span>模型</span><span class="sub">▸</span></div>
+          <div class="it"><span>暂停 Typex</span></div>
+          <hr>
+          <div class="it"><span>设置…</span><span class="sc">⌘,</span></div>
+          <div class="it"><span>主页…</span></div>
+          <div class="it"><span>检查更新</span></div>
+          <div class="it"><span>退出</span></div>
+        </div>
+        <p class="lbl">hover 行 = --sel-bg 灰底</p>
+      </div>
+      <div>
+        <div class="menu">
+          <div class="st"><span style="color:var(--recording)">●</span> 录音中 0:07</div>
+          <hr>
+          <div class="it"><span>取消本次录音</span><span class="sc">Esc</span></div>
+        </div>
+        <p class="lbl">录音中状态行(唯一彩色:录音红)</p>
+      </div>
+      <div>
+        <div class="menu">
+          <div class="st" style="font-weight:600">模型 ▸ 子菜单</div>
+          <hr>
+          <div class="it" style="color:var(--text-3);font-size:11px"><span>听写</span></div>
+          <div class="it"><span>✓ 本地 · Qwen3-ASR-0.6B</span></div>
+          <div class="it hov"><span>&nbsp;&nbsp;&nbsp;Groq · whisper-turbo</span></div>
+          <hr>
+          <div class="it" style="color:var(--text-3);font-size:11px"><span>翻译</span></div>
+          <div class="it"><span>✓ 本地 · Qwen3.5-2B</span></div>
+          <div class="it"><span>&nbsp;&nbsp;&nbsp;DeepSeek V3</span></div>
+          <hr>
+          <div class="it" style="color:var(--text-3);font-size:11px"><span>问答</span></div>
+          <div class="it"><span>✓ Claude · claude-fable-5</span></div>
+        </div>
+        <p class="lbl">「模型 ▸」子菜单:三组已存档案,✓ 标当前,点选即切(ADR-21 多档案快速切换)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 5. 助手面板 ═══════ -->
+  <div class="sec">
+    <h3>5 · 助手面板(屏幕上 1/3 居中,宽 560,圆角 16,失焦自动隐藏)</h3>
+    <div class="row">
+      <div>
+        <div class="panel-a">
+          <div class="chip-row"><span class="chip">⌗ 来自 Chrome · 217 字 <span class="x">✕</span></span></div>
+          <div class="in-row"><input class="input" placeholder="按住说话,或输入问题…"><button class="btn btn-secondary" style="flex-shrink:0">🎙</button></div>
+          <div class="ans">
+            <div class="bubble">Sure — here's a more concise version:<br><span style="color:var(--text-2)">"I'll fix this bug tomorrow morning; for today, here's a temporary workaround."</span><code>git stash && git checkout -b hotfix/tmp-workaround</code></div>
+          </div>
+          <div class="act"><button class="btn btn-primary">替换选区 ⏎</button><button class="btn btn-secondary">插入到光标</button><button class="btn btn-ghost">复制</button><span class="pin">📌</span></div>
+        </div>
+        <p class="lbl">有选中文本:上下文芯片 + 主动作 = 替换选区;回答区 Markdown 渲染,代码块可复制</p>
+      </div>
+      <div>
+        <div class="panel-a">
+          <div class="in-row" style="border-bottom:none"><input class="input" placeholder="按住说话,或输入问题…"><button class="btn btn-secondary" style="flex-shrink:0">🎙</button></div>
+        </div>
+        <p class="lbl">无选区、无回答的初始态(极简一行)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 6. 首次启动引导 ═══════ -->
+  <div class="sec">
+    <h3>6 · 首次启动引导 640×480(5 步)</h3>
+    <div class="row">
+      <div>
+        <div class="win onb">
+          <div class="steps"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+          <div class="body" style="align-items:center;justify-content:center;text-align:center;gap:12px">
+            <div class="appicon"><div class="bars"><i class="ib1"></i><i class="ib2"></i><i class="ib3"></i><i class="ib4"></i><i class="ib5"></i></div><div class="stem"></div></div>
+            <div class="logotype">Typex</div>
+            <p style="font-size:14px">说,即所得。</p>
+          </div>
+          <div class="foot"><span class="select" style="min-width:130px;height:30px;font-size:12.5px">简体中文 <span class="arr">▴</span></span><button class="btn btn-primary">开始 →</button></div>
+        </div>
+        <p class="lbl">步骤 1 · 欢迎(仅图标 + logotype + 口号,居中;左下角语言上拉框:简体中文/English,即时切换整个引导)</p>
+      </div>
+      <div>
+        <div class="win onb">
+          <div class="steps"><i></i><i class="on"></i><i></i><i></i><i></i></div>
+          <div class="body">
+            <h5 style="font-size:16px;margin-bottom:14px">需要几项系统权限</h5>
+            <div class="perm"><span>🎙</span><span>麦克风<br><small style="color:var(--text-3)">录下你说的话</small></span><span class="s" style="color:var(--success)">✓ 已授权</span></div>
+            <div class="perm"><span>⌨</span><span>辅助功能<br><small style="color:var(--text-3)">把文字输入到光标处、读取选中文本</small></span><button class="btn btn-secondary btn-sm s">去授权</button></div>
+            <div class="perm"><span>👂</span><span>输入监听<br><small style="color:var(--text-3)">监听全局快捷键(按住说话)</small></span><button class="btn btn-secondary btn-sm s">去授权</button></div>
+          </div>
+          <div class="foot"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary" disabled>继续 →</button></div>
+        </div>
+        <p class="lbl">步骤 2 · 权限(实时 ✓/✗ 轮询;权限未齐时主按钮禁用)</p>
+      </div>
+      <div>
+        <div class="win onb">
+          <div class="steps"><i></i><i></i><i class="on"></i><i></i><i></i></div>
+          <div class="body">
+            <h5 style="font-size:16px;margin-bottom:14px">连接模型服务</h5>
+            <div class="prov on"><div class="logo">◉</div><div class="meta"><b>本地模型(离线)</b> <span class="tag" style="margin-left:4px">推荐</span><br><small>无需密钥 · 已按你的设备选择「标准档」:Qwen3-ASR-0.6B + Qwen3.5-2B(约 1.8 GB) · <a href="#">更改档位 ▾</a></small></div><button class="btn btn-secondary btn-sm">下载并使用</button></div>
+            <p style="font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:10px;margin:10px 0"><span style="flex:1;border-top:1px solid var(--border)"></span>或连接云端服务<span style="flex:1;border-top:1px solid var(--border)"></span></p>
+            <div class="slot-h" style="margin:6px 0 2px"><span>语音转文字</span></div>
+            <div class="frow"><span class="l">API 端点</span><input class="input" style="width:250px" placeholder="https://api.example.com/v1"></div>
+            <div class="frow"><span class="l">API 密钥</span><div class="secret" style="width:250px"><input placeholder="sk-…"><button>👁</button><button>📋</button></div></div>
+            <div class="slot-h" style="margin:10px 0 2px"><span>大语言模型(整理 · 翻译 · 问答共用,可在设置中分开)</span></div>
+            <div class="frow"><span class="l">API 端点</span><input class="input" style="width:250px" placeholder="https://api.example.com/v1"></div>
+            <div class="frow"><span class="l">API 密钥</span><div class="secret" style="width:250px"><input placeholder="sk-…"><button>👁</button><button>📋</button></div></div>
+          </div>
+          <div class="foot"><button class="btn btn-ghost">稍后配置</button><button class="btn btn-primary">继续 →</button></div>
+        </div>
+        <p class="lbl">步骤 3 · 模型:本地一键(推荐) 或 云端直填(STT + LLM 两组端点+密钥;LLM 三槽共用;无厂商推荐,ADR-21)</p>
+      </div>
+      <div>
+        <div class="win onb">
+          <div class="steps"><i></i><i></i><i class="on"></i><i></i><i></i></div>
+          <div class="body">
+            <h5 style="font-size:16px;margin-bottom:14px">连接模型服务</h5>
+            <div class="prov on"><div class="logo">◉</div><div class="meta"><b>本地模型(离线) · 标准档</b><br><small>正在下载 Qwen3-ASR-0.6B … 216 / 512 MB</small><div class="pbar" style="margin-top:7px;width:100%"><i style="width:42%"></i></div></div></div>
+            <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3.5-2B(整理 / 翻译)</b><br><small>排队中 · 1.3 GB</small></div></div>
+            <p style="font-size:11px;color:var(--text-3);margin-top:8px">下载完成前可先完成余下步骤,语音输入将在模型就绪后可用。</p>
+          </div>
+          <div class="foot"><button class="btn btn-ghost">取消下载</button><button class="btn btn-primary">继续 →</button></div>
+        </div>
+        <p class="lbl">步骤 3b · 本地模型下载中(按设备推荐档位,ADR-22;可后台继续;进度条 = --text-1 实底,无彩色)</p>
+      </div>
+      <div>
+        <div class="win onb">
+          <div class="steps"><i></i><i></i><i></i><i class="on"></i><i></i></div>
+          <div class="body">
+            <h5 style="font-size:16px;margin-bottom:14px">试试你的快捷键</h5>
+            <div class="frow"><span class="l">听写</span><span class="kbd">右 ⌘</span></div>
+            <div class="frow"><span class="l">助手</span><span class="kbd">右 ⌥</span></div>
+            <div class="frow"><span class="l">翻译</span><span><span class="kbd">右 ⌘</span> + <span class="kbd">右 ⌥</span></span></div>
+            <div style="margin-top:14px">
+              <p style="font-size:12px;color:var(--text-2);margin-bottom:6px">练习:按住 <span class="kbd">右 ⌘</span> 说「你好,Typex」</p>
+              <input class="input" placeholder="文字会出现在这里…">
+            </div>
+          </div>
+          <div class="foot"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary">继续 →</button></div>
+        </div>
+        <p class="lbl">步骤 4 · 快捷键 + 练习输入框</p>
+      </div>
+      <div>
+        <div class="win onb">
+          <div class="steps"><i></i><i></i><i></i><i></i><i class="on"></i></div>
+          <div class="body" style="align-items:center;justify-content:center;text-align:center;gap:12px">
+            <span style="font-size:28px;color:var(--success)">✓</span>
+            <h5 style="font-size:16px">一切就绪</h5>
+          </div>
+          <div class="foot"><span></span><button class="btn btn-primary">完成</button></div>
+        </div>
+        <p class="lbl">步骤 5 · 完成(仅 ✓ + 一句话;开机自启默认开启,设置-通用可关)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════ 7. 组件全态 ═══════ -->
+  <div class="sec">
+    <h3>7 · 组件库全态(components/;全部键盘可达,焦点环 --focus-ring)</h3>
+    <div class="row" style="align-items:center">
+      <button class="btn btn-primary">主按钮</button>
+      <button class="btn btn-primary btn-focus">焦点态</button>
+      <button class="btn btn-primary" disabled>禁用</button>
+      <button class="btn btn-secondary">次按钮</button>
+      <button class="btn btn-ghost">Ghost(下划线)</button>
+      <button class="btn btn-danger">危险</button>
+      <span class="tag">已选中</span>
+      <span class="tag tag-plain">普通 tag</span>
+      <span class="tag tag-rec">● 录音中</span>
+      <span class="kbd">⌘</span><span class="kbd">右 ⌥</span>
+      <span class="toggle on"></span><span class="toggle"></span>
+      <span class="select">选项 A <span class="arr">▾</span></span>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div style="width:260px"><input class="input" placeholder="占位文本(text-3)"></div>
+      <div style="width:260px"><div class="secret"><input value="sk-••••••••••"><button>👁</button><button>📋</button></div></div>
+      <div style="width:300px"><div class="callout"><span>ⓘ</span><span>信息提示:整理层已开启。</span></div></div>
+      <div style="width:300px"><div class="callout err"><span>✕</span><span>错误:API 密钥无效(401)。</span></div></div>
+    </div>
+  </div>
+
+  <!-- ═══════ 8. 图标 & 色板 ═══════ -->
+  <div class="sec">
+    <h3>8 · 图标 · Logotype · 色板(图标随模式黑白反转,永不带灰/渐变)</h3>
+    <div class="row" style="align-items:center;margin-bottom:16px">
+      <div><div class="appicon"><div class="bars"><i class="ib1"></i><i class="ib2"></i><i class="ib3"></i><i class="ib4"></i><i class="ib5"></i></div><div class="stem"></div></div><p class="lbl icon-lbl"></p></div>
+      <div class="logotype" style="margin-left:8px">Typex</div>
+      <p class="lbl" style="margin-left:8px">logotype 五字母同色(Inter SemiBold,字距 -1%)</p>
+    </div>
+    <div class="row sw-area"></div>
+  </div>
+</template>
+
+<script>
+const tokens = [
+  ["--bg","窗口底色"],["--surface","卡片/HUD"],["--surface-2","输入框/inset"],
+  ["--text-1","主文本/主色"],["--text-2","次文本"],["--text-3","占位/禁用"],
+  ["--sel-bg","选中背景"],["--recording","录音红(唯一彩色)"],["--error","错误红"],
+];
+const meta = {
+  "t-light": { name:"Light · 纸面", icon:"浅色模式:黑底 #000 + 白 glyph" },
+  "t-dark":  { name:"Dark · 墨面",  icon:"深色模式:白底 #FFF + 黑 glyph" },
+};
+for (const id of ["t-light","t-dark"]) {
+  const root = document.getElementById(id);
+  root.appendChild(document.getElementById("all-ui").content.cloneNode(true));
+  root.querySelector(".theme-name").textContent = meta[id].name;
+  root.querySelector(".icon-lbl").textContent = meta[id].icon;
+  const area = root.querySelector(".sw-area");
+  const cs = getComputedStyle(root);
+  for (const [tok,label] of tokens) {
+    const v = cs.getPropertyValue(tok).trim();
+    const d = document.createElement("div");
+    d.className = "sw";
+    d.innerHTML = `<div class="cchip" style="background:${v}"></div><div class="meta"><b>${label}</b><span>${tok}<br>${v}</span></div>`;
+    area.appendChild(d);
+  }
+}
+</script>
+</body>
+</html>

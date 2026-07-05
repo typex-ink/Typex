@@ -1,8 +1,8 @@
 # Typex 实现路线表
 
-> 依据设计书 `/Users/daodaoneko/Documents/Typex/docs/`（01–09 章 + mockups）生成。
+> 依据设计书 [`docs/`](docs/)（01–09 章 + mockups）生成。
 > 每完成一个 checkpoint：将 `[ ]` 改为 `[x]`、附完成日期，并提交一次 git commit。
-> 里程碑划分对应设计书 06 章；模块归属对应 07 章；UI 以 `docs/mockups/ui-mono.html` + `tokens.css` 为准。
+> 里程碑划分对应设计书 [06 章](docs/06-roadmap.md)；模块归属对应 [07 章](docs/07-code-architecture.md)；UI 以 [`docs/mockups/ui-mono.html`](docs/mockups/ui-mono.html) + `tokens.css` 为准。
 > 平台优先级：macOS 先行（当前开发机），代码结构保持三平台可扩展。
 
 ---
@@ -103,3 +103,73 @@
 ## 明确不在本路线内（设计书 v1.1+）
 
 本地模型（F-12/ADR-20/22）、个人词典（F-10）、按应用 Profile（F-11）、流式转写、Windows/Linux 平台后端实测（代码留有 trait 扩展位，本机为 macOS）。
+
+---
+
+## v1.0 功能对照清单（2026-07-05 全量审计，逐条对照设计书 02/05 章）
+
+### 已实现 ✅
+
+| 设计书条目 | 实现位置 |
+|---|---|
+| F-1 听写主干：PTT/toggle 双模（350ms 自动区分）、Esc/✕ 取消、录音→VAD 裁剪→STT→整理→注入 | `hotkey/` `audio/` `orchestrator/` |
+| F-1 无时长硬上限：超 provider 上限在静音处切片分段转写拼接 | `providers/stt/mod.rs::transcribe_auto_chunk` |
+| F-1 失败不丢话：指数退避重试 ×2、音频/转写稿保留、HUD 重试/复制原文 | `session.rs` `http.rs` |
+| F-2 翻译：组合键乐观启动/无缝升级、双向判向提示词、流式收齐一次注入、失败注入原文 | `session.rs` `pipeline.rs` |
+| F-2 HUD 方向徽标 + 点击快切最近语言、托盘翻译目标 ▸ | `Hud.vue` `tray.rs` |
+| F-3a 选中文本读取（AX 主路径 + Cmd+C 剪贴板降级/哨兵防误读）、原地替换、ANSWER: 判定 | `selection/` `assistant.rs` |
+| F-3b 单轮问答：面板流式 Markdown（sanitize）、上下文芯片、动作行、失焦隐藏/📌 | `Assistant.vue` |
+| F-4 四槽位 BYOK：openai_compat STT + chat_completions/responses LLM、keyring 密钥、预设填充器、测试连接、多档案切换（设置 + 托盘） | `providers/` `ProvidersPage.vue` |
+| F-5 全修饰键三角方案、组合键让路、AltGr 不误判、HotkeyRecorder 改键 + 冲突警告 | `hotkey/` `HotkeyRecorder.vue` |
+| F-6 托盘：状态行/完整菜单/模型 ▸ 档案切换/暂停/复制上次结果；单实例二次启动唤起设置 | `tray.rs` |
+| F-7 历史：SQLite WAL、保留期清理、主页统计卡组 + 双栏对照 + 搜索/删除/清空 | `history/` `Home.vue` |
+| F-8 Onboarding 五步（语言切换/权限轮询/云端直填/练习框/完成） | `Onboarding.vue` |
+| F-9 整理层：内置提示词（03 §3.4 逐字）、失败/超时/未配置全降级直通、原样模式、HUD「未整理」 | `pipeline.rs` `prompt.rs` |
+| HUD 全状态胶囊（NSPanel 不抢焦点、底部居中 48px、波形 Canvas、成功回弹、失败驻留） | `Hud.vue` `windows.rs` |
+| 设置窗口 9 页、提示词模板编辑器（占位符校验/恢复默认）、诊断页权限自检 | `settings/pages/` |
+| 提示音三枚（合成木琴系 <150ms）、错误码 i18n 契约（zh-CN/en）、深浅双主题、Dock 图标点击开主页 | `chime.rs` `i18n/` |
+| CI（fmt/clippy/test/vue-tsc/vitest/HUD 体积断言）+ release 三平台矩阵工作流 | `.github/workflows/` |
+
+### 未实现 / 部分实现 ❌（补齐 checkpoint）
+
+**P0 缺口（v1.0 应补齐）**
+
+- [ ] **CP-6.1 volcengine STT adapter**（02 F-4 v1 明确支持格式②）
+  火山/豆包极速版 flash：双凭据 header、base64 JSON body、`X-Api-Status-Code` 判定（03 §2.2）；ProviderCard 编辑表单按 kind 渲染 AppKey/AccessToken 双字段；wiremock 集成测试。当前 `registry.rs` 为报错占位。
+- [ ] **CP-6.2 开机自启**（02 F-6）
+  `tauri-plugin-autostart` 已在依赖但未初始化；接通用页开关与 onboarding 完成步骤的默认开启。
+- [ ] **CP-6.3 自动更新**（02 F-6 / ADR-11）
+  `tauri-plugin-updater` 接入：默认自动检查、手动确认安装；托盘「检查更新」当前是空操作；设置-关于「检查更新」按钮接真实逻辑。
+- [ ] **CP-6.4 麦克风权限检测 + 设备选择**（02 F-8 / 05 §5.2）
+  权限检测目前仅辅助功能（`permissions.rs::check_all`）；补麦克风（AVCaptureDevice / tauri-plugin-macos-permissions）与输入监听（IOHIDCheckAccess）实时状态；听写页麦克风下拉接 cpal 设备枚举（当前只有「系统默认」占位）。
+- [ ] **CP-6.5 HUD 细节补齐**（05 §3.2）
+  录音超 10 分钟温和提示；重按忽略时的轻晃 +「正在处理上一条…」微文案（EmitBusyHint 已有 Effect，HUD 未渲染）；HUD 处一键切原样模式入口（02 F-9：HUD 与设置均可切换）。
+- [ ] **CP-6.6 i18n 全量化**（ADR-11 中英双语首发）
+  当前仅 HUD 与错误码走 i18n 资源；设置/引导/主页/助手界面文案为硬编码中文——全部迁入 vue-i18n 并跟随「界面语言」设置（含 onboarding 第 1 步语言切换即时生效于全 UI）。
+
+**P1 缺口（可延 v1.x）**
+
+- [ ] **CP-6.7 逐字输入注入后端**（07 §7.5 备选 type_direct）
+  设置里已有「逐字输入」选项但无对应后端（仅 paste）；enigo text() 实现 + 后备链接入。
+- [ ] **CP-6.8 目标应用识别**（02 F-7 历史字段 / F-11 预留）
+  `platform/focus.rs`（NSWorkspace frontmostApplication）；历史记录 app_name 当前恒为空；HUD NoFocus 检测同源。
+- [ ] **CP-6.9 托盘图标状态动画**（04 §2.4）
+  录音中电平动画（8fps）+ 红点角标、处理中呼吸、暂停 40% 透明 + 斜杠、错误红点；当前仅静态图标 + 状态行文字。
+- [ ] **CP-6.10 提示词评测脚本**（08 §6）
+  `scripts/eval-prompts.ts`：读 `docs/fixtures/denoise-cases.md` → 真实 API → 要点断言 + 通过率报告；语料已备，脚本未写。
+- [ ] **CP-6.11 日志 redact 层 + 诊断包导出**（07 §5.5 / 05 §5.2）
+  当前靠编码纪律（日志语句不含内容/凭据）；补 tracing Layer 级自动脱敏与「导出诊断包」按钮。
+- [ ] **CP-6.12 契约快照测试**（08 §4.1）
+  insta 依赖已加未使用；对四个 adapter 的完整 HTTP 请求形状做快照，防 AI 顺手重构漂移。
+- [ ] **CP-6.13 助手面板杂项**（05 §4）
+  面板内按住 🎙 录音（当前仅装饰，语音走全局键）；读不到选区时「未能读取选中内容」降级提示；⌘, 打开设置快捷键；打字基准 45 字/分 可调设置。
+- [ ] **CP-6.14 release-checklist.md**（08 §7）
+  按 02 章验收标准展开为可勾选人工回归清单（发布门槛）。
+
+**平台缺口（设计书要求、本机无法验证，随 Windows/Linux 环境补）**
+
+- [ ] **CP-7.1 Windows 后端**：SendInput 注入、WH_KEYBOARD_LL Alt 短按吞 keyup、UIA 读选区、Credential Manager 实测
+- [ ] **CP-7.2 Linux X11 后端**：XTEST 注入、primary selection、AppImage/deb/rpm 出包
+- [ ] **CP-7.3 Wayland 分级支持**（07 §8 Tier 1-3）：ashpd Portal 快捷键、wtype/ydotool、gtk-layer-shell HUD、诊断页 compositor 探测
+
+**明确不做（v1.1+，设计书原文范围）**：本地模型（F-12/ADR-20/22）、个人词典（F-10）、按应用 Profile（F-11）、流式转写、DashScope/Deepgram/ElevenLabs adapter。
