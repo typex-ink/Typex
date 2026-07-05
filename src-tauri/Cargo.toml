@@ -5,7 +5,7 @@ description = "Typex — Speak. It types. 开源跨平台 AI 语音输入"
 license = "GPL-3.0-only"
 repository = "https://github.com/typex-ink/typex"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [lib]
 name = "typex_lib"

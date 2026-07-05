@@ -336,11 +336,11 @@ impl SelectionReader for ClipboardFallbackReader {
         let mut text = None;
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(30));
-            if let Ok(t) = clipboard.get_text() {
-                if t != SENTINEL {
-                    text = Some(t);
-                    break;
-                }
+            if let Ok(t) = clipboard.get_text()
+                && t != SENTINEL
+            {
+                text = Some(t);
+                break;
             }
         }
 

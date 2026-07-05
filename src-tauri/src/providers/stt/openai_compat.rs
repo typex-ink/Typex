@@ -50,10 +50,11 @@ impl OpenAiCompatStt {
             .part("file", part)
             .text("model", self.model.clone())
             .text("response_format", "json");
-        if let Some(lang) = &opts.language {
-            if lang != "auto" && !lang.is_empty() {
-                form = form.text("language", lang.clone());
-            }
+        if let Some(lang) = &opts.language
+            && lang != "auto"
+            && !lang.is_empty()
+        {
+            form = form.text("language", lang.clone());
         }
         if let Some(prompt) = &opts.prompt {
             form = form.text("prompt", prompt.clone());

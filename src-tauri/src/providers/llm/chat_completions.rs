@@ -107,11 +107,10 @@ fn async_stream_impl(
             if event.data == "[DONE]" {
                 break;
             }
-            if let Some(text) = parse_delta(&event.data) {
-                if !text.is_empty() {
+            if let Some(text) = parse_delta(&event.data)
+                && !text.is_empty() {
                     yield LlmDelta { text };
                 }
-            }
         }
     }
 }

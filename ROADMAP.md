@@ -98,7 +98,7 @@
   release.yml（tag → 三平台构建 + updater 清单）；tauri-plugin-updater 接入。
 - [x] **CP-5.2 文档**（2026-07-05，签名凭据待项目所有者配置）
   README 完善、CONTRIBUTING、release-checklist.md、issue 模板。
-- [~] **CP-5.3 安全走查**（日志 redact 复核 ✓ · npm audit ✓ · cargo audit 待装工具）
+- [x] **CP-5.3 安全走查**（2026-07-06：日志 redact 复核 ✓ · npm audit ✓ · cargo audit ✓——修复 quick-xml×2/time 三个 RUSTSEC 漏洞（升级 plist 1.10 / time 0.3.47，MSRV 1.85→1.88）+ 更新被 yank 的 num-bigint；余 19 条为 unmaintained/unsound 级 warning，均来自 tauri/rdev 传递依赖，无 fix 版本，记录在案）
   密钥不落盘/不进日志复核；`cargo audit` / `npm audit`；权限最小化复核。
 - [ ] **CP-5.4 签名与分发**（⚠ 需 Apple Developer / SignPath 凭据，项目所有者操作）
 

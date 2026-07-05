@@ -214,10 +214,10 @@ pub fn run() {
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_millis() as i64)
                             .unwrap_or(0);
-                        if let Ok(n) = h.cleanup(retention, now) {
-                            if n > 0 {
-                                tracing::info!("历史保留期清理: 删除 {n} 条");
-                            }
+                        if let Ok(n) = h.cleanup(retention, now)
+                            && n > 0
+                        {
+                            tracing::info!("历史保留期清理: 删除 {n} 条");
                         }
                         Some(h)
                     }
@@ -319,10 +319,10 @@ pub fn run() {
                     has_visible_windows,
                     ..
                 } = event
+                    && !has_visible_windows
+                    && launched_at.elapsed().as_secs() >= 2
                 {
-                    if !has_visible_windows && launched_at.elapsed().as_secs() >= 2 {
-                        let _ = crate::app::windows::show_home(app);
-                    }
+                    let _ = crate::app::windows::show_home(app);
                 }
                 #[cfg(not(target_os = "macos"))]
                 let _ = (app, event, launched_at);
