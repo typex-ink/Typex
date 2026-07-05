@@ -289,9 +289,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             crate::app::windows::setup_hud_panel(app.handle())?;
 
-            // macOS：不在 Dock 显示（输入法级常驻，02 F-6）
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // macOS：显示在 Dock（Regular 默认即是；点击 Dock 图标打开主页在 RunEvent::Reopen 处理）
 
             // 首次启动 → 引导向导（02 F-8）
             if !settings_for_onboarding.get().onboarding_done {
@@ -311,8 +309,23 @@ pub fn run() {
             tracing::info!("Typex 启动完成");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run({
+            // 启动激活也会触发一次 Reopen——宽限期内忽略，保持「启动后无窗口」（05 §2）
+            let launched_at = std::time::Instant::now();
+            move |app, event| {
+                // 点击 Dock 图标（无可见窗口时）→ 打开主页（05 §8：Dock/托盘按需打开）
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                    if !has_visible_windows && launched_at.elapsed().as_secs() >= 2 {
+                        let _ = crate::app::windows::show_home(app);
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                let _ = (app, event, launched_at);
+            }
+        });
 }
 
 /// IPC bindings 导出（`pnpm gen:ipc` 触发；CI 校验新鲜度）。
