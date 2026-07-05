@@ -3,7 +3,7 @@ import { createPinia } from "pinia";
 import "@/styles/base.css";
 import { initTheme } from "@/composables/useTheme";
 
-document.documentElement.classList.add("solid-window");
+document.documentElement.classList.add("solid-window", "chrome-window");
 import Settings from "./Settings.vue";
 
 createApp(Settings).use(createPinia()).mount("#app");

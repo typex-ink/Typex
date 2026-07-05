@@ -13,11 +13,23 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "src-tauri" / "icons"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# 1024 网格几何（typex.svg 同源）
-BARS = [(220, 148.5, 151), (348, 101.5, 245), (476, 44, 360), (604, 101.5, 245), (732, 148.5, 151)]
-BAR_W = 72
-STEM = (476, 460, 72, 480)
-FOOT = (436, 884, 152, 56)
+# 1024 网格几何（typex.svg 同源；源自应用内 mini glyph）
+BARS = [(196.5, 266.5, 158), (334.5, 207.5, 276), (472.5, 148.5, 394), (610.5, 207.5, 276), (748.5, 266.5, 158)]
+BAR_W = 79
+STEM = (472.5, 600.5, 79, 276)
+APP_TILE_INSET = 72
+APP_TILE_SCALE = (1024 - 2 * APP_TILE_INSET) / 1024
+
+
+def fit_rect(x, y, w, h, scale=1.0):
+    if scale == 1.0:
+        return x, y, w, h
+    return (
+        512 + (x - 512) * scale,
+        512 + (y - 512) * scale,
+        w * scale,
+        h * scale,
+    )
 
 
 def rounded(draw: ImageDraw.ImageDraw, x, y, w, h, s, fill):
@@ -25,42 +37,45 @@ def rounded(draw: ImageDraw.ImageDraw, x, y, w, h, s, fill):
     draw.rounded_rectangle([x * s, y * s, (x + w) * s, (y + h) * s], radius=r * s, fill=fill)
 
 
-def render(size: int, bg, fg, small_threshold=32) -> Image.Image:
-    """按 04 §2.2 绘制：≤32px 降为三柱 + 竖笔、去底衬。"""
+def render(size: int, bg, fg, tile_scale=1.0) -> Image.Image:
+    """按 04 §2.2 绘制：五柱 + 短竖笔，无底衬。"""
     scale = 8  # 超采样抗锯齿
     canvas = size * scale
     s = canvas / 1024
     img = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     if bg:
-        d.rounded_rectangle([0, 0, canvas, canvas], radius=canvas * 0.22, fill=bg)
-    bars = BARS if size > small_threshold else BARS[1:4]
-    for (x, y, h) in bars:
-        rounded(d, x, y, BAR_W, h, s, fg)
-    rounded(d, *STEM, s, fg)
-    if size > small_threshold:
-        rounded(d, *FOOT, s, fg)
+        inset = (1 - tile_scale) * canvas / 2
+        d.rounded_rectangle(
+            [inset, inset, canvas - inset, canvas - inset],
+            radius=(canvas - 2 * inset) * 0.27,
+            fill=bg,
+        )
+    for (x, y, h) in BARS:
+        x, y, w, h = fit_rect(x, y, BAR_W, h, tile_scale)
+        rounded(d, x, y, w, h, s, fg)
+    rounded(d, *fit_rect(*STEM, tile_scale), s, fg)
     return img.resize((size, size), Image.LANCZOS)
 
 
 BLACK = (0, 0, 0, 255)
 WHITE = (255, 255, 255, 255)
 
-# --- 应用图标（墨版：黑底白 glyph）---
+# --- 应用图标（纸版：白底黑 glyph，Dock 默认）---
 for size, name in [(32, "32x32.png"), (128, "128x128.png"), (256, "128x128@2x.png"), (512, "icon.png")]:
-    render(size, BLACK, WHITE).save(OUT / name)
+    render(size, WHITE, BLACK, tile_scale=APP_TILE_SCALE).save(OUT / name)
 
 # --- .icns（macOS）---
 iconset = OUT / "typex.iconset"
 iconset.mkdir(exist_ok=True)
 for pt in (16, 32, 128, 256, 512):
-    render(pt, BLACK, WHITE).save(iconset / f"icon_{pt}x{pt}.png")
-    render(pt * 2, BLACK, WHITE).save(iconset / f"icon_{pt}x{pt}@2x.png")
+    render(pt, WHITE, BLACK, tile_scale=APP_TILE_SCALE).save(iconset / f"icon_{pt}x{pt}.png")
+    render(pt * 2, WHITE, BLACK, tile_scale=APP_TILE_SCALE).save(iconset / f"icon_{pt}x{pt}@2x.png")
 subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(OUT / "icon.icns")], check=True)
 
 # --- .ico（Windows）---
 ico_sizes = [16, 24, 32, 48, 64, 256]
-imgs = [render(sz, BLACK, WHITE) for sz in ico_sizes]
+imgs = [render(sz, WHITE, BLACK, tile_scale=APP_TILE_SCALE) for sz in ico_sizes]
 imgs[-1].save(OUT / "icon.ico", format="ICO", sizes=[(sz, sz) for sz in ico_sizes], append_images=imgs[:-1])
 
 # --- 托盘图标：去竖笔的五柱 glyph，macOS template image（纯黑 + alpha）---
@@ -70,7 +85,8 @@ def render_tray(size: int) -> Image.Image:
     img = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     # 五柱整体在正方形中垂直居中放大（托盘无竖笔）
-    top, bottom = 44, 404
+    top = min(y for _, y, _ in BARS)
+    bottom = max(y + h for _, y, h in BARS)
     glyph_h = bottom - top
     pad = 1024 * 0.18
     s = (canvas - 2 * pad * canvas / 1024) / 1024

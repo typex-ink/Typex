@@ -27,6 +27,9 @@
   --error: #C93B34;
   --focus-ring: rgba(23, 23, 25, .40);
   --shadow: 0 8px 24px rgba(23, 23, 25, .10);
+  --icon-bg: #000000;
+  --icon-fg: #FFFFFF;
+  --logo: #000000;
 
   /* ---- 字体 (04 §4) ---- */
   --font-ui: Inter, "SF Pro Text", "Segoe UI Variable", system-ui,
@@ -74,6 +77,9 @@
     --error: #F26D6D;
     --focus-ring: rgba(242, 242, 244, .45);
     --shadow: 0 8px 24px rgba(0, 0, 0, .50);
+    --icon-bg: #FFFFFF;
+    --icon-fg: #000000;
+    --logo: #FFFFFF;
   }
 }
 
@@ -98,4 +104,7 @@
   --error: #F26D6D;
   --focus-ring: rgba(242, 242, 244, .45);
   --shadow: 0 8px 24px rgba(0, 0, 0, .50);
+  --icon-bg: #FFFFFF;
+  --icon-fg: #000000;
+  --logo: #FFFFFF;
 }

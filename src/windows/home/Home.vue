@@ -132,8 +132,8 @@ onMounted(async () => {
         <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">◷ 历史记录</div>
       </nav>
       <div class="mfoot">
-        <span title="设置" @click="openSettings">⚙</span>
-        <span title="切换深浅色" @click="toggleTheme">◐</span>
+        <button type="button" title="设置" aria-label="设置" @click="openSettings">⚙</button>
+        <button type="button" title="切换深浅色" aria-label="切换深浅色" @click="toggleTheme">◐</button>
       </div>
     </aside>
 
@@ -188,7 +188,6 @@ onMounted(async () => {
         <Input v-model="search" placeholder="搜索历史…" @keydown.enter="doSearch" />
         <Button variant="danger" size="sm" @click="clearAll">清空全部</Button>
       </div>
-      <p class="note">历史仅保存在本机，不含音频</p>
       <div class="recent scroll" :class="{ 'scroll-empty': !items.length }">
         <template v-for="item in items" :key="item.id">
           <div class="hrow clickable" @click="expanded = expanded === item.id ? null : item.id">
@@ -220,10 +219,22 @@ onMounted(async () => {
 <style scoped>
 .home-root {
   display: flex;
+  position: relative;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
   overflow: hidden;
+}
+.home-root::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-2);
+  pointer-events: none;
+  z-index: 10;
 }
 .titlebar {
   display: none;
@@ -303,18 +314,24 @@ nav .on {
   gap: 4px;
   padding: 0 6px;
 }
-.mfoot span {
+.mfoot button {
   width: 28px;
   height: 28px;
   border-radius: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-3);
   font-size: 13px;
+  font-family: inherit;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.mfoot span:hover {
+.mfoot button:hover {
   background: var(--sel-bg);
   color: var(--text-1);
 }
@@ -471,11 +488,6 @@ nav .on {
   gap: 10px;
   align-items: center;
   margin-bottom: 4px;
-}
-.note {
-  font-size: 11px;
-  color: var(--text-3);
-  padding: 6px 0;
 }
 .empty {
   text-align: center;

@@ -1,22 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <!--
     Typex 主图标「声波成 T」— 设计规格见 docs/04-design-system.md §2.1
-    墨版（默认）：纯黑底 + 纯白 glyph。1024 网格：柱宽 72、间距 56，
-    五柱高度比 0.42:0.68:1:0.68:0.42（最高 360），全圆角；
-    竖笔 72×480，顶端与中柱底留 56 负空间，底部左右各出头 40。
-    整体居中偏上 2%。本文件是唯一图形源，位图由 scripts/gen-icons.py 导出。
+    纸版（Dock / app 默认）：纯白底 + 纯黑 glyph。Dock 交付物在 1024
+    画布内保留 72px 透明安全边，避免图标在 Dock 中显得过大。glyph 沿用
+    应用内 mini 图标比例：五柱 + 短竖笔，无底衬。本文件是唯一图形源，
+    位图由 scripts/gen-icons.py 导出。
   -->
-  <rect width="1024" height="1024" fill="#000000"/>
-  <g fill="#FFFFFF">
-    <!-- 五根波形柱：中线 y=224；高 151/245/360 -->
-    <rect x="220" y="148.5" width="72" height="151" rx="36"/>
-    <rect x="348" y="101.5" width="72" height="245" rx="36"/>
-    <rect x="476" y="44"    width="72" height="360" rx="36"/>
-    <rect x="604" y="101.5" width="72" height="245" rx="36"/>
-    <rect x="732" y="148.5" width="72" height="151" rx="36"/>
-    <!-- 竖笔（文本光标）：中柱底 404 + 56 间隙 -->
-    <rect x="476" y="460" width="72" height="480" rx="36"/>
-    <!-- 底衬：左右各出头 40 -->
-    <rect x="436" y="884" width="152" height="56" rx="28"/>
+  <rect x="72" y="72" width="880" height="880" rx="238" fill="#FFFFFF"/>
+  <g fill="#000000" transform="translate(512 512) scale(0.859375) translate(-512 -512)">
+    <!-- 五根波形柱：源自 26px mini icon 的 2px / 1.5px / 4-7-10 比例 -->
+    <rect x="196.5" y="266.5" width="79" height="158" rx="39.5"/>
+    <rect x="334.5" y="207.5" width="79" height="276" rx="39.5"/>
+    <rect x="472.5" y="148.5" width="79" height="394" rx="39.5"/>
+    <rect x="610.5" y="207.5" width="79" height="276" rx="39.5"/>
+    <rect x="748.5" y="266.5" width="79" height="158" rx="39.5"/>
+    <!-- 竖笔（文本光标）：中柱底 542.5 + 58px 间隙 -->
+    <rect x="472.5" y="600.5" width="79" height="276" rx="39.5"/>
   </g>
 </svg>

@@ -54,10 +54,22 @@ onMounted(() => store.load());
 <style scoped>
 .settings-root {
   display: flex;
+  position: relative;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
   overflow: hidden;
+}
+.settings-root::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-2);
+  pointer-events: none;
+  z-index: 10;
 }
 /* 顶部拖拽区：置顶、可拖动窗口、鼠标穿透到红绿灯以外区域 */
 .titlebar {
