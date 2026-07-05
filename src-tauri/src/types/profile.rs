@@ -34,11 +34,16 @@ pub enum ProviderKind {
     ChatCompletions,
     /// LLM：OpenAI Responses
     Responses,
+    /// 本地推理（v1.1 / ADR-20；无 base_url/凭据，model = 模型库 id）
+    Local,
 }
 
 impl ProviderKind {
     pub fn is_stt(self) -> bool {
-        matches!(self, ProviderKind::OpenaiCompat | ProviderKind::Volcengine)
+        matches!(
+            self,
+            ProviderKind::OpenaiCompat | ProviderKind::Volcengine | ProviderKind::Local
+        )
     }
 }
 

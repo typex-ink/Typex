@@ -124,6 +124,11 @@ pub fn run() {
                 }
             }
             let registry = Arc::new(ProviderRegistry::new(settings.get(), secrets.clone()));
+            // v1.1 本地模型（ADR-20 零配置兜底）：注入模型存储根
+            #[cfg(feature = "local-models")]
+            if let Ok(d) = app.path().app_data_dir() {
+                registry.set_models_data_dir(d);
+            }
             {
                 // 设置变更 → registry 惰性失效
                 let registry = registry.clone();

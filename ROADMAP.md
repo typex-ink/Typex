@@ -194,7 +194,7 @@
   llama.cpp（llama-cpp-2 绑定，qwen3vl 音频架构官方 GGUF）跑 0.6B/1.7B；1.7B 仅 GPU 加速可用时提供（纯 CPU 低于实时）；llama.cpp 音频长音频 bug 用现有 VAD 切片路径规避（短分段转写本来就是 F-1 路径）。
 - [x] **CP-8.5 本地 LLM Provider（整理/翻译槽）**（2026-07-06：`local/llm_llama.rs`——同一 LlmProvider trait，专属线程推理 → mpsc → BoxStream 流式 delta 与云端一致；n_ctx 4K；GGUF 内置 chat 模板 + ChatML 兜底；LoadPolicy 常驻/用完即卸 + unload()；LlamaBackend OnceLock 单例 + 日志静默；3 条单测；槽位限制在 CP-8.6 registry 层执行）
   llama.cpp + Qwen3.5 0.8B/2B/4B Q4_K_M instruct；实现同一 `LlmProvider` trait（流式 delta 与云端一致）；运行时策略可选：常驻内存 / 录音时预热（冷加载 1–3s）；上下文 4K；**槽位限制：只允许绑定整理与翻译槽，问答槽默认不提供**（性能档设备允许设置中手动指向 4B，ADR-22）。
-- [ ] **CP-8.6 零配置兜底 + 槽位混搭**（ADR-20）
+- [x] **CP-8.6 零配置兜底 + 槽位混搭**（2026-07-06：ProviderKind 增 Local · registry `profile_for_slot` 未配置时合成本地档案（清单序取已下载最轻模型；Assistant 槽显式无兜底，具名单测×2）· build_stt/build_llm Local 分支按清单条目选引擎（sherpa/llama mtmd/llama LLM）· runner 注入 app_data_dir；本地与云端天然槽位级混搭（各槽独立 active_profile））
   STT/整理/翻译三槽在未配置任何档案时默认指向 local 档案（模型已下载前提）；本地与云端槽位级自由混搭；问答槽无兜底，未配置时助手面板显示配置引导。
 - [ ] **CP-8.7 设置 UI：本地 Provider 卡片 + 已下载模型管理**（05 §5.1 / mockup 2.7/2.9）
   预设列表加「本地 · 离线」（问答槽预设列表不出现）；卡片副标题显示引擎与模型状态（已下载·体积 / 未下载[下载] / 下载中进度条）；编辑态字段 = 模型下拉（来自模型库）+ 加载策略，无端点/密钥；「测试」= 本地跑内置样音/ping；「管理…」子页 = 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（行内硬件要求与本机检测结果）+ 占用合计 + 下载源切换。
