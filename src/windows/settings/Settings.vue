@@ -32,6 +32,8 @@ onMounted(() => store.load());
 
 <template>
   <div class="settings-root">
+    <!-- Overlay 标题栏：顶部拖拽区（含红绿灯让位） -->
+    <div class="titlebar" data-tauri-drag-region></div>
     <nav class="nav">
       <div
         v-for="p in pages"
@@ -57,11 +59,20 @@ onMounted(() => store.load());
   background: var(--surface);
   overflow: hidden;
 }
+/* 顶部拖拽区：置顶、可拖动窗口、鼠标穿透到红绿灯以外区域 */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 100;
+}
 .nav {
   width: 160px;
   flex-shrink: 0;
   background: var(--surface-2);
-  padding: 10px 8px;
+  padding: 34px 8px 10px; /* 顶部让位红绿灯 */
   font-size: 12.5px;
   overflow-y: auto;
 }
@@ -83,7 +94,7 @@ onMounted(() => store.load());
 }
 .content {
   flex: 1;
-  padding: 18px 20px;
+  padding: 34px 20px 18px;
   overflow-y: auto;
 }
 </style>

@@ -94,7 +94,7 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         "settings",
         WebviewUrl::App("src/windows/settings/index.html".into()),
     )
-    .title("Typex 设置")
+    .title("")
     .inner_size(720.0, 520.0)
     .resizable(false)
     .build()?;
@@ -151,15 +151,17 @@ pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         "onboarding",
         WebviewUrl::App("src/windows/onboarding/index.html".into()),
     )
-    .title("欢迎使用 Typex")
+    .title("")
     .inner_size(640.0, 480.0)
     .resizable(false)
-    .center()
-    .build()?;
+    .center();
+    #[cfg(target_os = "macos")]
+    let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    builder.build()?;
     Ok(())
 }

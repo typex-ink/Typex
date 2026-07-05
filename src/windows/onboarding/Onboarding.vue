@@ -104,6 +104,7 @@ onUnmounted(() => {
 
 <template>
   <div class="onb">
+    <div class="titlebar" data-tauri-drag-region></div>
     <!-- 步骤圆点 -->
     <div class="steps">
       <i v-for="i in 5" :key="i" :class="{ on: step === i }" />
@@ -198,11 +199,19 @@ onUnmounted(() => {
   background: var(--surface);
   overflow: hidden;
 }
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 100;
+}
 .steps {
   display: flex;
   gap: 6px;
   justify-content: center;
-  padding: 14px 0 0;
+  padding: 30px 0 0; /* 顶部让位红绿灯 */
   flex-shrink: 0;
 }
 .steps i {

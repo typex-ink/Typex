@@ -113,6 +113,8 @@ onMounted(async () => {
 
 <template>
   <div class="home-root">
+    <!-- Overlay 标题栏：顶部拖拽区 -->
+    <div class="titlebar" data-tauri-drag-region></div>
     <!-- 侧边栏（180px，--surface-2 底） -->
     <aside class="side">
       <div class="brand">
@@ -207,13 +209,21 @@ onMounted(async () => {
   background: var(--surface);
   overflow: hidden;
 }
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 100;
+}
 .side {
   width: 180px;
   flex-shrink: 0;
   background: var(--surface-2);
   display: flex;
   flex-direction: column;
-  padding: 16px 10px 12px;
+  padding: 40px 10px 12px; /* 顶部让位红绿灯 */
 }
 .brand {
   display: flex;
@@ -299,7 +309,7 @@ nav .on {
 }
 .main {
   flex: 1;
-  padding: 26px 28px 16px;
+  padding: 40px 28px 16px;
   display: flex;
   flex-direction: column;
   overflow: hidden;

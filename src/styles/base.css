@@ -4,10 +4,17 @@
 /* 全局基础：字体、颜色一律经 token（04 §3.4：组件内禁止硬编码色值） */
 html {
   font-size: 13px;
+  /* 触控板橡皮筋回弹不露白底：禁用 overscroll（滚动只发生在内部容器） */
+  overscroll-behavior: none;
+  overflow: hidden;
+  height: 100%;
 }
 
 body {
   margin: 0;
+  height: 100%;
+  overscroll-behavior: none;
+  overflow: hidden;
   font-family: var(--font-ui);
   font-size: var(--fs-body);
   color: var(--text-1);
@@ -16,6 +23,18 @@ body {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   cursor: default;
+}
+
+/* Vue 挂载点撑满窗口（body 现为 fixed 高度 + overflow hidden） */
+#app {
+  height: 100%;
+}
+
+/* 常规窗口（settings/home/onboarding）在入口标记此类：
+   html 涂主题底色——即使回弹也只露出同色，不露白（HUD/助手保持透明） */
+html.solid-window,
+html.solid-window body {
+  background: var(--surface);
 }
 
 h1, h2, h3, h4, h5, h6 {
