@@ -172,4 +172,33 @@
 - [ ] **CP-7.2 Linux X11 后端**：XTEST 注入、primary selection、AppImage/deb/rpm 出包
 - [ ] **CP-7.3 Wayland 分级支持**（07 §8 Tier 1-3）：ashpd Portal 快捷键、wtype/ydotool、gtk-layer-shell HUD、诊断页 compositor 探测
 
-**明确不做（v1.1+，设计书原文范围）**：本地模型（F-12/ADR-20/22）、个人词典（F-10）、按应用 Profile（F-11）、流式转写、DashScope/Deepgram/ElevenLabs adapter。
+**v1.1 里程碑见下节**；更远期（优先级待定，06 章 v1.x 清单）：个人词典（F-10）、按应用 Profile（F-11）、流式转写、DashScope/Deepgram/ElevenLabs adapter、官方 STT 套餐预设（ADR-16，依赖服务端上线）。
+
+---
+
+## M8 · v1.1 本地模型（F-12 / ADR-20 / ADR-22）
+
+> 目标：消灭「必须先配 API 才能用」的上手门槛。全部工作在 feature flag `local-models` 下隔离，
+> 不进 v1.0 依赖树（07 §1）；模型不随安装包分发，应用内按需下载（03 §8）。
+> 顺序按收益排列：先本地 STT（收益最大、质量无折扣），本地 LLM 随后（ADR-20 节奏）。
+
+- [ ] **CP-8.1 模型库清单 + 硬件分档探测**
+  内置 JSON 清单（id/用途/文件列表/字节数/SHA-256/许可证/双源 URL/最低硬件要求；v1.1 起始 6 个条目：SenseVoice-int8 230MB、Qwen3-ASR-0.6B/1.7B Q4、Qwen3.5-0.8B/2B/4B Q4）；`sysinfo` 探测 RAM/CPU 核数 + Metal/CUDA/Vulkan 可用性 → 轻量/标准/性能三档推荐（ADR-22 分档表）；探测结果进诊断页。
+- [ ] **CP-8.2 模型下载管理器**（03 §8）
+  HuggingFace + ModelScope 双源（首包延迟自动择优，可固定）；HTTP Range 断点续传、SHA-256 校验、失败换源重试；进度经 Tauri event 推送；存储 `{app_data_dir}/models/{model_id}/`；下载是本地 Provider 唯一网络行为（零上报承诺不变）。
+- [ ] **CP-8.3 本地 STT Provider · SenseVoice 轻量档**
+  sherpa-onnx 官方 crate 静态链接 + SenseVoice-Small int8；实现同一 `SttProvider` trait（`kind: local`，无 base_url/凭据）；`capabilities()` 报告不限音频时长；错误分类只剩 InvalidRequest/模型未下载。弱机器上唯一保证实时的选项（ADR-22）。
+- [ ] **CP-8.4 本地 STT Provider · Qwen3-ASR 标准/性能档**
+  llama.cpp（llama-cpp-2 绑定，qwen3vl 音频架构官方 GGUF）跑 0.6B/1.7B；1.7B 仅 GPU 加速可用时提供（纯 CPU 低于实时）；llama.cpp 音频长音频 bug 用现有 VAD 切片路径规避（短分段转写本来就是 F-1 路径）。
+- [ ] **CP-8.5 本地 LLM Provider（整理/翻译槽）**
+  llama.cpp + Qwen3.5 0.8B/2B/4B Q4_K_M instruct；实现同一 `LlmProvider` trait（流式 delta 与云端一致）；运行时策略可选：常驻内存 / 录音时预热（冷加载 1–3s）；上下文 4K；**槽位限制：只允许绑定整理与翻译槽，问答槽默认不提供**（性能档设备允许设置中手动指向 4B，ADR-22）。
+- [ ] **CP-8.6 零配置兜底 + 槽位混搭**（ADR-20）
+  STT/整理/翻译三槽在未配置任何档案时默认指向 local 档案（模型已下载前提）；本地与云端槽位级自由混搭；问答槽无兜底，未配置时助手面板显示配置引导。
+- [ ] **CP-8.7 设置 UI：本地 Provider 卡片 + 已下载模型管理**（05 §5.1 / mockup 2.7/2.9）
+  预设列表加「本地 · 离线」（问答槽预设列表不出现）；卡片副标题显示引擎与模型状态（已下载·体积 / 未下载[下载] / 下载中进度条）；编辑态字段 = 模型下拉（来自模型库）+ 加载策略，无端点/密钥；「测试」= 本地跑内置样音/ping；「管理…」子页 = 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（行内硬件要求与本机检测结果）+ 占用合计 + 下载源切换。
+- [ ] **CP-8.8 Onboarding 第 3 步「使用本地模型」一键路径**（05 §6 / mockup 步骤 3/3b）
+  推荐卡显示检测出的档位与体积（可「更改档位 ▾」）；点击即下载（进度条、可后台继续、完成前可先走完余下步骤）；完成后 STT/整理/翻译三槽指向本地。
+- [ ] **CP-8.9 托盘/主菜单联动 + 回归**
+  托盘「模型 ▸」子菜单含本地档案；性能预算复核（整理短句 ≤500ms、常驻内存模式的空闲内存新预算）；denoise 语料集对本地小模型跑一轮评测报告；README/文档更新离线能力说明。
+
+**v1.1 依赖增量**：`llama-cpp-2`、`sherpa-rs`（或官方 sherpa-onnx crate）、`sysinfo`——全部锁在 `local-models` feature 后；安装包体积增量预算 +30–60 MB（推理引擎静态链接，07 §1）。
