@@ -81,8 +81,12 @@ const practiceText = ref("");
 const practiceDone = ref(false);
 
 // ── 完成 ──
+const autostartOn = ref(true); // 默认开启（02 F-6）
 async function finish() {
-  await store.mutate((s) => void (s.onboarding_done = true));
+  await store.mutate((s) => {
+    s.onboarding_done = true;
+    s.general.autostart = autostartOn.value;
+  });
   window.close();
 }
 
@@ -167,6 +171,10 @@ onUnmounted(() => {
     <div v-else class="body center">
       <span class="done-check">✓</span>
       <h5>一切就绪</h5>
+      <label class="autostart-row">
+        <input v-model="autostartOn" type="checkbox" />
+        <span>{{ lang === "zh_cn" ? "登录时自动启动 Typex" : "Launch Typex at login" }}</span>
+      </label>
     </div>
 
     <!-- 底部 -->
@@ -313,6 +321,15 @@ onUnmounted(() => {
 .done-check {
   font-size: 28px;
   color: var(--success);
+}
+.autostart-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
 }
 .foot {
   display: flex;

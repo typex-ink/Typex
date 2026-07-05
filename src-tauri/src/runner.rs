@@ -56,6 +56,10 @@ pub fn run() {
             let _ = crate::app::windows::show_settings(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -121,6 +125,31 @@ pub fn run() {
                     while rx.changed().await.is_ok() {
                         let s = rx.borrow_and_update().clone();
                         registry.on_settings_changed(s);
+                    }
+                });
+            }
+
+            // 开机自启（02 F-6）：启动时对齐设置，变更时跟随开关
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let apply = |handle: &tauri::AppHandle, on: bool| {
+                    let mgr = handle.autolaunch();
+                    let r = if on { mgr.enable() } else { mgr.disable() };
+                    if let Err(e) = r {
+                        tracing::warn!("开机自启设置失败: {e}");
+                    }
+                };
+                apply(app.handle(), s.general.autostart);
+                let handle = app.handle().clone();
+                let mut rx = settings.subscribe();
+                tauri::async_runtime::spawn(async move {
+                    let mut last = None;
+                    while rx.changed().await.is_ok() {
+                        let on = rx.borrow_and_update().general.autostart;
+                        if last != Some(on) {
+                            last = Some(on);
+                            apply(&handle, on);
+                        }
                     }
                 });
             }

@@ -138,7 +138,7 @@
 
 - [x] **CP-6.1 volcengine STT adapter**（2026-07-06：adapter + registry 双凭据构建（app_key/access_token，resource_id 可经 options 覆盖）· ProfileEditor 按 kind 渲染 APP ID/Access Token 双字段 + STT 预设「火山引擎 · 豆包（极速版）」· wiremock 集成测试 5 例（请求形状/鉴权不重试/55 系重试/缺 header 回退 HTTP 状态/自定义 resource_id））
   火山/豆包极速版 flash：双凭据 header、base64 JSON body、`X-Api-Status-Code` 判定（03 §2.2）；ProviderCard 编辑表单按 kind 渲染 AppKey/AccessToken 双字段；wiremock 集成测试。当前 `registry.rs` 为报错占位。
-- [ ] **CP-6.2 开机自启**（02 F-6）
+- [x] **CP-6.2 开机自启**（2026-07-06：plugin 初始化（macOS LaunchAgent）· 启动时对齐设置 + settings watch 跟随开关 · onboarding 完成步骤加默认勾选的自启选项）
   `tauri-plugin-autostart` 已在依赖但未初始化；接通用页开关与 onboarding 完成步骤的默认开启。
 - [ ] **CP-6.3 自动更新**（02 F-6 / ADR-11）
   `tauri-plugin-updater` 接入：默认自动检查、手动确认安装；托盘「检查更新」当前是空操作；设置-关于「检查更新」按钮接真实逻辑。
