@@ -4,7 +4,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
-import { events } from "@/ipc/bindings";
+import { commands, events } from "@/ipc/bindings";
 import { fitRectInWorkArea, type LogicalRect } from "@/shared/floating-window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow, type Monitor } from "@tauri-apps/api/window";
@@ -72,6 +72,7 @@ onMounted(async () => {
       syncWindowSize();
     }),
   );
+  await commands.assistantWindowReady();
 
   flushTimer = setInterval(flushDelta, 33);
   window.addEventListener("keydown", onKey);

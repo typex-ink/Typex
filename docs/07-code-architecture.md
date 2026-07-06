@@ -344,6 +344,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `test_profile { id }` | 密钥字段单独走 `set_profile_secret`（不随 profile JSON 往返） |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
+| 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
 | 历史 | `query_history { search, offset }` / `get_stats` / `delete_history_item` / `clear_history` | `get_stats` 返回主页统计（总时长/字数/节省时间/语速，本地聚合） |
 | 系统 | `get_permission_status` / `open_permission_settings { kind }` / `get_diagnostics` / `set_paused(bool)` / `copy_last_result` / `check_update` |  |

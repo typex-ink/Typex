@@ -8,6 +8,7 @@ use crate::orchestrator::Orchestrator;
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
 use crate::settings::secrets::{KeyringStore, SecretStore};
+use futures_util::FutureExt;
 use std::sync::Arc;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events};
@@ -21,6 +22,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::get_permission_status,
             commands::open_permission_settings,
             commands::session_command,
+            commands::assistant_window_ready,
             commands::list_profiles,
             commands::upsert_profile,
             commands::delete_profile,
@@ -198,6 +200,9 @@ pub fn run() {
             app.manage(PausedState(paused_tx));
             // 本地模型下载任务表（v1.1；默认构建恒空）
             app.manage(crate::app::LocalDownloads::default());
+            let assistant_window_ready =
+                Arc::new(crate::app::commands::AssistantWindowReady::default());
+            app.manage(assistant_window_ready.clone());
 
             // hotkey 线程（配置热更新：settings watch → HotkeyConfig watch 桥接）
             let hotkey_cfg = HotkeyConfig::from_settings(&s.hotkeys);
@@ -223,6 +228,7 @@ pub fn run() {
             // 回答型确认时经 show_panel 回调呼出回答弹窗
             let handle_a = app.handle().clone();
             let handle_panel = app.handle().clone();
+            let ready_panel = assistant_window_ready.clone();
             let assistant = Arc::new(crate::orchestrator::assistant::AssistantService::new(
                 settings.clone(),
                 registry.clone(),
@@ -271,7 +277,21 @@ pub fn run() {
                     }
                 }),
                 Box::new(move |has_selection| {
-                    let _ = crate::app::windows::show_assistant(&handle_panel, has_selection);
+                    let handle_panel = handle_panel.clone();
+                    let ready_panel = ready_panel.clone();
+                    async move {
+                        let is_new_window = handle_panel.get_webview_window("assistant").is_none();
+                        if is_new_window {
+                            ready_panel.reset();
+                        }
+                        let _ = crate::app::windows::show_assistant(&handle_panel, has_selection);
+                        if is_new_window || !ready_panel.is_ready() {
+                            let _ = ready_panel
+                                .wait_ready(std::time::Duration::from_millis(1500))
+                                .await;
+                        }
+                    }
+                    .boxed()
                 }),
             ));
 

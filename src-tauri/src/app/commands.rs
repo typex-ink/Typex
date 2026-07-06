@@ -7,11 +7,54 @@ use crate::settings::schema::{Settings, SlotConfig};
 use crate::settings::secrets::SecretStore;
 use crate::types::{ProviderProfile, SlotKind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
+use tokio::sync::Notify;
 
 type SettingsState<'a> = State<'a, Arc<SettingsService>>;
 type RegistryState<'a> = State<'a, Arc<ProviderRegistry>>;
 type SecretsState<'a> = State<'a, Arc<dyn SecretStore>>;
+type AssistantReadyState<'a> = State<'a, Arc<AssistantWindowReady>>;
+
+pub struct AssistantWindowReady {
+    ready: AtomicBool,
+    notify: Notify,
+}
+
+impl Default for AssistantWindowReady {
+    fn default() -> Self {
+        Self {
+            ready: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+}
+
+impl AssistantWindowReady {
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
+    }
+
+    pub fn reset(&self) {
+        self.ready.store(false, Ordering::Release);
+    }
+
+    pub fn mark_ready(&self) {
+        self.ready.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub async fn wait_ready(&self, timeout: std::time::Duration) -> bool {
+        if self.is_ready() {
+            return true;
+        }
+        let notified = self.notify.notified();
+        if self.is_ready() {
+            return true;
+        }
+        tokio::time::timeout(timeout, notified).await.is_ok() || self.is_ready()
+    }
+}
 
 #[tauri::command]
 #[specta::specta]
@@ -47,6 +90,13 @@ pub fn session_command(
     command: crate::orchestrator::SessionCommand,
 ) {
     let _ = commander.0.send(command);
+}
+
+/// 助手窗口前端已注册 assistant:// 事件监听器。
+#[tauri::command]
+#[specta::specta]
+pub fn assistant_window_ready(ready: AssistantReadyState<'_>) {
+    ready.mark_ready();
 }
 
 // ── Profile 管理（07 §10.1；密钥单独走 set_profile_secret，不随 JSON 往返）──
@@ -749,5 +799,30 @@ pub async fn delete_local_model(
     {
         let _ = (app, settings, model_id, force);
         Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn assistant_window_ready_waits_until_marked() {
+        let ready = Arc::new(AssistantWindowReady::default());
+        let waiter = {
+            let ready = ready.clone();
+            tokio::spawn(async move { ready.wait_ready(std::time::Duration::from_secs(1)).await })
+        };
+
+        tokio::task::yield_now().await;
+        ready.mark_ready();
+
+        assert!(waiter.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn assistant_window_ready_timeout_returns_false() {
+        let ready = AssistantWindowReady::default();
+        assert!(!ready.wait_ready(std::time::Duration::from_millis(1)).await);
     }
 }

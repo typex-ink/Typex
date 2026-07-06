@@ -12,6 +12,7 @@ use crate::providers::llm::{LlmDelta, LlmRequest, Msg, prompt};
 use crate::settings::SettingsService;
 use crate::types::SlotKind;
 use futures_util::StreamExt;
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -54,7 +55,7 @@ pub struct AssistantService {
     pub registry: Arc<ProviderRegistry>,
     pub sink: Box<dyn Fn(AssistantEvent) + Send + Sync>,
     /// 呼出回答弹窗（app 层注入；参数 = 是否有选区，决定定位方式）
-    pub show_panel: Box<dyn Fn(bool) + Send + Sync>,
+    pub show_panel: Box<dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync>,
     next_id: AtomicU64,
 }
 
@@ -63,7 +64,7 @@ impl AssistantService {
         settings: Arc<SettingsService>,
         registry: Arc<ProviderRegistry>,
         sink: Box<dyn Fn(AssistantEvent) + Send + Sync>,
-        show_panel: Box<dyn Fn(bool) + Send + Sync>,
+        show_panel: Box<dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync>,
     ) -> Self {
         Self {
             settings,
@@ -136,13 +137,13 @@ struct RunCtx<'a> {
     had_selection: bool,
     degraded: bool,
     sink: &'a (dyn Fn(AssistantEvent) + Send + Sync),
-    show_panel: &'a (dyn Fn(bool) + Send + Sync),
+    show_panel: &'a (dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync),
 }
 
 impl RunCtx<'_> {
     /// 呼出弹窗并回显指令（回答型确认的那一刻）。
-    fn open_panel(&self) {
-        (self.show_panel)(self.had_selection);
+    async fn open_panel(&self) {
+        (self.show_panel)(self.had_selection).await;
         (self.sink)(AssistantEvent::Started {
             request_id: self.request_id,
             instruction: self.instruction.clone(),
@@ -162,12 +163,11 @@ async fn drive(
     let prefix = prompt::ANSWER_PREFIX;
     let mut full = String::new();
     // 面板是否已呼出；有选区时延迟到前缀判定完成
-    let mut panel_open = if ctx.had_selection {
-        false
-    } else {
-        ctx.open_panel();
-        true
-    };
+    let mut panel_open = false;
+    if !ctx.had_selection {
+        ctx.open_panel().await;
+        panel_open = true;
+    }
     // 有选区时的判定结论：None = 仍在嗅探
     let mut is_rewrite: Option<bool> = if ctx.had_selection { None } else { Some(false) };
 
@@ -199,7 +199,7 @@ async fn drive(
             }
             if is_rewrite == Some(false) && !panel_open {
                 // 回答型确认：呼出弹窗 + 释放缓冲（剥掉前缀）
-                ctx.open_panel();
+                ctx.open_panel().await;
                 panel_open = true;
                 let buffered = full.trim_start();
                 let buffered = buffered.strip_prefix(prefix).unwrap_or(buffered);
@@ -240,7 +240,7 @@ async fn drive(
             let display = full.trim();
             let display = display.strip_prefix(prefix).unwrap_or(display).trim();
             if !panel_open {
-                ctx.open_panel();
+                ctx.open_panel().await;
                 (ctx.sink)(AssistantEvent::Delta {
                     request_id: ctx.request_id,
                     text: display.to_string(),
@@ -258,6 +258,7 @@ async fn drive(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::FutureExt;
     use std::sync::Mutex;
 
     /// 采集 sink 事件 + 弹窗呼出记录，跑 drive 并返回结果。
@@ -290,7 +291,10 @@ mod tests {
                 };
                 events.lock().unwrap().push(s);
             };
-            let show_panel = move |has_sel: bool| panel_shows.lock().unwrap().push(has_sel);
+            let show_panel = move |has_sel: bool| {
+                panel_shows.lock().unwrap().push(has_sel);
+                futures_util::future::ready(()).boxed()
+            };
             // BoxStream<'static> 要求 owned 数据
             let owned: Vec<std::result::Result<LlmDelta, ProviderError>> = chunks
                 .into_iter()
