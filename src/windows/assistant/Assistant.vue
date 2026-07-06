@@ -5,13 +5,18 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import MarkdownIt from "markdown-it";
 import { events } from "@/ipc/bindings";
-import { LogicalSize } from "@tauri-apps/api/dpi";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { fitRectInWorkArea, type LogicalRect } from "@/shared/floating-window";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
+import { currentMonitor, getCurrentWindow, type Monitor } from "@tauri-apps/api/window";
 
 const { t } = useI18n();
 
 // LLM 输出视为不可信内容：禁 raw HTML（07 §11）
 const md = new MarkdownIt({ html: false, linkify: true });
+const WINDOW_W = 560;
+const WINDOW_MARGIN = 12;
+const MAX_ANSWER_HEIGHT = 320;
+const MIN_ANSWER_HEIGHT = 120;
 
 const instruction = ref("");
 const selectionChars = ref<number | null>(null);
@@ -21,6 +26,7 @@ const streaming = ref(false);
 const errorText = ref("");
 const panelEl = ref<HTMLElement | null>(null);
 const currentRequest = ref(0);
+const answerMaxHeight = ref(MAX_ANSWER_HEIGHT);
 
 const rendered = computed(() => md.render(answer.value));
 
@@ -104,14 +110,72 @@ function close() {
 
 async function syncWindowSize(force = false) {
   await nextTick();
+  const win = getCurrentWindow();
+  const workArea = await currentLogicalWorkArea();
+  const maxWindowHeight = workArea
+    ? Math.max(160, Math.floor(workArea.height - WINDOW_MARGIN * 2))
+    : 440;
+  fitAnswerAreaToWindow(maxWindowHeight);
+  await nextTick();
+
   const panelRect = panelEl.value?.getBoundingClientRect();
-  const height = panelRect ? Math.ceil(panelRect.height) : 96;
-  if (!force && Math.abs(height - lastWindowHeight) < 2) return;
-  lastWindowHeight = height;
+  const measuredHeight = panelRect ? Math.ceil(panelRect.height) + 2 : 96;
+  const height = Math.min(measuredHeight, maxWindowHeight);
   try {
-    await getCurrentWindow().setSize(new LogicalSize(560, height));
+    if (force || Math.abs(height - lastWindowHeight) >= 2) {
+      lastWindowHeight = height;
+      await win.setSize(new LogicalSize(WINDOW_W, height));
+    }
+    if (workArea) {
+      await fitWindowWithinWorkArea(win, workArea, height);
+    }
   } catch {
     // 窗口隐藏/销毁过程中可能拒绝 resize；下一次显示会重新同步。
+  }
+}
+
+function fitAnswerAreaToWindow(maxWindowHeight: number) {
+  const panel = panelEl.value;
+  const answer = panel?.querySelector<HTMLElement>(".ans");
+  if (!panel || !answer) {
+    answerMaxHeight.value = MAX_ANSWER_HEIGHT;
+    return;
+  }
+  const panelRect = panel.getBoundingClientRect();
+  const answerRect = answer.getBoundingClientRect();
+  const fixedHeight = Math.max(0, panelRect.height - answerRect.height);
+  answerMaxHeight.value = Math.max(
+    MIN_ANSWER_HEIGHT,
+    Math.min(MAX_ANSWER_HEIGHT, maxWindowHeight - fixedHeight - 2),
+  );
+}
+
+function logicalWorkAreaOf(monitor: Monitor): LogicalRect {
+  const scale = monitor.scaleFactor;
+  const position = monitor.workArea.position.toLogical(scale);
+  const size = monitor.workArea.size.toLogical(scale);
+  return { x: position.x, y: position.y, width: size.width, height: size.height };
+}
+
+async function currentLogicalWorkArea(): Promise<LogicalRect | null> {
+  const monitor = await currentMonitor();
+  return monitor ? logicalWorkAreaOf(monitor) : null;
+}
+
+async function fitWindowWithinWorkArea(
+  win: ReturnType<typeof getCurrentWindow>,
+  workArea: LogicalRect,
+  height: number,
+) {
+  const scale = await win.scaleFactor();
+  const pos = (await win.outerPosition()).toLogical(scale);
+  const fitted = fitRectInWorkArea(
+    { x: pos.x, y: pos.y, width: WINDOW_W, height },
+    workArea,
+    WINDOW_MARGIN,
+  );
+  if (Math.abs(fitted.x - pos.x) >= 1 || Math.abs(fitted.y - pos.y) >= 1) {
+    await win.setPosition(new LogicalPosition(Math.round(fitted.x), Math.round(fitted.y)));
   }
 }
 
@@ -122,7 +186,12 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <div class="panel-wrap">
-    <div ref="panelEl" class="panel" data-tauri-drag-region>
+    <div
+      ref="panelEl"
+      class="panel"
+      data-tauri-drag-region
+      :style="{ '--assistant-answer-max': `${answerMaxHeight}px` }"
+    >
       <!-- 指令回显行 + 关闭按钮 -->
       <div class="ask-row">
         <span class="ask">🎤 {{ instruction }}</span>
@@ -180,10 +249,12 @@ function onKey(e: KeyboardEvent) {
   padding: 12px 14px 0;
 }
 .ask {
+  min-width: 0;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-2);
   user-select: text;
+  overflow-wrap: anywhere;
 }
 .x {
   flex-shrink: 0;
@@ -219,14 +290,16 @@ function onKey(e: KeyboardEvent) {
   padding: 12px 14px 14px;
   font-size: 13px;
   line-height: 1.6;
-  max-height: 320px;
+  max-height: var(--assistant-answer-max);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .bubble {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
   user-select: text;
+  overflow-wrap: anywhere;
 }
 .md :deep(p) {
   margin: 0 0 8px;
