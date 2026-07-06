@@ -135,6 +135,45 @@ async fn no_range_header_on_fresh_download() {
     assert!(!*has_range.lock().unwrap(), "不应发送 Range 头");
 }
 
+#[tokio::test]
+async fn download_request_sends_typex_user_agent() {
+    let server = MockServer::start().await;
+    let captured_user_agent = Arc::new(Mutex::new(None::<String>));
+    let captured_user_agent2 = captured_user_agent.clone();
+
+    let body = b"hello";
+    let sha = sha256_bytes(body);
+
+    Mock::given(method("GET"))
+        .and(path("/model.bin"))
+        .respond_with(move |req: &Request| {
+            let user_agent = req
+                .headers
+                .get("user-agent")
+                .map(|v| v.to_str().unwrap_or("").to_string());
+            *captured_user_agent2.lock().unwrap() = user_agent;
+            ResponseTemplate::new(200).set_body_bytes(body.to_vec())
+        })
+        .mount(&server)
+        .await;
+
+    let data_dir = tempdir().unwrap();
+    let model_dir = data_dir.path().join("models").join("test-model");
+    let entry = make_entry(&server.uri(), &server.uri(), &sha, body.len() as u64);
+
+    download_model_file(&client(), &entry.sources, &entry.files[0], &model_dir, None)
+        .await
+        .unwrap();
+
+    let user_agent = captured_user_agent.lock().unwrap().clone();
+    assert!(
+        user_agent
+            .as_deref()
+            .is_some_and(|v| v.starts_with("Typex/")),
+        "未发送 Typex User-Agent：{user_agent:?}"
+    );
+}
+
 // ── 测试 3：断点续传——.part 文件保留，重启后追加 ────────────────────────────────
 
 /// 模拟首次下载中断（只收到前半段），再次调用 download_model_file 时：

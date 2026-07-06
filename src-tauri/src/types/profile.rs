@@ -47,6 +47,18 @@ impl ProviderKind {
     }
 }
 
+/// 本地模型下载源（03 §8）。`Auto` 保持双源自动兜底。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+pub enum ModelDownloadSource {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "huggingface")]
+    HuggingFace,
+    #[serde(rename = "modelscope")]
+    ModelScope,
+}
+
 /// 一个配置档案。`credentials` 的值是 `keyring://` 引用，明文不落盘（03 §6）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ProviderProfile {

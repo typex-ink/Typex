@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::local::manifest::{ModelEntry, ModelFile, ModelSources};
+use crate::types::ModelDownloadSource;
+
+const DOWNLOAD_USER_AGENT: &str = concat!("Typex/", env!("CARGO_PKG_VERSION"));
 
 // ── 错误类型 ──────────────────────────────────────────────────────────────────
 
@@ -49,16 +52,23 @@ pub type ProgressFn = Box<dyn Fn(Progress) + Send + Sync>;
 
 // ── 源列表 ────────────────────────────────────────────────────────────────────
 
-/// 从 `ModelSources` 提取双源 URL（HuggingFace 优先）。
-fn source_urls(sources: &ModelSources, file_name: &str) -> Vec<String> {
-    vec![
-        format!(
-            "{}/{}",
-            sources.huggingface.trim_end_matches('/'),
-            file_name
-        ),
-        format!("{}/{}", sources.modelscope.trim_end_matches('/'), file_name),
-    ]
+/// 按下载源偏好提取 URL。固定源只返回对应单源；Auto 保持 HuggingFace 优先。
+fn source_urls_for(
+    sources: &ModelSources,
+    file_name: &str,
+    source: ModelDownloadSource,
+) -> Vec<String> {
+    let huggingface = format!(
+        "{}/{}",
+        sources.huggingface.trim_end_matches('/'),
+        file_name
+    );
+    let modelscope = format!("{}/{}", sources.modelscope.trim_end_matches('/'), file_name);
+    match source {
+        ModelDownloadSource::Auto => vec![huggingface, modelscope],
+        ModelDownloadSource::HuggingFace => vec![huggingface],
+        ModelDownloadSource::ModelScope => vec![modelscope],
+    }
 }
 
 // ── 路径辅助 ──────────────────────────────────────────────────────────────────
@@ -122,7 +132,9 @@ async fn download_file(
     };
 
     // 构造请求（Range 头）
-    let mut req = client.get(url);
+    let mut req = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, DOWNLOAD_USER_AGENT);
     if resume_from > 0 {
         req = req.header("Range", format!("bytes={resume_from}-"));
     }
@@ -192,6 +204,28 @@ pub async fn download_model_file(
     dest_dir: &Path,
     progress_fn: Option<ProgressFn>,
 ) -> Result<(), DownloadError> {
+    download_model_file_with_source(
+        client,
+        sources,
+        file,
+        dest_dir,
+        ModelDownloadSource::Auto,
+        progress_fn,
+    )
+    .await
+}
+
+/// 下载单个模型文件，按用户选择的下载源决定源列表。
+///
+/// `Auto` = HuggingFace 优先、失败换 ModelScope；固定源只尝试指定源。
+pub async fn download_model_file_with_source(
+    client: &reqwest::Client,
+    sources: &ModelSources,
+    file: &ModelFile,
+    dest_dir: &Path,
+    source: ModelDownloadSource,
+    progress_fn: Option<ProgressFn>,
+) -> Result<(), DownloadError> {
     tokio::fs::create_dir_all(dest_dir).await?;
     let dest = dest_dir.join(&file.name);
     if dest.exists() {
@@ -199,7 +233,7 @@ pub async fn download_model_file(
         return Ok(());
     }
 
-    let urls = source_urls(sources, &file.name);
+    let urls = source_urls_for(sources, &file.name, source);
     let mut last_err = String::new();
 
     for url in &urls {
@@ -287,9 +321,29 @@ mod unit_tests {
             huggingface: "https://hf.co/repo".into(),
             modelscope: "https://ms.cn/repo".into(),
         };
-        let urls = source_urls(&sources, "model.gguf");
+        let urls = source_urls_for(&sources, "model.gguf", ModelDownloadSource::Auto);
         assert_eq!(urls[0], "https://hf.co/repo/model.gguf");
         assert_eq!(urls[1], "https://ms.cn/repo/model.gguf");
+    }
+
+    #[test]
+    fn source_urls_can_pin_huggingface() {
+        let sources = ModelSources {
+            huggingface: "https://hf.co/repo".into(),
+            modelscope: "https://ms.cn/repo".into(),
+        };
+        let urls = source_urls_for(&sources, "model.gguf", ModelDownloadSource::HuggingFace);
+        assert_eq!(urls, vec!["https://hf.co/repo/model.gguf"]);
+    }
+
+    #[test]
+    fn source_urls_can_pin_modelscope() {
+        let sources = ModelSources {
+            huggingface: "https://hf.co/repo".into(),
+            modelscope: "https://ms.cn/repo".into(),
+        };
+        let urls = source_urls_for(&sources, "model.gguf", ModelDownloadSource::ModelScope);
+        assert_eq!(urls, vec!["https://ms.cn/repo/model.gguf"]);
     }
 
     #[test]
@@ -298,7 +352,7 @@ mod unit_tests {
             huggingface: "https://hf.co/repo/".into(),
             modelscope: "https://ms.cn/repo/".into(),
         };
-        let urls = source_urls(&sources, "f.gguf");
+        let urls = source_urls_for(&sources, "f.gguf", ModelDownloadSource::Auto);
         assert!(!urls[0].contains("//f.gguf"), "双斜杠：{}", urls[0]);
     }
 

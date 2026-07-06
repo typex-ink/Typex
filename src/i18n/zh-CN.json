@@ -201,7 +201,11 @@
       "check_ok_gpu": "✓ Metal",
       "check_ok_ram": "✓ {ram} GB",
       "check_fail": "✗ 不满足",
-      "total": "占用合计 {size} · 下载源：自动（HuggingFace / ModelScope）"
+      "total": "占用合计 {size}",
+      "source_label": "下载源：",
+      "source_auto": "自动（HuggingFace / ModelScope）",
+      "source_huggingface": "HuggingFace",
+      "source_modelscope": "ModelScope"
     },
     "hotkeys": {
       "desc": "听写与助手键位可改；翻译 = 两键同按（自动跟随）。",

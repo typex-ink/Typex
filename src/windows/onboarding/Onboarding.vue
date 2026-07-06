@@ -94,7 +94,7 @@ async function downloadNext(queue: string[]) {
   dlDone.value = 0;
   dlTotal.value = localModels.value.find((m) => m.id === head)?.bytes ?? 0;
   pendingQueue = rest;
-  const r = await commands.downloadLocalModel(head);
+  const r = await commands.downloadLocalModel(head, null);
   if (r.status !== "ok") {
     localPhase.value = "error";
     localError.value = r.error.message;

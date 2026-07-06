@@ -594,13 +594,16 @@ pub fn get_hardware_tier() -> Option<HardwareTier> {
 pub fn download_local_model(
     app: tauri::AppHandle,
     downloads: State<'_, crate::app::LocalDownloads>,
+    settings: SettingsState<'_>,
     model_id: String,
+    source: Option<crate::types::ModelDownloadSource>,
 ) -> Result<(), TypexError> {
     #[cfg(feature = "local-models")]
     {
         use crate::local::{download, manifest};
         use tauri_specta::Event as _;
         let data_dir = local_models_data_dir(&app)?;
+        let source = source.unwrap_or_else(|| settings.get().general.model_download_source);
         let entry = manifest::catalog()
             .into_iter()
             .find(|m| m.id == model_id)
@@ -639,11 +642,12 @@ pub fn download_local_model(
                         .emit(&handle);
                     }) as download::ProgressFn
                 };
-                if let Err(e) = download::download_model_file(
+                if let Err(e) = download::download_model_file_with_source(
                     &client,
                     &entry.sources,
                     file,
                     &dir,
+                    source,
                     Some(emitted),
                 )
                 .await
@@ -667,7 +671,7 @@ pub fn download_local_model(
     }
     #[cfg(not(feature = "local-models"))]
     {
-        let _ = (app, downloads, model_id);
+        let _ = (app, downloads, settings, model_id, source);
         Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
     }
 }

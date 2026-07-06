@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 已下载模型管理子页（05 §5.1 / mockup 2.9 / CP-8.7）：
 // 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（硬件要求 + 本机检测 ✓/✗）+ 占用合计。
-// 下载源切换（HF/ModelScope/自动）：settings schema 暂无 download_source 字段，
-// 先不做源切换 UI（03 §8 双源自动择优是后端行为）；schema 加字段后补（mockup 2.9 底部「更改…」）。
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
+import Select from "@/components/Select.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { formatBytes } from "@/shared/format";
 import {
@@ -13,6 +12,7 @@ import {
   events,
   type HardwareTier,
   type LocalModelInfo,
+  type ModelDownloadSource,
   type SlotKind,
 } from "@/ipc/bindings";
 
@@ -22,8 +22,13 @@ const store = useSettingsStore();
 
 const models = ref<LocalModelInfo[]>([]);
 const hw = ref<HardwareTier | null>(null);
-/** model_id → 下载进度 0–100 */
-const progress = ref<Record<string, number>>({});
+interface DownloadProgress {
+  percent: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+/** model_id → 下载进度 */
+const progress = ref<Record<string, DownloadProgress>>({});
 /** 删除警告中的模型 id（被槽位引用时先警告再 force） */
 const confirmDelete = ref<string | null>(null);
 let unlisten: (() => void) | null = null;
@@ -33,6 +38,18 @@ const available = computed(() => models.value.filter((m) => !m.downloaded));
 const totalBytes = computed(() =>
   downloaded.value.reduce((sum, m) => sum + m.bytes, 0),
 );
+const sourceOptions = computed(() => [
+  { value: "auto", label: t("settings.models.source_auto") },
+  { value: "huggingface", label: t("settings.models.source_huggingface") },
+  { value: "modelscope", label: t("settings.models.source_modelscope") },
+]);
+const downloadSource = computed<string>({
+  get: () => store.settings?.general.model_download_source ?? "auto",
+  set: (v) =>
+    void store.mutate((s) => {
+      s.general.model_download_source = v as ModelDownloadSource;
+    }),
+});
 
 const SLOT_LABEL_KEY: Record<SlotKind, string> = {
   stt: "settings.providers.slot_stt",
@@ -83,8 +100,12 @@ async function load() {
 }
 
 async function download(id: string) {
-  progress.value = { ...progress.value, [id]: 0 };
-  await commands.downloadLocalModel(id);
+  const model = models.value.find((m) => m.id === id);
+  progress.value = {
+    ...progress.value,
+    [id]: { percent: 0, bytesDone: 0, bytesTotal: model?.bytes ?? 0 },
+  };
+  await commands.downloadLocalModel(id, downloadSource.value as ModelDownloadSource);
 }
 
 async function cancelDownload(id: string) {
@@ -117,7 +138,11 @@ onMounted(async () => {
     } else if (p.bytes_total > 0) {
       progress.value = {
         ...progress.value,
-        [p.model_id]: Math.round((p.bytes_done / p.bytes_total) * 100),
+        [p.model_id]: {
+          percent: Math.round((p.bytes_done / p.bytes_total) * 100),
+          bytesDone: p.bytes_done,
+          bytesTotal: p.bytes_total,
+        },
       };
     }
   });
@@ -159,7 +184,12 @@ onUnmounted(() => unlisten?.());
         <b>{{ m.display_name }}</b>
         <span class="tag">{{ m.purpose === "stt" ? "STT" : "LLM" }}</span><br />
         <small>{{ formatBytes(m.bytes) }} · {{ hardwareLine(m) }}</small>
-        <span v-if="progress[m.id] !== undefined" class="pbar"><i :style="{ width: `${progress[m.id]}%` }" /></span>
+        <span v-if="progress[m.id] !== undefined" class="progress-line">
+          <span class="pbar"><i :style="{ width: `${progress[m.id].percent}%` }" /></span>
+          <small class="progress-bytes">
+            {{ formatBytes(progress[m.id].bytesDone) }} / {{ formatBytes(progress[m.id].bytesTotal || m.bytes) }}
+          </small>
+        </span>
       </div>
       <Button v-if="progress[m.id] !== undefined" size="sm" @click="cancelDownload(m.id)">
         {{ t("actions.cancel") }}
@@ -170,7 +200,13 @@ onUnmounted(() => unlisten?.());
     </div>
 
     <!-- 占用合计 -->
-    <p class="total">{{ t("settings.models.total", { size: formatBytes(totalBytes) }) }}</p>
+    <p class="total">
+      <span>{{ t("settings.models.total", { size: formatBytes(totalBytes) }) }}</span>
+      <span class="source-control">
+        <span>{{ t("settings.models.source_label") }}</span>
+        <Select v-model="downloadSource" class="source-select" :options="sourceOptions" />
+      </span>
+    </p>
   </div>
 </template>
 
@@ -253,6 +289,22 @@ onUnmounted(() => unlisten?.());
   background: var(--text-1);
   transition: width 0.3s;
 }
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 7px;
+}
+.progress-line .pbar {
+  flex: 1;
+  margin-top: 0;
+}
+.progress-bytes {
+  flex-shrink: 0;
+  min-width: 92px;
+  text-align: right;
+  color: var(--text-3);
+}
 .slot-h {
   font-size: 11px;
   color: var(--text-3);
@@ -267,5 +319,22 @@ onUnmounted(() => unlisten?.());
   font-size: 11px;
   color: var(--text-3);
   margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.source-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+:deep(.source-select.select-wrap) {
+  min-width: 210px;
+}
+:deep(.source-select .select) {
+  height: 26px;
+  font-size: 12px;
+  background: transparent;
 }
 </style>

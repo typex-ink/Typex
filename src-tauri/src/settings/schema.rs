@@ -1,7 +1,7 @@
 //! 全部配置结构体 + 默认值 + schema_version（07 §4 settings/schema.rs）。
 //! settings.json 形态见 03 §6；本文件是其唯一 Rust 定义。
 
-use crate::types::profile::{ProviderProfile, SlotKind};
+use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -88,6 +88,8 @@ pub struct GeneralSettings {
     pub proxy_mode: ProxyMode,
     /// proxy_mode = Manual 时生效，如 "socks5://127.0.0.1:1080"
     pub proxy_url: String,
+    /// 本地模型下载源（模型管理页底部设置）。
+    pub model_download_source: ModelDownloadSource,
     pub check_updates: bool,
 }
 
@@ -101,6 +103,7 @@ impl Default for GeneralSettings {
             chimes_volume: 0.6,
             proxy_mode: ProxyMode::System,
             proxy_url: String::new(),
+            model_download_source: ModelDownloadSource::Auto,
             check_updates: true,
         }
     }

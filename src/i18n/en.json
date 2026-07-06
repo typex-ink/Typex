@@ -201,7 +201,11 @@
       "check_ok_gpu": "✓ Metal",
       "check_ok_ram": "✓ {ram} GB",
       "check_fail": "✗ not met",
-      "total": "Total {size} on disk · Source: auto (HuggingFace / ModelScope)"
+      "total": "Total {size} on disk",
+      "source_label": "Source:",
+      "source_auto": "Auto (HuggingFace / ModelScope)",
+      "source_huggingface": "HuggingFace",
+      "source_modelscope": "ModelScope"
     },
     "hotkeys": {
       "desc": "Dictation and assistant keys are customizable; translation = both keys held together (follows automatically).",

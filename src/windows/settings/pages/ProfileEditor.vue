@@ -99,7 +99,7 @@ async function loadLocalModels() {
 async function downloadSelected() {
   if (!selectedLocal.value) return;
   downloadPct.value = 0;
-  await commands.downloadLocalModel(selectedLocal.value.id);
+  await commands.downloadLocalModel(selectedLocal.value.id, null);
 }
 
 function displayLabel(p: (typeof presets)[number]): string {
