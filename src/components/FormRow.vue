@@ -28,6 +28,9 @@ defineProps<{ label: string; hint?: string }>();
 }
 .l {
   color: var(--text-1);
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
 }
 .l small {
   display: block;

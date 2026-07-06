@@ -43,6 +43,14 @@ fn chat_completions_thinking_option(profile: &ProviderProfile) -> Option<bool> {
     }
 }
 
+fn profile_enable_thinking(profile: &ProviderProfile) -> bool {
+    profile
+        .options
+        .get("enable_thinking")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 fn supports_enable_thinking_param(profile: &ProviderProfile) -> bool {
     let base_url = profile.base_url.to_ascii_lowercase();
     if base_url.contains("siliconflow")
@@ -362,7 +370,10 @@ impl ProviderRegistry {
                     Some("unload_after_use") => llm_llama::LoadPolicy::UnloadAfterUse,
                     _ => llm_llama::LoadPolicy::Resident,
                 };
-                Ok(Arc::new(llm_llama::LlamaLlm::new(gguf, policy)))
+                Ok(Arc::new(
+                    llm_llama::LlamaLlm::new(gguf, policy)
+                        .with_thinking(profile_enable_thinking(profile)),
+                ))
             }
             _ => Err(TypexError::new(
                 ErrorCode::InvalidRequest,
@@ -506,6 +517,16 @@ mod tests {
         p.options
             .insert("enable_thinking".into(), serde_json::Value::Bool(false));
         assert_eq!(chat_completions_thinking_option(&p), Some(false));
+    }
+
+    #[test]
+    fn profile_enable_thinking_defaults_false_and_reads_bool() {
+        let mut p = llm_profile("local-qwen", "");
+        assert!(!profile_enable_thinking(&p));
+
+        p.options
+            .insert("enable_thinking".into(), serde_json::Value::Bool(true));
+        assert!(profile_enable_thinking(&p));
     }
 
     #[test]

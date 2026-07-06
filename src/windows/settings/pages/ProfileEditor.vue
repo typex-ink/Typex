@@ -57,6 +57,9 @@ const isLocal = computed(() => kind.value === "local");
 const isCloudChatLlm = computed(
   () => !isLocal.value && props.slotKind !== "stt" && kind.value === "chat_completions",
 );
+const canConfigureThinking = computed(
+  () => props.slotKind !== "stt" && (kind.value === "chat_completions" || kind.value === "local"),
+);
 const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
 const hasExistingVolcKeys = computed(
   () =>
@@ -150,7 +153,7 @@ async function save(): Promise<string | null> {
   const id = props.profile?.id ?? `p-${Date.now().toString(36)}`;
   const options = { ...(props.profile?.options ?? {}) };
   if (isLocal.value) options["load_policy"] = loadPolicy.value;
-  if (isCloudChatLlm.value) {
+  if (canConfigureThinking.value) {
     options["enable_thinking"] = thinkingEnabled.value;
   } else {
     delete options["enable_thinking"];
@@ -291,6 +294,13 @@ onUnmounted(() => unlistenProgress?.());
             { value: 'unload_after_use', label: t('settings.profile.load_policy_unload') },
           ]"
         />
+      </FormRow>
+      <FormRow
+        v-if="canConfigureThinking"
+        :label="t('settings.profile.thinking')"
+        :hint="t('settings.profile.thinking_hint')"
+      >
+        <Toggle v-model="thinkingEnabled" />
       </FormRow>
       <p class="local-note">{{ t("settings.profile.local_note") }}</p>
     </template>

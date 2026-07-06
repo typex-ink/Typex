@@ -145,7 +145,7 @@ hidden ─按键按下─▶ recording ─松开─▶ processing ─▶ success
 └─────────────┴──────────────────────────────────────────┘
 ```
 
-- 每个槽位一张 `ProviderCard`；「编辑」进入**编辑子页**（同一内容区内切换，顶部「← 模型服务」返回链接；保存/删除档案后自动返回列表；有未保存修改时离开需确认）：预设下拉（OpenAI/Groq/SiliconFlow/火山·豆包/DeepSeek/OpenRouter/Ollama/自定义，仅作表单填充、无推荐标注）→ 按 `kind` 动态渲染字段（openai_compat：Base URL/模型/密钥；volcengine：AppKey/AccessToken/ResourceId；云端 Chat Completions 的 LLM 档案额外显示「模型思考」开关，默认关闭，对支持的 Qwen 端点发送 `enable_thinking`）。「已下载模型」管理页同为子页，同样以「← 模型服务」返回。
+- 每个槽位一张 `ProviderCard`；「编辑」进入**编辑子页**（同一内容区内切换，顶部「← 模型服务」返回链接；保存/删除档案后自动返回列表；有未保存修改时离开需确认）：预设下拉（OpenAI/Groq/SiliconFlow/火山·豆包/DeepSeek/OpenRouter/Ollama/自定义，仅作表单填充、无推荐标注）→ 按 `kind` 动态渲染字段（openai_compat：Base URL/模型/密钥；volcengine：AppKey/AccessToken/ResourceId；云端 Chat Completions 与本地 LLM 档案额外显示「模型思考」开关，默认关闭）。「已下载模型」管理页同为子页，同样以「← 模型服务」返回。
 - **「切换 ▾」= 多配置档案（[ADR-21](09-decisions.md)）**：下拉列出该槽位所有已存档案（✓ 标当前）+「新建配置…」；新建不覆盖旧档案，切换即时生效。同一组档案也出现在托盘「模型 ▸」子菜单中（快速切换，不用打开设置）。
 - 密钥输入用 `SecretInput`（默认掩码、可见性切换、粘贴按钮）；保存即写 keyring。
 - 「测试」按钮内联显示结果：`✓ 320ms` 或分类错误文案 + 修复建议。

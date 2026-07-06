@@ -149,6 +149,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 - **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B，Q4_K_M），按硬件档位下载（见 §8）。Apache 2.0，多语言，中文分词效率高。
 - **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B 级模型（[ADR-22](09-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。
+- **思考模式**：`profiles[].options.enable_thinking` 默认 `false`；本地 Qwen LLM 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
 
 ### 3.4 内置提示词与占位符（可在高级设置中覆盖）
@@ -311,7 +312,7 @@ F-3 不引入新的 Provider 类型：
 要点：
 
 - `kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值一律是 keyring 引用，明文不落盘。
-- LLM `options.enable_thinking` 控制 Qwen 兼容端点的 thinking 扩展，缺省为 `false`；非支持端点不发送该参数，避免破坏 OpenAI / Responses 等严格协议。
+- LLM `options.enable_thinking` 控制 thinking 模式，缺省为 `false`；云端只对支持端点发送 `enable_thinking` 参数，避免破坏 OpenAI / Responses 等严格协议；本地 Qwen LLM 通过 `/think` / `/no_think` 控制词实现。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。
 
