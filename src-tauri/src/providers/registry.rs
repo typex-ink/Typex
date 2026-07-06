@@ -29,6 +29,40 @@ pub struct ProviderRegistry {
     models_data_dir: Mutex<Option<std::path::PathBuf>>,
 }
 
+fn chat_completions_thinking_option(profile: &ProviderProfile) -> Option<bool> {
+    if supports_enable_thinking_param(profile) {
+        Some(
+            profile
+                .options
+                .get("enable_thinking")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        )
+    } else {
+        None
+    }
+}
+
+fn supports_enable_thinking_param(profile: &ProviderProfile) -> bool {
+    let base_url = profile.base_url.to_ascii_lowercase();
+    if base_url.contains("siliconflow")
+        || base_url.contains("dashscope")
+        || base_url.contains("aliyuncs.com")
+        || base_url.contains("bailian")
+    {
+        return true;
+    }
+
+    let model = profile.model.to_ascii_lowercase();
+    profile.options.contains_key("enable_thinking")
+        && model.contains("qwen")
+        && !base_url.contains("api.openai.com")
+        && !base_url.contains("openrouter")
+        && !base_url.contains("groq")
+        && !base_url.contains("deepseek")
+        && !base_url.contains("ollama")
+}
+
 impl ProviderRegistry {
     pub fn new(settings: Settings, secrets: Arc<dyn SecretStore>) -> Self {
         Self {
@@ -285,7 +319,8 @@ impl ProviderRegistry {
                         key,
                         profile.model.clone(),
                     )
-                    .with_headers(profile.extra_headers.clone()),
+                    .with_headers(profile.extra_headers.clone())
+                    .with_thinking(chat_completions_thinking_option(profile)),
                 ))
             }
             ProviderKind::Responses => {
@@ -363,6 +398,26 @@ mod tests {
         }
     }
 
+    fn llm_profile(id: &str, base_url: &str) -> ProviderProfile {
+        ProviderProfile {
+            id: id.into(),
+            slots: vec![SlotKind::Assistant],
+            kind: ProviderKind::ChatCompletions,
+            label: id.into(),
+            base_url: base_url.into(),
+            model: "Qwen/Qwen3-14B".into(),
+            credentials: [(
+                "api_key".to_string(),
+                format!("keyring://typex/assistant/{id}/api_key"),
+            )]
+            .into(),
+            extra_headers: HashMap::new(),
+            extra_form: HashMap::new(),
+            timeout_ms: 30_000,
+            options: HashMap::new(),
+        }
+    }
+
     fn setup() -> (ProviderRegistry, Arc<MemoryStore>) {
         let secrets = Arc::new(MemoryStore::default());
         secrets
@@ -429,6 +484,36 @@ mod tests {
         reg.on_settings_changed(s2);
         let c = reg.stt_for(SlotKind::Stt).unwrap();
         assert!(!Arc::ptr_eq(&a, &c));
+    }
+
+    #[test]
+    fn qwen_compatible_endpoint_sends_thinking_disabled_by_default() {
+        let p = llm_profile("qwen", "https://api.siliconflow.cn/v1");
+        assert_eq!(chat_completions_thinking_option(&p), Some(false));
+    }
+
+    #[test]
+    fn qwen_compatible_endpoint_respects_thinking_option() {
+        let mut p = llm_profile("qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        p.options
+            .insert("enable_thinking".into(), serde_json::Value::Bool(true));
+        assert_eq!(chat_completions_thinking_option(&p), Some(true));
+    }
+
+    #[test]
+    fn explicit_qwen_custom_endpoint_sends_thinking_param() {
+        let mut p = llm_profile("qwen-custom", "https://qwen.example.com/v1");
+        p.options
+            .insert("enable_thinking".into(), serde_json::Value::Bool(false));
+        assert_eq!(chat_completions_thinking_option(&p), Some(false));
+    }
+
+    #[test]
+    fn non_qwen_endpoint_omits_thinking_param() {
+        let mut p = llm_profile("openai", "https://api.openai.com/v1");
+        p.options
+            .insert("enable_thinking".into(), serde_json::Value::Bool(true));
+        assert_eq!(chat_completions_thinking_option(&p), None);
     }
 
     /// ADR-20：问答槽无本地兜底——未配置一律 NotConfigured。

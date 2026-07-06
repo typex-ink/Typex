@@ -1,7 +1,7 @@
 //! OpenAI Chat Completions adapter（03 §3.1）。
 //! 覆盖 OpenAI / DeepSeek / Groq / SiliconFlow / OpenRouter / Ollama / 火山方舟。
 
-use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest};
+use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest, filter_thinking_stream};
 use crate::providers::ProviderError;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -14,6 +14,7 @@ pub struct ChatCompletionsLlm {
     api_key: String,
     model: String,
     extra_headers: HashMap<String, String>,
+    enable_thinking: Option<bool>,
 }
 
 impl ChatCompletionsLlm {
@@ -29,11 +30,17 @@ impl ChatCompletionsLlm {
             api_key: api_key.into(),
             model: model.into(),
             extra_headers: HashMap::new(),
+            enable_thinking: None,
         }
     }
 
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.extra_headers = headers;
+        self
+    }
+
+    pub fn with_thinking(mut self, enable_thinking: Option<bool>) -> Self {
+        self.enable_thinking = enable_thinking;
         self
     }
 
@@ -50,6 +57,9 @@ impl ChatCompletionsLlm {
         });
         if let Some(mt) = req.max_tokens {
             body["max_tokens"] = mt.into();
+        }
+        if let Some(enable) = self.enable_thinking {
+            body["enable_thinking"] = enable.into();
         }
         body
     }
@@ -72,7 +82,7 @@ impl LlmProvider for ChatCompletionsLlm {
         let extra_headers = self.extra_headers.clone();
 
         let stream = async_stream_impl(client, url, api_key, extra_headers, body);
-        stream.boxed()
+        filter_thinking_stream(stream)
     }
 
     fn capabilities(&self) -> LlmCapabilities {

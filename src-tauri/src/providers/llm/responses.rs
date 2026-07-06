@@ -1,7 +1,7 @@
 //! OpenAI Responses adapter（03 §3.2）。
 //! SSE 事件：response.output_text.delta / response.completed / response.failed。
 
-use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest};
+use super::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest, filter_thinking_stream};
 use crate::providers::ProviderError;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -135,7 +135,7 @@ impl LlmProvider for ResponsesLlm {
                 }
             }
         };
-        stream.boxed()
+        filter_thinking_stream(stream)
     }
 
     fn capabilities(&self) -> LlmCapabilities {

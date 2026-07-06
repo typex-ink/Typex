@@ -6,7 +6,9 @@
 //! 错误分类只剩 InvalidRequest / 模型未下载（03 §3.3）。
 
 use crate::providers::ProviderError;
-use crate::providers::llm::{LlmCapabilities, LlmDelta, LlmProvider, LlmRequest};
+use crate::providers::llm::{
+    LlmCapabilities, LlmDelta, LlmProvider, LlmRequest, filter_thinking_stream,
+};
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -219,10 +221,10 @@ impl LlmProvider for LlamaLlm {
                 *slot.lock().unwrap() = None;
             }
         });
-        futures_util::stream::unfold(rx, |mut rx| async move {
+        let stream = futures_util::stream::unfold(rx, |mut rx| async move {
             rx.recv().await.map(|item| (item, rx))
-        })
-        .boxed()
+        });
+        filter_thinking_stream(stream)
     }
 
     fn capabilities(&self) -> LlmCapabilities {

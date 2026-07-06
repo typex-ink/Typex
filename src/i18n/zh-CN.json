@@ -162,6 +162,8 @@
       "api_format": "接口格式",
       "kind_chat": "Chat Completions（OpenAI 兼容）",
       "kind_responses": "Responses（OpenAI 新协议）",
+      "thinking": "模型思考",
+      "thinking_hint": "默认关闭；支持的 Qwen 接口会传 enable_thinking，思考内容不会显示在结果里。",
       "api_key": "API 密钥",
       "app_id_hint": "火山控制台的 APP ID",
       "token_hint": "火山控制台的 Access Token",

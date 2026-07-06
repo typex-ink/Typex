@@ -7,6 +7,7 @@ import FormRow from "@/components/FormRow.vue";
 import Input from "@/components/Input.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Select from "@/components/Select.vue";
+import Toggle from "@/components/Toggle.vue";
 import { presetsForSlot } from "@/shared/presets";
 import { formatBytes } from "@/shared/format";
 import {
@@ -53,6 +54,9 @@ const saving = ref(false);
 const isNew = computed(() => !props.profile);
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
+const isCloudChatLlm = computed(
+  () => !isLocal.value && props.slotKind !== "stt" && kind.value === "chat_completions",
+);
 const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
 const hasExistingVolcKeys = computed(
   () =>
@@ -66,6 +70,7 @@ const localModels = ref<LocalModelInfo[]>([]);
 const loadPolicy = ref<string>(
   (props.profile?.options?.["load_policy"] as string) ?? "resident",
 );
+const thinkingEnabled = ref(props.profile?.options?.["enable_thinking"] === true);
 const downloadPct = ref<number | null>(null);
 let unlistenProgress: (() => void) | null = null;
 
@@ -145,6 +150,11 @@ async function save(): Promise<string | null> {
   const id = props.profile?.id ?? `p-${Date.now().toString(36)}`;
   const options = { ...(props.profile?.options ?? {}) };
   if (isLocal.value) options["load_policy"] = loadPolicy.value;
+  if (isCloudChatLlm.value) {
+    options["enable_thinking"] = thinkingEnabled.value;
+  } else {
+    delete options["enable_thinking"];
+  }
   const profile: ProviderProfile = {
     id,
     slots: props.profile?.slots ?? [props.slotKind],
@@ -304,6 +314,13 @@ onUnmounted(() => unlistenProgress?.());
             { value: 'responses', label: t('settings.profile.kind_responses') },
           ]"
         />
+      </FormRow>
+      <FormRow
+        v-if="isCloudChatLlm"
+        :label="t('settings.profile.thinking')"
+        :hint="t('settings.profile.thinking_hint')"
+      >
+        <Toggle v-model="thinkingEnabled" />
       </FormRow>
       <template v-if="isVolc">
         <FormRow

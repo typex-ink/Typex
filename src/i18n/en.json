@@ -162,6 +162,8 @@
       "api_format": "API format",
       "kind_chat": "Chat Completions (OpenAI-compatible)",
       "kind_responses": "Responses (OpenAI's new protocol)",
+      "thinking": "Model thinking",
+      "thinking_hint": "Off by default; Typex sends enable_thinking for supported Qwen APIs, and hidden reasoning is never shown in the result.",
       "api_key": "API key",
       "app_id_hint": "APP ID from the Volcengine console",
       "token_hint": "Access Token from the Volcengine console",

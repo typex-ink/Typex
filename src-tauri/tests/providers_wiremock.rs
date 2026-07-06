@@ -242,6 +242,31 @@ async fn chat_completions_streams_deltas() {
 }
 
 #[tokio::test]
+async fn chat_completions_sends_thinking_option_and_strips_think_blocks() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(v["enable_thinking"], false);
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body(&["<thi", "nk>内部推理", "</think>你好"]))
+        })
+        .mount(&server)
+        .await;
+
+    let llm = ChatCompletionsLlm::new(client(), server.uri(), "sk-llm", "test-model")
+        .with_thinking(Some(false));
+    let mut out = String::new();
+    let mut stream = llm.complete(llm_req());
+    while let Some(d) = stream.next().await {
+        out.push_str(&d.unwrap().text);
+    }
+    assert_eq!(out, "你好");
+}
+
+#[tokio::test]
 async fn chat_completions_error_status_maps() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

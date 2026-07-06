@@ -125,6 +125,11 @@ Authorization: Bearer {api_key}
 
 SSE `data:` 行解析 `choices[0].delta.content`。覆盖 OpenAI、DeepSeek、Groq、SiliconFlow、OpenRouter、Ollama、火山方舟（豆包 LLM 也提供 OpenAI 兼容端点）等几乎全部生态。
 
+Qwen3 / 千问类模型可能默认输出 `<think>...</think>` 推理块，语音助手会表现为长时间“思考”且把内部推理显示到回答弹窗。Provider 层必须做两件事：
+
+- `profiles[].options.enable_thinking` 是用户可配置布尔值，默认 `false`；对已知支持该扩展的 Qwen 兼容 Chat Completions 端点（SiliconFlow、DashScope/阿里兼容模式等），以及用户显式保存该选项的自定义 Qwen 端点，请求体发送顶层 `enable_thinking`。
+- 不论端点是否支持该参数，所有 LLM 流式 delta 在进入 orchestrator 前都要过滤完整或跨 chunk 分片的 `<think>...</think>` 块；内部推理不得出现在助手弹窗、整理/翻译结果或注入文本中。
+
 ### 3.2 内置实现二：`responses`（OpenAI Responses 格式）
 
 ```
@@ -306,6 +311,7 @@ F-3 不引入新的 Provider 类型：
 要点：
 
 - `kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值一律是 keyring 引用，明文不落盘。
+- LLM `options.enable_thinking` 控制 Qwen 兼容端点的 thinking 扩展，缺省为 `false`；非支持端点不发送该参数，避免破坏 OpenAI / Responses 等严格协议。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。
 
