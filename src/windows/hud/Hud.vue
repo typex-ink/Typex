@@ -12,6 +12,7 @@ import {
   type ErrorCode,
 } from "./ipc";
 import Waveform from "./Waveform.vue";
+import { hasVoiceActivity } from "./waveform-scale";
 // HUD 纪律：不引 vue-i18n 运行时，静态 JSON 按语言直取（文案仍单一来源）
 import zhCN from "@/i18n/zh-CN.json";
 import en from "@/i18n/en.json";
@@ -140,7 +141,7 @@ onMounted(async () => {
   });
   unlistenLevel = await onAudioLevel((l) => {
     levels.value = l;
-    if (l.some((v) => v > 0.02)) lastVoice = Date.now();
+    if (hasVoiceActivity(l)) lastVoice = Date.now();
   });
   window.addEventListener("keydown", onKey);
 });

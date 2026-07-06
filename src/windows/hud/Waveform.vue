@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Canvas 波形（04 §6：60fps 仅录音时运行；80ms 电平平滑；处理中 = 五柱依次呼吸）
 import { onMounted, onUnmounted, ref, watch } from "vue";
+import { levelToVisualAmplitude } from "./waveform-scale";
 
 const props = defineProps<{
   levels: number[];
@@ -17,6 +18,7 @@ let smoothed = new Array(BAR_COUNT).fill(0);
 let target = new Array(BAR_COUNT).fill(0);
 let running = false;
 let breathePhase = 0;
+let reducedMotion = false;
 
 watch(
   () => props.levels,
@@ -25,8 +27,9 @@ watch(
     // 重采样到 BAR_COUNT
     for (let i = 0; i < BAR_COUNT; i++) {
       const v = l[Math.floor((i * l.length) / BAR_COUNT)] ?? 0;
-      target[i] = Math.min(1, v * 4); // RMS → 可视增益
+      target[i] = levelToVisualAmplitude(v);
     }
+    if (reducedMotion && !props.breathing) draw();
   },
 );
 
@@ -71,8 +74,8 @@ function draw() {
 function start() {
   if (running) return;
   running = true;
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reduced && !props.breathing) {
+  reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion && !props.breathing) {
     // 降级：静态电平条（04 §6）
     running = false;
     draw();
