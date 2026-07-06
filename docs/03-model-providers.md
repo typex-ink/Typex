@@ -92,6 +92,7 @@ Content-Type: application/json
 不走 HTTP，进程内推理，实现同一个 `SttProvider` trait。按硬件档位提供两条引擎路线：
 
 - **Qwen3-ASR（标准/性能档）**：llama.cpp（qwen3vl 音频架构，官方 ggml-org GGUF）跑 `Qwen3-ASR-0.6B`（Q8_0 主模型 + mmproj 约 1.0 GB）/ `Qwen3-ASR-1.7B`（Q8_0 主模型 + mmproj 约 2.5 GB，仅 GPU 加速可用时提供——纯 CPU 低于实时）。52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA。**注意**：llama.cpp 音频支持仍标 experimental、长音频有已知 bug——所有音频先过 VAD 切片成短分段再转写（本来就是 F-1 的路径），规避该问题。
+  - Qwen3-ASR 的 llama.cpp / OpenAI-compatible 网关输出可能带 `language Chinese<asr_text>...` 包装；Provider 层必须剥离 `language ...<asr_text>` 前缀、把语言填入 `Transcript.detected_language`，不得把包装文本传给 orchestrator / 前端 / 注入层。
 - **SenseVoice（轻量档）**：sherpa-onnx（官方 Rust crate，静态链接）+ `SenseVoice-Small int8`（约 230 MB）。非自回归，CPU 实时数倍速——弱机器上唯一保证实时的选项；自带 VAD 可复用。热词经 sherpa hotwords 接口（F-10 预留）。
 - whisper.cpp 降为可选扩展（Qwen3-ASR 的语言覆盖已够长尾）。
 - `capabilities()` 报告：不限音频时长（本地无 25 MB 上限）；错误分类只剩 `InvalidRequest`/模型未下载。

@@ -105,6 +105,25 @@ async fn stt_language_auto_is_omitted() {
 }
 
 #[tokio::test]
+async fn stt_qwen_asr_envelope_from_compat_response_is_stripped() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "text": "language Chinese<asr_text>你好。"
+        })))
+        .mount(&server)
+        .await;
+
+    let stt = OpenAiCompatStt::new(client(), server.uri(), "k", "qwen3-asr");
+    let t = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(t.text, "你好。");
+    assert_eq!(t.detected_language.as_deref(), Some("Chinese"));
+}
+
+#[tokio::test]
 async fn stt_401_is_auth_error_and_not_retried() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

@@ -44,6 +44,52 @@ pub trait SttProvider: Send + Sync {
     fn capabilities(&self) -> SttCapabilities;
 }
 
+const QWEN_ASR_TEXT_MARKER: &str = "<asr_text>";
+
+pub(crate) fn transcript_from_provider_text(
+    text: impl AsRef<str>,
+    detected_language: Option<String>,
+) -> Transcript {
+    let (text, marker_language) = strip_qwen_asr_envelope(text.as_ref());
+    Transcript {
+        text,
+        detected_language: detected_language.or(marker_language),
+    }
+}
+
+fn strip_qwen_asr_envelope(raw: &str) -> (String, Option<String>) {
+    let trimmed = raw.trim();
+    let Some(marker_pos) = trimmed.find(QWEN_ASR_TEXT_MARKER) else {
+        return (trimmed.to_string(), None);
+    };
+
+    let prefix = trimmed[..marker_pos].trim();
+    let Some(language) = strip_ascii_case_prefix(prefix, "language") else {
+        return (trimmed.to_string(), None);
+    };
+    let language = language
+        .trim()
+        .trim_start_matches([':', '='])
+        .trim()
+        .to_string();
+    if language.is_empty() || language.contains('<') || language.len() > 64 {
+        return (trimmed.to_string(), None);
+    }
+
+    let mut body = trimmed[marker_pos + QWEN_ASR_TEXT_MARKER.len()..].trim();
+    if let Some(stripped) = body.strip_suffix("</asr_text>") {
+        body = stripped.trim();
+    }
+    (body.to_string(), Some(language))
+}
+
+fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    match value.get(..prefix.len()) {
+        Some(head) if head.eq_ignore_ascii_case(prefix) => Some(&value[prefix.len()..]),
+        _ => None,
+    }
+}
+
 /// 长录音自动切片转写（02 F-1 无时长硬上限）：
 /// 超过 provider 单次上限时在 VAD 静音处切片，分段转写后拼接，用户无感。
 pub async fn transcribe_auto_chunk(
@@ -96,4 +142,43 @@ pub async fn transcribe_auto_chunk(
         text: full_text,
         detected_language: detected,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qwen_asr_envelope_is_stripped() {
+        let t = transcript_from_provider_text("language Chinese<asr_text>你好。", None);
+        assert_eq!(t.text, "你好。");
+        assert_eq!(t.detected_language.as_deref(), Some("Chinese"));
+    }
+
+    #[test]
+    fn qwen_asr_envelope_allows_spacing_and_closing_tag() {
+        let t = transcript_from_provider_text(
+            " Language: Chinese \n<asr_text>  你好 Typex。 </asr_text> ",
+            None,
+        );
+        assert_eq!(t.text, "你好 Typex。");
+        assert_eq!(t.detected_language.as_deref(), Some("Chinese"));
+    }
+
+    #[test]
+    fn qwen_asr_marker_language_does_not_override_response_language() {
+        let t = transcript_from_provider_text(
+            "language Chinese<asr_text>你好。",
+            Some("zh".to_string()),
+        );
+        assert_eq!(t.text, "你好。");
+        assert_eq!(t.detected_language.as_deref(), Some("zh"));
+    }
+
+    #[test]
+    fn plain_transcript_is_only_trimmed() {
+        let t = transcript_from_provider_text("  language learning <asr_textless>  ", None);
+        assert_eq!(t.text, "language learning <asr_textless>");
+        assert_eq!(t.detected_language, None);
+    }
 }

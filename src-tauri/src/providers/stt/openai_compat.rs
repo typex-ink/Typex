@@ -1,7 +1,9 @@
 //! openai_compat STT（03 §2.1）：multipart POST {base_url}/audio/transcriptions。
 //! 覆盖 OpenAI / Groq / SiliconFlow / 自建（vLLM、speaches…）。
 
-use super::{AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript};
+use super::{
+    AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript, transcript_from_provider_text,
+};
 use crate::providers::{ProviderError, http};
 use std::collections::HashMap;
 
@@ -102,10 +104,7 @@ impl SttProvider for OpenAiCompatStt {
             let parsed: TranscriptionResponse = serde_json::from_str(&body).map_err(|e| {
                 ProviderError::InvalidRequest(format!("响应解析失败: {e}; body: {body}"))
             })?;
-            Ok(Transcript {
-                text: parsed.text,
-                detected_language: parsed.language,
-            })
+            Ok(transcript_from_provider_text(parsed.text, parsed.language))
         })
         .await
     }

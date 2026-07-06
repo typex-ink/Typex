@@ -9,7 +9,9 @@
 
 use crate::local::llm_llama::llama_backend;
 use crate::providers::ProviderError;
-use crate::providers::stt::{AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript};
+use crate::providers::stt::{
+    AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript, transcript_from_provider_text,
+};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
@@ -198,10 +200,7 @@ impl SttProvider for QwenAsrStt {
         let text = tokio::task::spawn_blocking(move || transcribe_blocking(&loaded, &samples))
             .await
             .map_err(|e| ProviderError::InvalidRequest(format!("转写线程异常: {e}")))??;
-        Ok(Transcript {
-            text: text.trim().to_string(),
-            detected_language: None, // Qwen3-ASR 不单独回报语种
-        })
+        Ok(transcript_from_provider_text(text, None))
     }
 
     fn capabilities(&self) -> SttCapabilities {
