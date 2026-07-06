@@ -129,7 +129,12 @@
     "assistant": {
       "prompt_label": "问答提示词（高级）",
       "prompt_hint": "占位符：{'{instruction}'} 语音指令 · {'{selection}'} 选中文本（可选）",
-      "ph_missing": "缺少必需占位符 {ph}"
+      "process_prompt_label": "选区处理提示词（高级）",
+      "process_prompt_hint": "占位符：{'{selection}'} 选中文本 · {'{instruction}'} 语音指令；回答型需输出 ANSWER:",
+      "ask_prompt_label": "问答提示词（高级）",
+      "ask_prompt_hint": "占位符：{'{instruction}'} 语音指令 · {'{selection}'} 选中文本（可选）",
+      "ph_missing": "缺少必需占位符 {ph}",
+      "ph_missing_list": "缺少必需占位符：{list}"
     },
     "providers": {
       "slot_stt": "语音转文字",

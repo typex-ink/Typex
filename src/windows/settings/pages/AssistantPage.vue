@@ -6,50 +6,130 @@ import FormRow from "@/components/FormRow.vue";
 import Button from "@/components/Button.vue";
 import { useSettingsStore } from "@/stores/settings";
 
+const PROCESS_DEFAULT = `你是文本处理引擎。用户选中了一段文本并口述了处理要求。
+若要求是对文本的加工（改写/翻译/精简/格式化等）：只输出加工后的文本本身，
+不解释、不寒暄，结果将直接替换原文；
+若要求实际上是就这段文本提问：以「ANSWER:」开头输出简洁回答。
+【选中文本】{selection}
+【处理要求】{instruction}`;
+
 const ASK_DEFAULT = `你是 Typex 语音助手。用户通过语音提出一个问题，这是单轮问答。
 回答应直接、简洁、可立即使用；默认使用用户提问的语言。
 用户当前选中的内容作为上下文：{selection}
 【问题】{instruction}`;
 
+type PromptKind = "process" | "ask";
+
+const PROMPTS = {
+  process: {
+    defaultTemplate: PROCESS_DEFAULT,
+    labelKey: "settings.assistant.process_prompt_label",
+    hintKey: "settings.assistant.process_prompt_hint",
+    required: ["{selection}", "{instruction}"],
+    rows: 8,
+  },
+  ask: {
+    defaultTemplate: ASK_DEFAULT,
+    labelKey: "settings.assistant.ask_prompt_label",
+    hintKey: "settings.assistant.ask_prompt_hint",
+    required: ["{instruction}"],
+    rows: 6,
+  },
+} satisfies Record<
+  PromptKind,
+  {
+    defaultTemplate: string;
+    labelKey: string;
+    hintKey: string;
+    required: string[];
+    rows: number;
+  }
+>;
+
 const { t } = useI18n();
 const store = useSettingsStore();
 
-const promptOpen = ref(false);
+const promptOpen = ref<PromptKind | null>(null);
 const draft = ref("");
-const missing = computed(() => !draft.value.includes("{instruction}"));
-function openEditor() {
-  draft.value = store.settings!.assistant.ask_prompt || ASK_DEFAULT;
-  promptOpen.value = true;
+const activePrompt = computed(() => (promptOpen.value ? PROMPTS[promptOpen.value] : PROMPTS.ask));
+const missing = computed(() => activePrompt.value.required.filter((p) => !draft.value.includes(p)));
+
+function openEditor(kind: PromptKind) {
+  const assistant = store.settings!.assistant;
+  draft.value =
+    (kind === "process" ? assistant.process_prompt : assistant.ask_prompt) ||
+    PROMPTS[kind].defaultTemplate;
+  promptOpen.value = kind;
+}
+function toggleEditor(kind: PromptKind) {
+  if (promptOpen.value === kind) {
+    promptOpen.value = null;
+    return;
+  }
+  openEditor(kind);
 }
 function save() {
-  if (missing.value) return;
-  const v = draft.value === ASK_DEFAULT ? "" : draft.value;
-  store.mutate((d) => void (d.assistant.ask_prompt = v));
-  promptOpen.value = false;
+  const kind = promptOpen.value;
+  if (!kind || missing.value.length) return;
+  const v = draft.value === PROMPTS[kind].defaultTemplate ? "" : draft.value;
+  store.mutate((d) => {
+    if (kind === "process") {
+      d.assistant.process_prompt = v;
+    } else {
+      d.assistant.ask_prompt = v;
+    }
+  });
+  promptOpen.value = null;
+}
+function restoreDefault() {
+  if (!promptOpen.value) return;
+  draft.value = PROMPTS[promptOpen.value].defaultTemplate;
 }
 </script>
 
 <template>
   <div>
     <h5 class="page-title">{{ t("settings.nav_assistant") }}</h5>
+
     <FormRow
-      v-if="!promptOpen"
-      :label="t('settings.assistant.prompt_label')"
-      :hint="t('settings.assistant.prompt_hint')"
+      :label="t('settings.assistant.process_prompt_label')"
+      :hint="t('settings.assistant.process_prompt_hint')"
     >
-      <Button variant="ghost" size="sm" @click="openEditor">{{ t("prompt.expand") }}</Button>
+      <Button variant="ghost" size="sm" @click="toggleEditor('process')">
+        {{ t(promptOpen === "process" ? "prompt.collapse" : "prompt.expand") }}
+      </Button>
     </FormRow>
-    <template v-else>
-      <FormRow :label="t('settings.assistant.prompt_label')">
-        <Button variant="ghost" size="sm" @click="promptOpen = false">{{ t("prompt.collapse") }}</Button>
-      </FormRow>
-      <textarea v-model="draft" class="ta" rows="6" spellcheck="false" />
-      <p v-if="missing" class="ph-error">
-        {{ t("settings.assistant.ph_missing", { ph: "{instruction}" }) }}
+    <template v-if="promptOpen === 'process'">
+      <textarea v-model="draft" class="ta" :rows="activePrompt.rows" spellcheck="false" />
+      <p v-if="missing.length" class="ph-error">
+        {{ t("settings.assistant.ph_missing_list", { list: missing.join(" · ") }) }}
       </p>
       <div class="editor-actions">
-        <Button variant="primary" size="sm" :disabled="missing" @click="save">{{ t("actions.save") }}</Button>
-        <Button size="sm" @click="draft = ASK_DEFAULT">{{ t("actions.restore_default") }}</Button>
+        <Button variant="primary" size="sm" :disabled="missing.length > 0" @click="save">
+          {{ t("actions.save") }}
+        </Button>
+        <Button size="sm" @click="restoreDefault">{{ t("actions.restore_default") }}</Button>
+      </div>
+    </template>
+
+    <FormRow
+      :label="t('settings.assistant.ask_prompt_label')"
+      :hint="t('settings.assistant.ask_prompt_hint')"
+    >
+      <Button variant="ghost" size="sm" @click="toggleEditor('ask')">
+        {{ t(promptOpen === "ask" ? "prompt.collapse" : "prompt.expand") }}
+      </Button>
+    </FormRow>
+    <template v-if="promptOpen === 'ask'">
+      <textarea v-model="draft" class="ta" :rows="activePrompt.rows" spellcheck="false" />
+      <p v-if="missing.length" class="ph-error">
+        {{ t("settings.assistant.ph_missing_list", { list: missing.join(" · ") }) }}
+      </p>
+      <div class="editor-actions">
+        <Button variant="primary" size="sm" :disabled="missing.length > 0" @click="save">
+          {{ t("actions.save") }}
+        </Button>
+        <Button size="sm" @click="restoreDefault">{{ t("actions.restore_default") }}</Button>
       </div>
     </template>
   </div>
