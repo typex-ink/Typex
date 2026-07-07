@@ -61,8 +61,55 @@ impl From<ProviderError> for TypexError {
             ProviderError::Server { .. } => ErrorCode::ServerError,
             ProviderError::Network(_) => ErrorCode::NetworkError,
         };
-        TypexError::new(code, e.to_string())
+        TypexError::new(code, e.user_message())
     }
+}
+
+impl ProviderError {
+    fn user_message(&self) -> String {
+        match self {
+            ProviderError::Auth(body)
+            | ProviderError::RateLimited(body)
+            | ProviderError::InvalidRequest(body) => {
+                upstream_error_message(body).unwrap_or_else(|| self.to_string())
+            }
+            ProviderError::Server { body, .. } => {
+                upstream_error_message(body).unwrap_or_else(|| self.to_string())
+            }
+            ProviderError::Timeout | ProviderError::Network(_) => self.to_string(),
+        }
+    }
+}
+
+fn upstream_error_message(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    for line in trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let candidate = line.strip_prefix("data:").map(str::trim).unwrap_or(line);
+        if !candidate.starts_with('{') {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate) {
+            if let Some(msg) = v
+                .pointer("/error/message")
+                .and_then(|x| x.as_str())
+                .or_else(|| v.pointer("/message").and_then(|x| x.as_str()))
+                .or_else(|| v.pointer("/error").and_then(|x| x.as_str()))
+            {
+                let msg = msg.trim();
+                if !msg.is_empty() {
+                    return Some(msg.to_string());
+                }
+            }
+        }
+    }
+    Some(trimmed.to_string())
 }
 
 #[cfg(test)]
@@ -75,10 +122,9 @@ mod tests {
             ProviderError::from_status(401, String::new()),
             ProviderError::Auth(_)
         ));
-        assert!(matches!(
-            ProviderError::from_status(403, String::new()),
-            ProviderError::Auth(_)
-        ));
+        let forbidden = ProviderError::from_status(403, "forbidden".into());
+        assert!(matches!(forbidden, ProviderError::Auth(_)));
+        assert!(!forbidden.retryable());
         assert!(matches!(
             ProviderError::from_status(429, String::new()),
             ProviderError::RateLimited(_)
@@ -111,5 +157,22 @@ mod tests {
         );
         assert!(ProviderError::Network(String::new()).retryable());
         assert!(ProviderError::Timeout.retryable());
+    }
+
+    #[test]
+    fn typex_error_uses_upstream_error_message() {
+        let body = r#"{"error":{"message":"client group denied","type":"forbidden_error"}}"#;
+        let err: TypexError = ProviderError::from_status(403, body.into()).into();
+        assert_eq!(err.code, ErrorCode::AuthError);
+        assert_eq!(err.message, "client group denied");
+    }
+
+    #[test]
+    fn upstream_message_parser_handles_sse_data_line() {
+        let body = "event: error\ndata: {\"error\":{\"message\":\"upstream failed\"}}\n\n";
+        assert_eq!(
+            upstream_error_message(body).as_deref(),
+            Some("upstream failed")
+        );
     }
 }

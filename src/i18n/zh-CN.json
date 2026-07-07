@@ -1,6 +1,6 @@
 {
   "error": {
-    "auth_error": "API 密钥无效（401）",
+    "auth_error": "鉴权或访问被拒（401/403）",
     "network_error": "无法连接 API，请检查网络",
     "timeout": "服务响应超时",
     "rate_limited": "请求过于频繁（429），稍后自动重试",
@@ -187,7 +187,7 @@
       "testing": "测试中…",
       "fill_form": "请先完整填写表单",
       "test_pass": "✓ 测试通过 · {ms}ms",
-      "err_auth_error": "密钥无效（401）——请检查 API 密钥",
+      "err_auth_error": "鉴权或访问被拒（401/403）——请检查密钥、账户权限或客户端分组",
       "err_network_error": "无法连接——请检查网络与端点地址",
       "err_timeout": "响应超时——端点可能不可达",
       "err_invalid_request": "请求被拒（404/400）——请检查 Base URL 与模型名",
@@ -356,7 +356,7 @@
       "unconfigured": "未配置",
       "unconfigured_hint": "此槽位尚未连接任何服务",
       "configure": "配置…",
-      "err_auth_error": "密钥无效（401）",
+      "err_auth_error": "鉴权/访问被拒（401/403）",
       "err_network_error": "无法连接",
       "err_timeout": "超时",
       "err_not_configured": "未配置",

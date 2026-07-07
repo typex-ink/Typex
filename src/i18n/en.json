@@ -1,6 +1,6 @@
 {
   "error": {
-    "auth_error": "Invalid API key (401)",
+    "auth_error": "Authentication or access denied (401/403)",
     "network_error": "Cannot reach the API — check your network",
     "timeout": "The service timed out",
     "rate_limited": "Rate limited (429), retrying automatically",
@@ -187,7 +187,7 @@
       "testing": "Testing…",
       "fill_form": "Please complete the form first",
       "test_pass": "✓ Passed · {ms}ms",
-      "err_auth_error": "Invalid key (401) — check your API key",
+      "err_auth_error": "Authentication or access denied (401/403) — check the key, account permissions, or client group",
       "err_network_error": "Cannot connect — check your network and endpoint",
       "err_timeout": "Timed out — the endpoint may be unreachable",
       "err_invalid_request": "Rejected (404/400) — check the base URL and model name",
@@ -356,7 +356,7 @@
       "unconfigured": "Not configured",
       "unconfigured_hint": "No service connected to this slot yet",
       "configure": "Configure…",
-      "err_auth_error": "Invalid key (401)",
+      "err_auth_error": "Auth/access denied (401/403)",
       "err_network_error": "Cannot connect",
       "err_timeout": "Timed out",
       "err_not_configured": "Not configured",

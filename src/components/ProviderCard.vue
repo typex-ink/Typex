@@ -37,7 +37,8 @@ async function runTest() {
     testResult.value = `✓ ${r.data}ms`;
     testError.value = false;
   } else {
-    testResult.value = errText(r.error.code);
+    const upstream = r.error.message?.trim();
+    testResult.value = `${errText(r.error.code)}${upstream ? `：${upstream}` : ""}`;
     testError.value = true;
   }
 }
@@ -157,6 +158,9 @@ function errText(code: string): string {
 .lat.err {
   color: var(--error);
   border-color: var(--error);
+  max-width: min(360px, 42vw);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .switch-wrap {
   position: relative;

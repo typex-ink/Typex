@@ -222,7 +222,8 @@ async function testConnection() {
       not_configured: "settings.profile.err_not_configured",
     };
     const key = KEYS[r.error.code];
-    testResult.value = `✗ ${key ? t(key) : r.error.code}`;
+    const upstream = r.error.message?.trim();
+    testResult.value = `✗ ${key ? t(key) : r.error.code}${upstream ? `：${upstream}` : ""}`;
     testOk.value = false;
   }
 }
@@ -420,6 +421,8 @@ onUnmounted(() => unlistenProgress?.());
   margin-top: 10px;
   font-size: 12px;
   color: var(--error);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .test-result.ok {
   color: var(--success);

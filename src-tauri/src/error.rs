@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
-    /// 密钥无效（401/403）——不重试，引导检查密钥
+    /// 鉴权/访问控制失败（401/403）——不重试，引导检查密钥、权限、客户端分组
     AuthError,
     /// 网络不可达 / DNS / 连接被拒
     NetworkError,
