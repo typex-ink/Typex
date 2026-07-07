@@ -71,11 +71,11 @@ function makeSettings(): Settings {
   } as Settings;
 }
 
-function mountPage() {
+function mountPage(settings = makeSettings()) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const store = useSettingsStore();
-  store.settings = makeSettings();
+  store.settings = settings;
   return mount(ProvidersPage, {
     global: { plugins: [pinia, makeI18n("zh-CN")] },
   });
@@ -106,5 +106,28 @@ describe("ProvidersPage", () => {
     await deepseek.trigger("click");
 
     expect(commands.activateProfile).toHaveBeenCalledWith("assistant", "llm-deepseek");
+  });
+
+  it("未配置功能点击配置时先选择已有兼容服务", async () => {
+    const settings = makeSettings();
+    settings.slots.assistant = { active_profile: null };
+    const wrapper = mountPage(settings);
+
+    const configure = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("配置"))!;
+    await configure.trigger("click");
+
+    const menu = wrapper.find(".menu");
+    expect(menu.text()).toContain("DeepSeek");
+    expect(menu.text()).toContain("Claude");
+    expect(menu.text()).not.toContain("Groq STT");
+
+    const claude = menu
+      .findAll(".it")
+      .find((item) => item.text().includes("Claude"))!;
+    await claude.trigger("click");
+
+    expect(commands.activateProfile).toHaveBeenCalledWith("assistant", "llm-claude");
   });
 });

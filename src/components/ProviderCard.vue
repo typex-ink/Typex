@@ -51,6 +51,24 @@ function errText(code: string): string {
   const key = `components.provider_card.err_${code}`;
   return `✗ ${te(key) ? t(key) : code}`;
 }
+
+function chooseProfile(profileId: string) {
+  switchOpen.value = false;
+  if (props.profile?.id !== profileId) emit("switch", profileId);
+}
+
+function createProfile() {
+  switchOpen.value = false;
+  emit("create");
+}
+
+function configureEmpty() {
+  if (showSwitch.value) {
+    switchOpen.value = !switchOpen.value;
+  } else {
+    emit("create");
+  }
+}
 </script>
 
 <template>
@@ -78,21 +96,12 @@ function errText(code: string): string {
             :key="alt.id"
             class="it"
             :class="{ cur: alt.id === profile.id }"
-            @click="
-              switchOpen = false;
-              if (alt.id !== profile.id) emit('switch', alt.id);
-            "
+            @click="chooseProfile(alt.id)"
           >
             <span>{{ alt.id === profile.id ? "✓ " : "　" }}{{ alt.label }}</span>
           </div>
           <hr />
-          <div
-            class="it"
-            @click="
-              switchOpen = false;
-              emit('create');
-            "
-          >
+          <div class="it" @click="createProfile">
             <span>{{ t("components.provider_card.new_config") }}</span>
           </div>
         </div>
@@ -104,7 +113,27 @@ function errText(code: string): string {
         <b class="unconfigured">{{ t("components.provider_card.unconfigured") }}</b><br />
         <small>{{ t("components.provider_card.unconfigured_hint") }}</small>
       </div>
-      <Button variant="primary" size="sm" @click="emit('create')">{{ t("components.provider_card.configure") }}</Button>
+      <span class="switch-wrap">
+        <Button variant="primary" size="sm" @click="configureEmpty">
+          {{ t("components.provider_card.configure") }}
+        </Button>
+        <div v-if="showSwitch && switchOpen" class="menu">
+          <div class="st">{{ t("components.provider_card.switch_menu") }}</div>
+          <hr />
+          <div
+            v-for="alt in alternatives"
+            :key="alt.id"
+            class="it"
+            @click="chooseProfile(alt.id)"
+          >
+            <span>　{{ alt.label }}</span>
+          </div>
+          <hr />
+          <div class="it" @click="createProfile">
+            <span>{{ t("components.provider_card.new_config") }}</span>
+          </div>
+        </div>
+      </span>
     </template>
   </div>
 </template>
