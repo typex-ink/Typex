@@ -363,6 +363,7 @@
       "unconfigured": "未配置",
       "unconfigured_hint": "此槽位尚未连接任何服务",
       "configure": "配置…",
+      "configure_select": "配置",
       "err_auth_error": "鉴权/访问被拒（401/403）",
       "err_network_error": "无法连接",
       "err_timeout": "超时",

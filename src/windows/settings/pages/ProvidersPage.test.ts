@@ -116,7 +116,9 @@ describe("ProvidersPage", () => {
     const configure = wrapper
       .findAll("button")
       .find((button) => button.text().includes("配置"))!;
+    expect(configure.text()).toContain("▾");
     await configure.trigger("click");
+    expect(configure.text()).toContain("▴");
 
     const menu = wrapper.find(".menu");
     expect(menu.text()).toContain("DeepSeek");

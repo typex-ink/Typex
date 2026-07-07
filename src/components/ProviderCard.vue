@@ -30,6 +30,11 @@ const testResult = ref<string | null>(null);
 const testError = ref(false);
 const switchOpen = ref(false);
 const showSwitch = computed(() => props.alternatives.length > 0);
+const configureText = computed(() =>
+  showSwitch.value
+    ? `${t("components.provider_card.configure_select")} ${switchOpen.value ? "▴" : "▾"}`
+    : t("components.provider_card.configure"),
+);
 
 async function runTest() {
   if (!props.profile) return;
@@ -115,7 +120,7 @@ function configureEmpty() {
       </div>
       <span class="switch-wrap">
         <Button variant="primary" size="sm" @click="configureEmpty">
-          {{ t("components.provider_card.configure") }}
+          {{ configureText }}
         </Button>
         <div v-if="showSwitch && switchOpen" class="menu">
           <div class="st">{{ t("components.provider_card.switch_menu") }}</div>

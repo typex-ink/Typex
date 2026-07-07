@@ -363,6 +363,7 @@
       "unconfigured": "Not configured",
       "unconfigured_hint": "No service connected to this slot yet",
       "configure": "Configure…",
+      "configure_select": "Configure",
       "err_auth_error": "Auth/access denied (401/403)",
       "err_network_error": "Cannot connect",
       "err_timeout": "Timed out",
