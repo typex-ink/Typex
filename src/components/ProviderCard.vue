@@ -94,8 +94,6 @@ function configureEmpty() {
           {{ t("actions.switch") }} {{ switchOpen ? "▴" : "▾" }}
         </Button>
         <div v-if="switchOpen" class="menu">
-          <div class="st">{{ t("components.provider_card.switch_menu") }}</div>
-          <hr />
           <div
             v-for="alt in alternatives"
             :key="alt.id"
@@ -123,8 +121,6 @@ function configureEmpty() {
           {{ configureText }}
         </Button>
         <div v-if="showSwitch && switchOpen" class="menu">
-          <div class="st">{{ t("components.provider_card.switch_menu") }}</div>
-          <hr />
           <div
             v-for="alt in alternatives"
             :key="alt.id"
@@ -215,11 +211,6 @@ function configureEmpty() {
   padding: 5px;
   font-size: 12.5px;
   z-index: 10;
-}
-.menu .st {
-  padding: 6px 10px;
-  color: var(--text-2);
-  font-size: 12px;
 }
 .menu hr {
   border: none;

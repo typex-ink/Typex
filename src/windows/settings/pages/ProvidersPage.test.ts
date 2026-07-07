@@ -99,6 +99,7 @@ describe("ProvidersPage", () => {
     expect(menu.text()).toContain("DeepSeek");
     expect(menu.text()).toContain("Claude");
     expect(menu.text()).not.toContain("Groq STT");
+    expect(menu.text()).not.toContain("切换配置档案");
 
     const deepseek = menu
       .findAll(".it")
@@ -124,6 +125,7 @@ describe("ProvidersPage", () => {
     expect(menu.text()).toContain("DeepSeek");
     expect(menu.text()).toContain("Claude");
     expect(menu.text()).not.toContain("Groq STT");
+    expect(menu.text()).not.toContain("切换配置档案");
 
     const claude = menu
       .findAll(".it")
