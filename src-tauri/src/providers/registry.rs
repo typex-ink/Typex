@@ -1,7 +1,7 @@
 //! ProviderRegistry：由配置构造 provider 实例（03 §5 / 07 §5.1）。
 //!
 //! - 按 profile-id 惰性构建 + 缓存；settings 变更时失效重建
-//! - 密钥经 SecretStore 解析（keyring:// 引用 → 明文只在内存）
+//! - 密钥从 profile.credentials 读取；日志与诊断导出必须脱敏
 
 use crate::error::{ErrorCode, Result, TypexError};
 use crate::providers::http;
@@ -12,13 +12,11 @@ use crate::providers::stt::{
     SttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
 };
 use crate::settings::schema::Settings;
-use crate::settings::secrets::SecretStore;
 use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct ProviderRegistry {
-    secrets: Arc<dyn SecretStore>,
     /// profile-id → 已构建实例
     stt_cache: Mutex<HashMap<String, Arc<dyn SttProvider>>>,
     llm_cache: Mutex<HashMap<String, Arc<dyn LlmProvider>>>,
@@ -94,9 +92,8 @@ fn supports_enable_thinking_param(profile: &ProviderProfile) -> bool {
 }
 
 impl ProviderRegistry {
-    pub fn new(settings: Settings, secrets: Arc<dyn SecretStore>) -> Self {
+    pub fn new(settings: Settings) -> Self {
         Self {
-            secrets,
             stt_cache: Mutex::new(HashMap::new()),
             llm_cache: Mutex::new(HashMap::new()),
             settings: Mutex::new(settings),
@@ -219,13 +216,24 @@ impl ProviderRegistry {
     }
 
     fn resolve_secret(&self, profile: &ProviderProfile, field: &str) -> Result<String> {
-        let reference = profile.credentials.get(field).ok_or_else(|| {
-            TypexError::new(
+        let secret = profile
+            .credentials
+            .get(field)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                TypexError::new(
+                    ErrorCode::NotConfigured,
+                    format!("档案 {} 缺少凭据 {field}", profile.id),
+                )
+            })?;
+        if secret.starts_with("keyring://") {
+            return Err(TypexError::new(
                 ErrorCode::NotConfigured,
-                format!("档案 {} 缺少凭据 {field}", profile.id),
-            )
-        })?;
-        self.secrets.get(reference)
+                format!("档案 {} 使用旧版凭据引用，请重新保存 {field}", profile.id),
+            ));
+        }
+        Ok(secret.to_string())
     }
 
     fn http_client(&self, timeout_ms: u64) -> reqwest::Client {
@@ -431,7 +439,6 @@ impl ProviderRegistry {
 mod tests {
     use super::*;
     use crate::settings::schema::SlotConfig;
-    use crate::settings::secrets::MemoryStore;
 
     fn profile(id: &str, kind: ProviderKind) -> ProviderProfile {
         ProviderProfile {
@@ -441,11 +448,7 @@ mod tests {
             label: id.into(),
             base_url: "https://api.example.com/v1".into(),
             model: "m".into(),
-            credentials: [(
-                "api_key".to_string(),
-                format!("keyring://typex/stt/{id}/api_key"),
-            )]
-            .into(),
+            credentials: [("api_key".to_string(), format!("sk-{id}"))].into(),
             extra_headers: HashMap::new(),
             extra_form: HashMap::new(),
             timeout_ms: 30_000,
@@ -461,11 +464,7 @@ mod tests {
             label: id.into(),
             base_url: base_url.into(),
             model: "Qwen/Qwen3-14B".into(),
-            credentials: [(
-                "api_key".to_string(),
-                format!("keyring://typex/llm/{id}/api_key"),
-            )]
-            .into(),
+            credentials: [("api_key".to_string(), format!("sk-{id}"))].into(),
             extra_headers: HashMap::new(),
             extra_form: HashMap::new(),
             timeout_ms: 30_000,
@@ -473,11 +472,7 @@ mod tests {
         }
     }
 
-    fn setup() -> (ProviderRegistry, Arc<MemoryStore>) {
-        let secrets = Arc::new(MemoryStore::default());
-        secrets
-            .set("keyring://typex/stt/p1/api_key", "sk-1")
-            .unwrap();
+    fn setup() -> ProviderRegistry {
         let mut s = Settings::default();
         s.profiles.push(profile("p1", ProviderKind::OpenaiCompat));
         s.slots.insert(
@@ -486,12 +481,12 @@ mod tests {
                 active_profile: Some("p1".into()),
             },
         );
-        (ProviderRegistry::new(s, secrets.clone()), secrets)
+        ProviderRegistry::new(s)
     }
 
     #[test]
     fn stt_for_builds_and_caches() {
-        let (reg, _) = setup();
+        let reg = setup();
         let a = reg.stt_for(SlotKind::Stt).unwrap();
         let b = reg.stt_for(SlotKind::Stt).unwrap();
         assert!(Arc::ptr_eq(&a, &b)); // 缓存命中
@@ -499,7 +494,7 @@ mod tests {
 
     #[test]
     fn unconfigured_slot_yields_not_configured() {
-        let (reg, _) = setup();
+        let reg = setup();
         let err = match reg.llm_for(SlotKind::Assistant) {
             Err(e) => e,
             Ok(_) => panic!("expected error"),
@@ -509,22 +504,44 @@ mod tests {
 
     #[test]
     fn missing_secret_is_error_not_panic() {
-        let secrets = Arc::new(MemoryStore::default()); // 没存密钥
         let mut s = Settings::default();
-        s.profiles.push(profile("p1", ProviderKind::OpenaiCompat));
+        let mut p = profile("p1", ProviderKind::OpenaiCompat);
+        p.credentials.clear();
+        s.profiles.push(p);
         s.slots.insert(
             SlotKind::Stt,
             SlotConfig {
                 active_profile: Some("p1".into()),
             },
         );
-        let reg = ProviderRegistry::new(s, secrets);
+        let reg = ProviderRegistry::new(s);
         assert!(reg.stt_for(SlotKind::Stt).is_err());
     }
 
     #[test]
+    fn legacy_keyring_secret_is_not_treated_as_api_key() {
+        let mut s = Settings::default();
+        let mut p = profile("p1", ProviderKind::OpenaiCompat);
+        p.credentials
+            .insert("api_key".into(), "keyring://typex/stt/p1/api_key".into());
+        s.profiles.push(p);
+        s.slots.insert(
+            SlotKind::Stt,
+            SlotConfig {
+                active_profile: Some("p1".into()),
+            },
+        );
+        let reg = ProviderRegistry::new(s);
+        let err = match reg.stt_for(SlotKind::Stt) {
+            Err(e) => e,
+            Ok(_) => panic!("旧 keyring 引用不应被当作明文密钥"),
+        };
+        assert_eq!(err.code, ErrorCode::NotConfigured);
+    }
+
+    #[test]
     fn settings_change_invalidates_only_affected_profile() {
-        let (reg, _) = setup();
+        let reg = setup();
         let a = reg.stt_for(SlotKind::Stt).unwrap();
 
         // 无关变更：缓存保留
@@ -543,10 +560,6 @@ mod tests {
 
     #[test]
     fn same_llm_profile_can_back_multiple_slots() {
-        let secrets = Arc::new(MemoryStore::default());
-        secrets
-            .set("keyring://typex/llm/shared/api_key", "sk-llm")
-            .unwrap();
         let mut s = Settings::default();
         s.profiles
             .push(llm_profile("shared", "https://api.example.com/v1"));
@@ -558,7 +571,7 @@ mod tests {
                 },
             );
         }
-        let reg = ProviderRegistry::new(s, secrets);
+        let reg = ProviderRegistry::new(s);
 
         let translate = reg.llm_for(SlotKind::Translate).unwrap();
         let assistant = reg.llm_for(SlotKind::Assistant).unwrap();
@@ -567,7 +580,7 @@ mod tests {
 
     #[test]
     fn incompatible_profile_slot_is_rejected() {
-        let (reg, _) = setup();
+        let reg = setup();
         let err = match reg.llm_for(SlotKind::Assistant) {
             Err(e) => e,
             Ok(_) => panic!("STT 档案不应可用于 LLM 槽"),
@@ -683,7 +696,7 @@ mod tests {
     /// ADR-20：问答槽无本地兜底——未配置一律 NotConfigured。
     #[test]
     fn assistant_slot_has_no_local_fallback() {
-        let (reg, _) = setup(); // 仅配置了 Stt 槽
+        let reg = setup(); // 仅配置了 Stt 槽
         let err = match reg.llm_for(SlotKind::Assistant) {
             Err(e) => e,
             Ok(_) => panic!("Assistant 槽不应有兜底"),
@@ -694,8 +707,7 @@ mod tests {
     /// ADR-20：模型目录未注入 / 未下载时兜底同样报 NotConfigured（不 panic）。
     #[test]
     fn unconfigured_stt_without_local_models_is_not_configured() {
-        let secrets = Arc::new(MemoryStore::default());
-        let reg = ProviderRegistry::new(Settings::default(), secrets);
+        let reg = ProviderRegistry::new(Settings::default());
         let err = match reg.stt_for(SlotKind::Stt) {
             Err(e) => e,
             Ok(_) => panic!("未配置且无模型时不应成功"),
@@ -706,8 +718,7 @@ mod tests {
     #[cfg(feature = "local-models")]
     #[test]
     fn local_llm_build_does_not_require_api_key() {
-        let secrets = Arc::new(MemoryStore::default());
-        let reg = ProviderRegistry::new(Settings::default(), secrets);
+        let reg = ProviderRegistry::new(Settings::default());
         let data_dir = tempfile::tempdir().unwrap();
         reg.set_models_data_dir(data_dir.path().to_path_buf());
 

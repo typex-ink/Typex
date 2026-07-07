@@ -7,7 +7,6 @@ use crate::inject::InjectorChain;
 use crate::orchestrator::Orchestrator;
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
-use crate::settings::secrets::{KeyringStore, SecretStore};
 use futures_util::FutureExt;
 use std::sync::Arc;
 use tauri::Manager;
@@ -98,41 +97,37 @@ pub fn run() {
             let audio = Arc::new(AudioService::new());
             let injector = Arc::new(InjectorChain::platform_default(s.dictation.paste_delay_ms));
 
-            // ProviderRegistry + keyring（CP-1.6）
-            let secrets: Arc<dyn SecretStore> = Arc::new(KeyringStore);
+            // ProviderRegistry（CP-1.6）
             // 开发便利：TYPEX_STT_API_KEY 环境变量 → 自动建/更新 env-stt 档案
             if let Ok(key) = std::env::var("TYPEX_STT_API_KEY") {
                 let base = std::env::var("TYPEX_STT_BASE_URL")
                     .unwrap_or_else(|_| "https://api.groq.com/openai/v1".into());
                 let model = std::env::var("TYPEX_STT_MODEL")
                     .unwrap_or_else(|_| "whisper-large-v3-turbo".into());
-                let secret_ref = crate::settings::secrets::make_ref("stt", "env-stt", "api_key");
-                if secrets.set(&secret_ref, &key).is_ok() {
-                    let _ = settings.mutate(|st| {
-                        st.profiles.retain(|p| p.id != "env-stt");
-                        st.profiles.push(crate::types::ProviderProfile {
-                            id: "env-stt".into(),
-                            capability: crate::types::ProviderCapability::Stt,
-                            kind: crate::types::ProviderKind::OpenaiCompat,
-                            label: "环境变量 STT".into(),
-                            base_url: base,
-                            model,
-                            credentials: [("api_key".to_string(), secret_ref.clone())].into(),
-                            extra_headers: Default::default(),
-                            extra_form: Default::default(),
-                            timeout_ms: 30_000,
-                            options: Default::default(),
-                        });
-                        st.slots.insert(
-                            crate::types::SlotKind::Stt,
-                            crate::settings::schema::SlotConfig {
-                                active_profile: Some("env-stt".into()),
-                            },
-                        );
+                let _ = settings.mutate(|st| {
+                    st.profiles.retain(|p| p.id != "env-stt");
+                    st.profiles.push(crate::types::ProviderProfile {
+                        id: "env-stt".into(),
+                        capability: crate::types::ProviderCapability::Stt,
+                        kind: crate::types::ProviderKind::OpenaiCompat,
+                        label: "环境变量 STT".into(),
+                        base_url: base,
+                        model,
+                        credentials: [("api_key".to_string(), key.trim().to_string())].into(),
+                        extra_headers: Default::default(),
+                        extra_form: Default::default(),
+                        timeout_ms: 30_000,
+                        options: Default::default(),
                     });
-                }
+                    st.slots.insert(
+                        crate::types::SlotKind::Stt,
+                        crate::settings::schema::SlotConfig {
+                            active_profile: Some("env-stt".into()),
+                        },
+                    );
+                });
             }
-            let registry = Arc::new(ProviderRegistry::new(settings.get(), secrets.clone()));
+            let registry = Arc::new(ProviderRegistry::new(settings.get()));
             // v1.1 本地模型（ADR-20 零配置兜底）：注入模型存储根
             #[cfg(feature = "local-models")]
             if let Ok(d) = app.path().app_data_dir() {
@@ -376,7 +371,6 @@ pub fn run() {
             let settings_for_onboarding = settings.clone();
             app.manage(settings);
             app.manage(registry);
-            app.manage(secrets);
 
             // 托盘
             crate::app::tray::setup(app.handle())?;

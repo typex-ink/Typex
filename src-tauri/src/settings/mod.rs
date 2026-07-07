@@ -1,14 +1,13 @@
 //! SettingsService：读写、校验、变更广播（07 §5.1 / §9）。
 pub mod migrate;
 pub mod schema;
-pub mod secrets;
 
 use crate::error::{ErrorCode, Result, TypexError};
 use schema::Settings;
 use std::path::PathBuf;
 use tokio::sync::watch;
 
-/// 设置服务：JSON 落盘（无密钥明文）+ watch 广播。
+/// 设置服务：JSON 落盘 + watch 广播。
 pub struct SettingsService {
     path: PathBuf,
     tx: watch::Sender<Settings>,

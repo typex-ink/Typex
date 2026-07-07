@@ -11,6 +11,7 @@ pub fn migrate(mut value: Value) -> Value {
     if version < 2 {
         migrate_v1_to_v2(&mut value);
     }
+    drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
         obj.insert(
             "schema_version".into(),
@@ -51,6 +52,25 @@ fn migrate_v1_to_v2(value: &mut Value) {
     }
 }
 
+fn drop_legacy_keyring_credentials(value: &mut Value) {
+    let Some(profiles) = value.get_mut("profiles").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for profile in profiles {
+        let Some(credentials) = profile
+            .get_mut("credentials")
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        credentials.retain(|_, value| {
+            value
+                .as_str()
+                .is_none_or(|secret| !secret.trim().starts_with("keyring://"))
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +105,31 @@ mod tests {
         let migrated = migrate(value);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
+    }
+
+    #[test]
+    fn legacy_keyring_credentials_are_dropped() {
+        let value = serde_json::json!({
+            "schema_version": 2,
+            "profiles": [
+                {
+                    "id": "llm",
+                    "capability": "llm",
+                    "credentials": {
+                        "api_key": " keyring://typex/llm/llm/api_key ",
+                        "other": "sk-plain"
+                    }
+                }
+            ]
+        });
+
+        let migrated = migrate(value);
+
+        assert!(
+            migrated["profiles"][0]["credentials"]
+                .get("api_key")
+                .is_none()
+        );
+        assert_eq!(migrated["profiles"][0]["credentials"]["other"], "sk-plain");
     }
 }

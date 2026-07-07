@@ -37,7 +37,6 @@ rubato = "0.16"
 hound = "3.5"
 arboard = "3"
 enigo = "0.6"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # Provider HTTP
 async-trait = "0.1"

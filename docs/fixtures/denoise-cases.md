@@ -78,7 +78,7 @@
 | E9 | 会议纪要冒号，换行，参会人张三李四 | 含「会议纪要：」+ 换行 |
 | E10 | bullet points: apples bananas oranges | 三项列表 |
 
-## F. 专有名词保留（≥10）
+## F. 专有名词保留与 ASR 纠错（≥12）
 
 | # | 输入 | 期望要点 |
 |---|---|---|
@@ -92,6 +92,8 @@
 | F8 | 这个 PR 里有三个 commit | 含「PR」「commit」 |
 | F9 | whisper-large-v3-turbo 的延迟很低 | 模型名原样保留（连字符不丢） |
 | F10 | 部署在 Ubuntu 22.04 上 | 含「Ubuntu 22.04」 |
+| F11 | 我们用瑞艾克特和 VS 扣的写这个 APP | 含「React」「VS Code」「App」；中文与英文之间有空格 |
+| F12 | 给它哈布上的加瓦项目要迁到 my sequel | 含「GitHub」「Java」「MySQL」 |
 
 ## G. 反向约束：不得过度改写（宁欠勿过，ADR-2）
 

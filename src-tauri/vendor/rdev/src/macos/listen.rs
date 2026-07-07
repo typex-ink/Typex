@@ -5,8 +5,10 @@ use cocoa::base::nil;
 use cocoa::foundation::NSAutoreleasePool;
 use core_graphics::event::{CGEventTapLocation, CGEventType};
 use std::os::raw::c_void;
+use std::ptr;
 
 static mut GLOBAL_CALLBACK: Option<Box<dyn FnMut(Event)>> = None;
+static mut EVENT_TAP: CFMachPortRef = ptr::null();
 
 #[link(name = "Cocoa", kind = "framework")]
 extern "C" {}
@@ -17,6 +19,16 @@ unsafe extern "C" fn raw_callback(
     cg_event: CGEventRef,
     _user_info: *mut c_void,
 ) -> CGEventRef {
+    match _type {
+        CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
+            let tap = EVENT_TAP;
+            if !tap.is_null() {
+                CGEventTapEnable(tap, true);
+            }
+            return cg_event;
+        }
+        _ => {}
+    }
     // println!("Event ref {:?}", cg_event_ptr);
     // let cg_event: CGEvent = transmute_copy::<*mut c_void, CGEvent>(&cg_event_ptr);
     let opt = KEYBOARD_STATE.lock();
@@ -50,6 +62,7 @@ where
         if tap.is_null() {
             return Err(ListenError::EventTapError);
         }
+        EVENT_TAP = tap;
         let _loop = CFMachPortCreateRunLoopSource(nil, tap, 0);
         if _loop.is_null() {
             return Err(ListenError::LoopSourceError);

@@ -31,6 +31,7 @@
 | A18 | 快递明天上午送到，记得有人签收 | 含 "tomorrow morning"（或 "tomorrow"）；无中文 |
 | A19 | 用户反馈登录页面偶尔白屏 | 含 "login"；无中文 |
 | A20 | 价格含税一共是三千二百块 | 含 "3,200"（或 "3200"）、"tax"；无中文 |
+| A21 | 我们用瑞艾克特重构了这个 APP | 含 "React"、"App"、"refactor"（或 "rewrote"）；无中文 |
 
 ## B. EN → 中（双向自动判向，≥20）
 
@@ -58,6 +59,7 @@
 | B18 | the package will arrive tomorrow morning | 含「明天上午」（或「明早」） |
 | B19 | users report a blank screen on the login page sometimes | 含「白屏」（或「空白」）「登录」 |
 | B20 | the total is three thousand two hundred including tax | 含「三千二」（或「3200」）「含税」 |
+| B21 | fix the my sequel connection in VS code | 含「MySQL」「VS Code」「连接」 |
 
 ## C. 结构保留（验收标准 3 专项）
 

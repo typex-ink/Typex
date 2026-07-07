@@ -2,8 +2,8 @@
 //!
 //! 状态机只知道 `CallProcess`；本模块按 mode 选提示词与模型槽：
 //! - Dictation：F-9 整理（整理层关闭/未配置/失败 → Degraded 直通原文，绝不阻塞）
-//! - Translation：翻译提示词（失败 → Failed，HUD 提供注入原文）
-//! - Assistant：CP-3 实现（当前直通）
+//! - Translation：先按 F-9 开关预整理，再翻译（翻译失败 → Failed，HUD 提供注入原文）
+//! - Assistant：CP-3 在 assistant.rs 中先按 F-9 开关预整理语音指令
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
@@ -25,6 +25,11 @@ pub enum ProcessOutcome {
 /// 整理层延迟预算（02 F-9：≤ 500ms 推荐轻量模型；超时降级取 8s 硬上限）
 const POLISH_TIMEOUT: Duration = Duration::from_secs(8);
 
+pub struct PreparedTranscript {
+    pub text: String,
+    pub degraded: bool,
+}
+
 pub async fn process(
     mode: SessionMode,
     transcript: String,
@@ -39,18 +44,30 @@ pub async fn process(
     }
 }
 
-/// F-9 文本整理：失败/超时/未配置一律降级直通（02 F-9 铁律）。
-async fn polish(
+/// 按听写的文本整理开关和提示词预处理 STT 文本。
+///
+/// 用于听写最终正文，也用于翻译文本和助手语音指令。关闭「文本整理」时不处理；
+/// 开启但整理槽不可用/超时/报错/空输出时直通原文，不阻断下游功能。
+pub async fn prepare_transcript(
     transcript: String,
     settings: &Settings,
     registry: &Arc<ProviderRegistry>,
-) -> ProcessOutcome {
+) -> PreparedTranscript {
     if !settings.dictation.polish_enabled {
-        return ProcessOutcome::Done(transcript); // 原样模式
+        return PreparedTranscript {
+            text: transcript,
+            degraded: false,
+        };
     }
     let llm = match registry.llm_for(SlotKind::Polish) {
-        Ok(l) => l,
-        Err(_) => return ProcessOutcome::Degraded(transcript), // 未配置 → 直通
+        Ok(llm) => llm,
+        Err(e) => {
+            tracing::warn!("整理槽不可用，直通原文: {}", e.message);
+            return PreparedTranscript {
+                text: transcript,
+                degraded: true,
+            };
+        }
     };
 
     let template = if settings.dictation.polish_prompt.is_empty() {
@@ -73,16 +90,42 @@ async fn polish(
         max_tokens: None,
     };
     match tokio::time::timeout(POLISH_TIMEOUT, collect_text(llm.as_ref(), req)).await {
-        Ok(Ok(text)) if !text.trim().is_empty() => ProcessOutcome::Done(text.trim().to_string()),
-        Ok(Ok(_)) => ProcessOutcome::Degraded(transcript), // 空结果 → 直通
+        Ok(Ok(text)) if !text.trim().is_empty() => PreparedTranscript {
+            text: text.trim().to_string(),
+            degraded: false,
+        },
+        Ok(Ok(_)) => PreparedTranscript {
+            text: transcript,
+            degraded: true,
+        },
         Ok(Err(e)) => {
             tracing::warn!("整理失败降级直通: {e}");
-            ProcessOutcome::Degraded(transcript)
+            PreparedTranscript {
+                text: transcript,
+                degraded: true,
+            }
         }
         Err(_) => {
             tracing::warn!("整理超时降级直通");
-            ProcessOutcome::Degraded(transcript)
+            PreparedTranscript {
+                text: transcript,
+                degraded: true,
+            }
         }
+    }
+}
+
+/// F-9 文本整理：失败/超时/未配置一律降级直通（02 F-9 铁律）。
+async fn polish(
+    transcript: String,
+    settings: &Settings,
+    registry: &Arc<ProviderRegistry>,
+) -> ProcessOutcome {
+    let prepared = prepare_transcript(transcript, settings, registry).await;
+    if prepared.degraded {
+        ProcessOutcome::Degraded(prepared.text)
+    } else {
+        ProcessOutcome::Done(prepared.text)
     }
 }
 
@@ -96,6 +139,9 @@ async fn translate(
         Ok(l) => l,
         Err(e) => return ProcessOutcome::Failed(e),
     };
+    let transcript = prepare_transcript(transcript, settings, registry)
+        .await
+        .text;
     let template = if settings.translation.translate_prompt.is_empty() {
         prompt::TRANSLATE_TEMPLATE
     } else {

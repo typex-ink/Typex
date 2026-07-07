@@ -16,6 +16,7 @@ import {
   type ProviderCapability,
   type ProviderProfile,
   type SlotKind,
+  type TypexError,
 } from "@/ipc/bindings";
 
 const props = defineProps<{
@@ -31,9 +32,16 @@ const CAPABILITY_LABEL_KEY: Record<ProviderCapability, string> = {
   stt: "settings.providers.service_stt",
   llm: "settings.providers.service_llm",
 };
+const ERROR_KEYS: Record<string, string> = {
+  auth_error: "settings.profile.err_auth_error",
+  network_error: "settings.profile.err_network_error",
+  timeout: "settings.profile.err_timeout",
+  invalid_request: "settings.profile.err_invalid_request",
+  server_error: "settings.profile.err_server_error",
+  not_configured: "settings.profile.err_not_configured",
+};
 
 const presets = presetsForCapability(props.capability);
-const REASONING_AUTO = "auto";
 const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
@@ -41,13 +49,13 @@ function isReasoningEffort(value: unknown): value is ReasoningEffort {
   return typeof value === "string" && (REASONING_EFFORTS as readonly string[]).includes(value);
 }
 
-function initialReasoningEffort(profile: ProviderProfile | null): string {
+function initialReasoningEffort(profile: ProviderProfile | null): ReasoningEffort {
   const raw = profile?.options?.["reasoning_effort"];
   if (isReasoningEffort(raw)) return raw;
   const legacy = profile?.options?.["enable_thinking"];
   if (legacy === true) return "medium";
   if (legacy === false) return "none";
-  return REASONING_AUTO;
+  return "none";
 }
 
 const presetId = ref<string>(
@@ -76,7 +84,6 @@ const canConfigureReasoning = computed(
     (kind.value === "chat_completions" || kind.value === "responses" || kind.value === "local"),
 );
 const reasoningOptions = computed(() => [
-  { value: REASONING_AUTO, label: t("settings.profile.reasoning_auto") },
   { value: "none", label: t("settings.profile.reasoning_none") },
   { value: "minimal", label: t("settings.profile.reasoning_minimal") },
   { value: "low", label: t("settings.profile.reasoning_low") },
@@ -84,11 +91,15 @@ const reasoningOptions = computed(() => [
   { value: "high", label: t("settings.profile.reasoning_high") },
   { value: "xhigh", label: t("settings.profile.reasoning_xhigh") },
 ]);
-const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
+function hasStoredSecret(value: string | undefined): boolean {
+  return !!value?.trim() && !value.trim().startsWith("keyring://");
+}
+
+const hasExistingKey = computed(() => hasStoredSecret(props.profile?.credentials?.["api_key"]));
 const hasExistingVolcKeys = computed(
   () =>
-    !!props.profile?.credentials?.["app_key"] &&
-    !!props.profile?.credentials?.["access_token"],
+    hasStoredSecret(props.profile?.credentials?.["app_key"]) &&
+    hasStoredSecret(props.profile?.credentials?.["access_token"]),
 );
 
 // ── 本地档案编辑态（CP-8.7 / mockup 2.7）──
@@ -132,6 +143,20 @@ async function downloadSelected() {
   if (!selectedLocal.value) return;
   downloadPct.value = 0;
   await commands.downloadLocalModel(selectedLocal.value.id, null);
+}
+
+function profileErrorMessage(error: TypexError): string {
+  const key = ERROR_KEYS[error.code];
+  const upstream = error.message?.trim();
+  return `✗ ${key ? t(key) : error.code}${upstream ? `：${upstream}` : ""}`;
+}
+
+async function saveSecret(id: string, field: string, value: string): Promise<boolean> {
+  const result = await commands.setProfileSecret(id, field, value);
+  if (result.status === "ok") return true;
+  testResult.value = profileErrorMessage(result.error);
+  testOk.value = false;
+  return false;
 }
 
 function displayLabel(p: (typeof presets)[number]): string {
@@ -199,6 +224,8 @@ async function save(): Promise<string | null> {
   };
   const r = await commands.upsertProfile(profile);
   if (r.status !== "ok") {
+    testResult.value = profileErrorMessage(r.error);
+    testOk.value = false;
     saving.value = false;
     return null;
   }
@@ -206,16 +233,31 @@ async function save(): Promise<string | null> {
     // 本地推理无凭据（mockup 2.7）
   } else if (isVolc.value) {
     if (appKey.value.trim()) {
-      await commands.setProfileSecret(id, "app_key", appKey.value.trim());
+      if (!(await saveSecret(id, "app_key", appKey.value.trim()))) {
+        saving.value = false;
+        return null;
+      }
     }
     if (accessToken.value.trim()) {
-      await commands.setProfileSecret(id, "access_token", accessToken.value.trim());
+      if (!(await saveSecret(id, "access_token", accessToken.value.trim()))) {
+        saving.value = false;
+        return null;
+      }
     }
   } else if (apiKey.value.trim()) {
-    await commands.setProfileSecret(id, "api_key", apiKey.value.trim());
+    if (!(await saveSecret(id, "api_key", apiKey.value.trim()))) {
+      saving.value = false;
+      return null;
+    }
   }
   if (isNew.value && props.assignTo) {
-    await commands.activateProfile(props.assignTo, id);
+    const activated = await commands.activateProfile(props.assignTo, id);
+    if (activated.status !== "ok") {
+      testResult.value = profileErrorMessage(activated.error);
+      testOk.value = false;
+      saving.value = false;
+      return null;
+    }
   }
   saving.value = false;
   return id;
@@ -231,7 +273,9 @@ async function testConnection() {
   testOk.value = false;
   const id = await save();
   if (!id) {
-    testResult.value = t("settings.profile.fill_form");
+    if (testResult.value === t("settings.profile.testing")) {
+      testResult.value = t("settings.profile.fill_form");
+    }
     return;
   }
   const r = await commands.testProfile(id);
@@ -239,17 +283,7 @@ async function testConnection() {
     testResult.value = t("settings.profile.test_pass", { ms: r.data });
     testOk.value = true;
   } else {
-    const KEYS: Record<string, string> = {
-      auth_error: "settings.profile.err_auth_error",
-      network_error: "settings.profile.err_network_error",
-      timeout: "settings.profile.err_timeout",
-      invalid_request: "settings.profile.err_invalid_request",
-      server_error: "settings.profile.err_server_error",
-      not_configured: "settings.profile.err_not_configured",
-    };
-    const key = KEYS[r.error.code];
-    const upstream = r.error.message?.trim();
-    testResult.value = `✗ ${key ? t(key) : r.error.code}${upstream ? `：${upstream}` : ""}`;
+    testResult.value = profileErrorMessage(r.error);
     testOk.value = false;
   }
 }

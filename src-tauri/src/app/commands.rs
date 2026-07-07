@@ -4,7 +4,6 @@ use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
 use crate::settings::schema::{Settings, SlotConfig};
-use crate::settings::secrets::SecretStore;
 use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +12,6 @@ use tokio::sync::Notify;
 
 type SettingsState<'a> = State<'a, Arc<SettingsService>>;
 type RegistryState<'a> = State<'a, Arc<ProviderRegistry>>;
-type SecretsState<'a> = State<'a, Arc<dyn SecretStore>>;
 type AssistantReadyState<'a> = State<'a, Arc<AssistantWindowReady>>;
 
 pub struct AssistantWindowReady {
@@ -99,19 +97,12 @@ pub fn assistant_window_ready(ready: AssistantReadyState<'_>) {
     ready.mark_ready();
 }
 
-// ── Profile 管理（07 §10.1；密钥单独走 set_profile_secret，不随 JSON 往返）──
+// ── Profile 管理（07 §10.1）──
 
 #[tauri::command]
 #[specta::specta]
 pub fn list_profiles(settings: SettingsState<'_>) -> Vec<ProviderProfile> {
     settings.get().profiles
-}
-
-fn capability_name(capability: ProviderCapability) -> &'static str {
-    match capability {
-        ProviderCapability::Stt => "stt",
-        ProviderCapability::Llm => "llm",
-    }
 }
 
 fn profile_kind_matches_capability(profile: &ProviderProfile) -> bool {
@@ -159,15 +150,8 @@ pub fn upsert_profile(
 #[specta::specta]
 pub fn delete_profile(
     settings: SettingsState<'_>,
-    secrets: SecretsState<'_>,
     profile_id: String,
 ) -> Result<Settings, TypexError> {
-    // 删除档案时清理 keyring 凭据
-    if let Some(p) = settings.get().profiles.iter().find(|p| p.id == profile_id) {
-        for reference in p.credentials.values() {
-            let _ = secrets.delete(reference);
-        }
-    }
     settings.mutate(|s| {
         s.profiles.retain(|p| p.id != profile_id);
         for slot in s.slots.values_mut() {
@@ -207,23 +191,20 @@ pub fn activate_profile(
 #[specta::specta]
 pub fn set_profile_secret(
     settings: SettingsState<'_>,
-    secrets: SecretsState<'_>,
     profile_id: String,
     field: String,
     secret: String,
 ) -> Result<(), TypexError> {
-    let profiles = settings.get().profiles;
-    let profile = profiles
-        .iter()
-        .find(|p| p.id == profile_id)
-        .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
-    let reference = profile.credentials.get(&field).cloned().unwrap_or_else(|| {
-        crate::settings::secrets::make_ref(capability_name(profile.capability), &profile_id, &field)
-    });
-    secrets.set(&reference, &secret)?;
+    let secret = secret.trim().to_string();
+    if secret.is_empty() {
+        return Err(TypexError::new(ErrorCode::InvalidRequest, "密钥不能为空"));
+    }
+    if !settings.get().profiles.iter().any(|p| p.id == profile_id) {
+        return Err(TypexError::new(ErrorCode::InvalidRequest, "档案不存在"));
+    }
     settings.mutate(|s| {
         if let Some(p) = s.profiles.iter_mut().find(|p| p.id == profile_id) {
-            p.credentials.insert(field.clone(), reference.clone());
+            p.credentials.insert(field.clone(), secret.clone());
         }
     })?;
     Ok(())
@@ -509,7 +490,7 @@ pub fn export_diagnostics(
         })
         .map_err(|e| TypexError::new(ErrorCode::Internal, format!("写诊断包失败: {e}")))?;
 
-    // 2. 脱敏 settings：credentials 全剔除（keyring 引用路径含 profile 结构也不导出）
+    // 2. 脱敏 settings：credentials 全剔除（API 密钥明文不导出）
     let mut s = settings.get();
     for p in &mut s.profiles {
         p.credentials.clear();

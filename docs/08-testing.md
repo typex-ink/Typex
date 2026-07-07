@@ -42,7 +42,8 @@
 - Esc：仅 Recording 态响应；其他态收到 Esc 不产生 Effect。
 - 失败恢复：Transcribing 失败 → `recoverable_payload` 含音频；Processing 失败 → 含转写稿且 Effect 提供「复制原文」；重试从正确的 stage 恢复而非从头。
 - **session_id 竞态**：携带旧 session_id 的 SttResult/LlmDelta 到达 → 被丢弃，状态零变化（这是防「上一句注入到下一句」的核心测试）。
-- 整理层降级：Polish 超时/报错 → 注入原始转写 + `EmitUi(unpolished)`。
+- 整理层降级：听写中 Polish 超时/报错 → 注入原始转写 + `EmitUi(unpolished)`。
+- 共享预整理：翻译/助手在 `polish_enabled=true` 时先使用文本整理提示词；`polish_enabled=false` 时跳过；整理超时/报错/未配置时直通原始转写继续下游。
 - 翻译降级：STT 成功翻译失败 → Failed 且提供「注入原文」Effect。
 - 取消后迟到的回调：Cancel 后 SttResult 到达 → 丢弃。
 - 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff`（回答型，已交回答弹窗流式）→ Idle + 释放音频；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
@@ -51,11 +52,11 @@
 
 | 对象 | 重点用例 |
 |---|---|
-| hotkey 判定器（独立于 rdev 的纯逻辑层） | 修饰键 down/up 序列 → 触发事件流；AltGr 序列（Windows 上 AltGr = LCtrl+RAlt 连发）不误判为翻译组合 |
+| hotkey 判定器（独立于 rdev 的纯逻辑层） | 修饰键 down/up 序列 → 触发事件流；AltGr 序列（Windows 上 AltGr = LCtrl+RAlt 连发）不误判为翻译组合；漏 release 后同一触发键 stale duplicate down 能重置并恢复触发 |
 | VAD 切片（`audio/pipeline.rs`） | 构造合成 PCM（静音/正弦波拼接）：切点落在静音段、短音频不切、超长无静音音频的强制切片 |
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
 | `settings/migrate.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak` |
-| `providers/error.rs` | HTTP 状态码/IO 错误 → ErrorCode 分类表 |
+| `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 剪贴板恢复逻辑（`inject/paste.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；恢复失败不吞注入成功的结果 |
 | PromptKit 模板渲染 | 变量替换（target_language、词典注入）、`ANSWER:` 前缀解析 |
 | 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误 |
@@ -76,7 +77,7 @@
 ### 4.2 服务级集成
 
 - `SettingsService`：临时目录读写全流程、并发写、变更广播（watch 收到且仅收到一次）。
-- `ProviderRegistry`：配置变更 → 只重建受影响的 profile 实例；密钥引用解析失败 → 明确错误而非 panic（keyring 用内存 mock 实现 `SecretStore` trait）。
+- `ProviderRegistry`：配置变更 → 只重建受影响的 profile 实例；缺少密钥或旧版 `keyring://` 引用 → 明确 `not_configured` 错误而非 panic。
 - `history`：CRUD、保留期清理（注入 Clock 拨快 91 天）、并发写（WAL）。
 - `InjectorChain`：用 mock Injector 断言后备链顺序、首个成功即停、全失败 → 剪贴板兜底 Effect。
 

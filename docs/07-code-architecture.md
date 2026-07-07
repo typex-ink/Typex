@@ -35,7 +35,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 读取选中文本 | `get-selected-text`（AX → 剪贴板降级）；必要时直接用 `axuielement` / `uiautomation` | |
 | HTTP / SSE | `reqwest` + `eventsource-stream` | 全部 Provider 调用 |
 | WebSocket | `tokio-tungstenite` | 火山流式（P2） |
-| 密钥存储 | `keyring` | Keychain / Credential Manager / Secret Service |
+| 密钥存储 | `settings.json` credentials 字段 | 与其他配置项同路径；导出与日志必须脱敏 |
 | 本地数据 | `rusqlite`（历史）+ `tauri-plugin-store`（设置） | |
 | macOS 权限 | `tauri-plugin-macos-permissions` + `macos-accessibility-client` | 检测 + 引导跳转 |
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
@@ -140,8 +140,7 @@ typex/
 │       ├── settings/
 │       │   ├── mod.rs            # SettingsService：读写、校验、变更广播
 │       │   ├── schema.rs         # 全部配置结构体 + 默认值 + schema_version
-│       │   ├── migrate.rs
-│       │   └── secrets.rs        # keyring 封装（keyring:// 引用解析）
+│       │   └── migrate.rs
 │       ├── history/
 │       │   └── mod.rs            # rusqlite：建表/迁移/CRUD/保留期清理/主页统计聚合（每条记录含时长与字数）
 │       ├── platform/
@@ -256,7 +255,7 @@ v1 保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `carg
 
 ### 7.2 已知平台坑清单（开发时逐条对照）
 
-1. **macOS 权限静默失效**：未授权辅助功能时 `rdev::listen` 静默无事件、不报错——必须用 `macos-accessibility-client` 主动检测并引导；开发时给终端/IDE 授权。
+1. **macOS 权限静默失效**：未授权辅助功能时 `rdev::listen` 静默无事件、不报错——必须用 `macos-accessibility-client` 主动检测并引导；开发时给终端/IDE 授权。CGEventTap 还可能被系统以 `TapDisabledByTimeout/UserInput` 禁用，vendored rdev 后端必须收到该事件后立即 `CGEventTapEnable(..., true)`。
 2. **macOS 签名后麦克风弹窗 bug**（tauri#9928/#11951）：Info.plist 有 `NSMicrophoneUsageDescription` 也可能不弹授权——需原生侧主动 `AVCaptureDevice.requestAccess`（`tauri-plugin-macos-permissions` 已封装）；entitlement `com.apple.security.device.audio-input`。
 3. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
 4. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
@@ -269,6 +268,7 @@ v1 保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `carg
 
 - 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug），改用 **rdev 独立线程**自维护 down/up 状态——默认键位为全修饰键三角方案（右⌘/右⌥ 及其组合，见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
 - **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`AltGr+E` 等），立即静默取消本次录音、不产生任何输出、按键完全放行。监听是 listen-only，普通键本来就不被拦截，此规则只是状态机层面的取消逻辑。
+- **漏 release 自恢复**：rdev/CGEventTap 偶发漏掉触发键 release 时，`HotkeyDetector` 会残留 held 状态。修饰键正常不会自动连发，因此同一触发键在 250 ms 抖动窗口后再次 down 视为上一轮 release 丢失：旧 held 状态重置，必要时向状态机发 `Yielded` 取消卡住的录音，再发新的 `TriggerDown`，保证下一次按键恢复响应。
 - **唯一需要事件拦截的点**：Windows 上单击 Alt 会聚焦菜单栏——助手键（右 Alt）短按时用低级钩子 `WH_KEYBOARD_LL` 吞掉对应 keyup。macOS/Linux 的修饰键单按无系统副作用，无需拦截。启动时自检钩子可用性，失败降级为「监听不拦截」+ UI 提示改键。
 - 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：触发键按下即开始录音，判定窗口内组合出第二触发键则无缝切换为翻译模式，音频保留。
 - Wayland：探测 `XDG_SESSION_TYPE`；优先 `ashpd` 走 `org.freedesktop.portal.GlobalShortcuts`（KDE/GNOME≥48/Hyprland 支持，Activated/Deactivated 信号天然支持按住；注意 Portal 快捷键由 compositor 分配，未必能绑到「单独的右⌥」，此时默认键退化为 compositor 允许的组合键）；不可用时提示 evdev 方案（用户加入 `input` 组）或 compositor 绑定 `typex toggle` CLI 命令（经 single-instance 转发）。
@@ -315,17 +315,16 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 ## 9. 配置、密钥与磁盘数据布局
 
-- **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多，此项为 v1 必备；代理凭据同样入 keyring。
+- **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多，此项为 v1 必备；代理凭据若有同样按敏感配置字段处理，导出与日志必须脱敏。
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
-- 密钥：`keyring` crate 存 OS 凭据库，settings.json 只存 `keyring://typex/<capability>/<profile-id>/<field>` 引用；导出配置时不含密钥。
+- 密钥：随 profile 的 `credentials` 字段存入 `settings.json`，与其他配置项同路径；诊断包导出清空 `credentials`，日志 redact 层拦截 Authorization/密钥文本。旧版 `keyring://` 引用在迁移时清除，运行时也视为未配置。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。
 
 运行时磁盘布局：
 
 | 内容 | 位置（平台标准目录） | 说明 |
 |---|---|---|
-| `settings.json` | config dir（如 `~/Library/Application Support/ink.typex.app/`） | 无密钥明文 |
-| 密钥 | OS 凭据库 | service=`typex`，account=`<capability>/<profile-id>/<field>` |
+| `settings.json` | config dir（如 `~/Library/Application Support/ink.typex.app/`） | 含 profile 与 credentials；导出诊断时 credentials 为空 |
 | `history.sqlite` | data dir | WAL 模式；启动时跑保留期清理 |
 | 失败重试音频 | cache dir `/pending/` | 会话结束/放弃即删；启动时清孤儿文件 |
 | 日志 | log dir，按天滚动，保留 7 天 | 经 redact 层 |
@@ -342,7 +341,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 |---|---|---|
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置 |
-| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段单独走 `set_profile_secret`（不随 profile JSON 往返） |
+| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |

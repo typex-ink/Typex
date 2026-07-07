@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeI18n } from "@/i18n";
 import { type ProviderKind, type ProviderProfile } from "@/ipc/bindings";
 import ProfileEditor from "./ProfileEditor.vue";
@@ -7,11 +7,14 @@ import ProfileEditor from "./ProfileEditor.vue";
 const mockUpsertProfile = vi.hoisted(() =>
   vi.fn(async (_profile: ProviderProfile) => ({ status: "ok" as const })),
 );
+const mockSetProfileSecret = vi.hoisted(() =>
+  vi.fn(async (): Promise<unknown> => ({ status: "ok" as const, data: null })),
+);
 
 vi.mock("@/ipc/bindings", () => ({
   commands: {
     upsertProfile: mockUpsertProfile,
-    setProfileSecret: vi.fn(async () => ({ status: "ok" })),
+    setProfileSecret: mockSetProfileSecret,
     activateProfile: vi.fn(async () => ({ status: "ok" })),
     testProfile: vi.fn(async () => ({ status: "ok", data: 10 })),
     deleteProfile: vi.fn(async () => ({ status: "ok" })),
@@ -31,7 +34,7 @@ function llmProfile(kind: ProviderKind): ProviderProfile {
     label: "OpenAI",
     base_url: "https://api.openai.com/v1",
     model: "gpt-5-mini",
-    credentials: { api_key: "keyring://typex/llm/openai/api_key" },
+    credentials: { api_key: "sk-existing" },
     extra_headers: {},
     extra_form: {},
     timeout_ms: 30000,
@@ -40,14 +43,44 @@ function llmProfile(kind: ProviderKind): ProviderProfile {
 }
 
 async function saveWithReasoning(kind: ProviderKind) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
   const wrapper = mount(ProfileEditor, {
+    attachTo: host,
     props: { capability: "llm", profile: llmProfile(kind) },
     global: { plugins: [makeI18n("zh-CN")] },
   });
-  const reasoningSelect = wrapper.findAll("select").at(-1)!;
-  expect(reasoningSelect.text()).toContain("高");
 
-  await reasoningSelect.setValue("high");
+  const reasoningTrigger = wrapper
+    .findAll("button.select")
+    .find((button) => button.text().includes("关闭"))!;
+  await reasoningTrigger.trigger("click");
+
+  const highOption = [...document.body.querySelectorAll<HTMLButtonElement>(".select-option")]
+    .find((option) => option.textContent?.includes("高"))!;
+  expect(highOption).toBeTruthy();
+  highOption.click();
+  await flushPromises();
+
+  const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+  await save.trigger("click");
+  await flushPromises();
+}
+
+async function saveWithoutChangingReasoning(kind: ProviderKind) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const wrapper = mount(ProfileEditor, {
+    attachTo: host,
+    props: { capability: "llm", profile: llmProfile(kind) },
+    global: { plugins: [makeI18n("zh-CN")] },
+  });
+
+  const reasoningTrigger = wrapper
+    .findAll("button.select")
+    .find((button) => button.text().includes("关闭"))!;
+  expect(reasoningTrigger.text()).not.toContain("默认");
+
   const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
   await save.trigger("click");
   await flushPromises();
@@ -56,6 +89,11 @@ async function saveWithReasoning(kind: ProviderKind) {
 describe("ProfileEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSetProfileSecret.mockResolvedValue({ status: "ok", data: null });
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
   });
 
   it("Responses 档案可保存思考等级", async () => {
@@ -68,6 +106,16 @@ describe("ProfileEditor", () => {
     expect(options.enable_thinking).toBe(true);
   });
 
+  it("未配置思考等级时默认保存为关闭", async () => {
+    await saveWithoutChangingReasoning("responses");
+
+    const saved = mockUpsertProfile.mock.calls[0]?.[0];
+    if (!saved) throw new Error("expected upsertProfile call");
+    const options = saved.options ?? {};
+    expect(options.reasoning_effort).toBe("none");
+    expect(options.enable_thinking).toBe(false);
+  });
+
   it("OpenAI 兼容档案可保存思考等级", async () => {
     await saveWithReasoning("chat_completions");
 
@@ -76,5 +124,47 @@ describe("ProfileEditor", () => {
     const options = saved.options ?? {};
     expect(options.reasoning_effort).toBe("high");
     expect(options.enable_thinking).toBe(true);
+  });
+
+  it("密钥写入失败时显示上游错误信息", async () => {
+    mockSetProfileSecret.mockResolvedValueOnce({
+      status: "error",
+      error: {
+        code: "internal",
+        message: "写入设置失败",
+      },
+    });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "llm", profile: llmProfile("responses") },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    await wrapper.find("input[type='password']").setValue("sk-new");
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockSetProfileSecret).toHaveBeenCalledWith("llm-responses", "api_key", "sk-new");
+    expect(wrapper.text()).toContain("写入设置失败");
+    expect(wrapper.emitted("saved")).toBeUndefined();
+  });
+
+  it("旧 keyring 引用不算已保存密钥", async () => {
+    const profile = llmProfile("responses");
+    profile.credentials = { api_key: "keyring://typex/llm/openai/api_key" };
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "llm", profile },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+
+    expect(save.attributes("disabled")).toBeDefined();
   });
 });

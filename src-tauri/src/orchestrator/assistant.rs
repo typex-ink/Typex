@@ -1,6 +1,7 @@
 //! 助手服务（F-3）：单次 LLM 调用（03 §4：无 Agent 层）。
 //!
 //! ADR-23 分流：
+//! - 语音指令先按听写文本整理开关走 F-9 预整理（关闭则直通）
 //! - F-3a 选中文本 + 改写指令 → 静默收全文 → `Rewrite`（orchestrator 注入替换选区，不弹窗）
 //! - F-3a 选中文本 + 提问（`ANSWER:` 前缀，流首部嗅探）→ 呼出回答弹窗流式展示 → `HandedOff`
 //! - F-3b 无选区提问 → 必为回答型，弹窗立即呼出流式展示 → `HandedOff`
@@ -89,6 +90,9 @@ impl AssistantService {
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let s = self.settings.get();
         let llm = self.registry.llm_for(SlotKind::Assistant)?;
+        let instruction = super::pipeline::prepare_transcript(instruction, &s, &self.registry)
+            .await
+            .text;
 
         // 选提示词：有选区 = 处理模板（F-3a）；无选区 = 问答模板（F-3b）
         let (template, custom) = if selection.is_some() {

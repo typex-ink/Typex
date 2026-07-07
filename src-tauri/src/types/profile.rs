@@ -74,7 +74,7 @@ pub enum ModelDownloadSource {
     ModelScope,
 }
 
-/// 一个配置档案。`credentials` 的值是 `keyring://` 引用，明文不落盘（03 §6）。
+/// 一个配置档案。`credentials` 保存各 provider 需要的敏感配置值（03 §6）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ProviderProfile {
     pub id: String,
@@ -85,7 +85,7 @@ pub struct ProviderProfile {
     #[serde(default)]
     pub base_url: String,
     pub model: String,
-    /// 字段名 → keyring 引用（map 结构为火山双凭据设计）
+    /// 字段名 → 凭据值（map 结构为火山双凭据设计）
     #[serde(default)]
     pub credentials: HashMap<String, String>,
     #[serde(default)]

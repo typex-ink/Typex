@@ -10,6 +10,10 @@ pub mod rdev_backend;
 
 use crate::types::SessionMode;
 
+/// 修饰键正常不会自动连发；同一触发键在这个窗口后再次 down，
+/// 视为上一轮 release 丢失，重置判定器以恢复下一次触发。
+const STALE_DUPLICATE_DOWN_MS: u64 = 250;
+
 /// 键的稳定字符串标识（rdev::Key 的 Debug 名，settings.json 存储形态）。
 pub type KeyId = String;
 
@@ -112,6 +116,20 @@ impl HotkeyDetector {
         match self.config.role_of(key) {
             Some(role) => {
                 if self.held.iter().any(|(h, _)| h == key) {
+                    if t_ms.saturating_sub(self.first_down_at) >= STALE_DUPLICATE_DOWN_MS {
+                        let should_cancel_stale_recording = !self.yielded;
+                        self.held.clear();
+                        self.yielded = false;
+                        self.first_down_at = t_ms;
+                        self.current_mode = Some(role);
+                        self.held.push((key.to_string(), role));
+                        let mut events = Vec::with_capacity(2);
+                        if should_cancel_stale_recording {
+                            events.push(HotkeyEvent::Yielded);
+                        }
+                        events.push(HotkeyEvent::TriggerDown { mode: role });
+                        return events;
+                    }
                     return vec![]; // OS 自动重复
                 }
                 self.held.push((key.to_string(), role));
@@ -316,6 +334,47 @@ mod tests {
         assert_eq!(
             d.on_key("MetaRight", false, 500),
             vec![HotkeyEvent::TriggerUp { held_ms: 500 }]
+        );
+    }
+
+    #[test]
+    fn stale_duplicate_trigger_down_recovers_after_missed_release() {
+        let mut d = det();
+        assert_eq!(
+            d.on_key("MetaRight", true, 0),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
+        );
+        assert_eq!(
+            d.on_key("MetaRight", true, 500),
+            vec![
+                HotkeyEvent::Yielded,
+                HotkeyEvent::TriggerDown {
+                    mode: SessionMode::Dictation
+                }
+            ]
+        );
+        assert_eq!(
+            d.on_key("MetaRight", false, 900),
+            vec![HotkeyEvent::TriggerUp { held_ms: 400 }]
+        );
+    }
+
+    #[test]
+    fn stale_duplicate_after_yield_starts_fresh_session() {
+        let mut d = det();
+        d.on_key("MetaRight", true, 0);
+        assert_eq!(d.on_key("KeyC", true, 40), vec![HotkeyEvent::Yielded]);
+        assert_eq!(
+            d.on_key("MetaRight", true, 500),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
+        );
+        assert_eq!(
+            d.on_key("MetaRight", false, 700),
+            vec![HotkeyEvent::TriggerUp { held_ms: 200 }]
         );
     }
 }

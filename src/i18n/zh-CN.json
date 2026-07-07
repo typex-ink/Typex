@@ -99,7 +99,7 @@
     },
     "dictation": {
       "polish": "文本整理",
-      "polish_hint": "去语气词、修标点、保留改口后的最终意图",
+      "polish_hint": "去语气词、修标点、修复技术术语和中英文混排",
       "prompt_label": "整理提示词（高级）",
       "prompt_hint": "占位符：{'{transcript}'} 原始转写 · {'{dictionary}'} 个人词典",
       "ph_help_prefix": "可用占位符：",
@@ -176,8 +176,7 @@
       "kind_chat": "Chat Completions（OpenAI 兼容）",
       "kind_responses": "Responses（OpenAI 新协议）",
       "reasoning_effort": "思考等级",
-      "reasoning_effort_hint": "默认不发送；Responses 使用 reasoning.effort，OpenAI 兼容使用 reasoning_effort，Qwen 兼容/本地模型仅按开关处理。",
-      "reasoning_auto": "默认（不指定）",
+      "reasoning_effort_hint": "关闭时不启用思考；Responses 使用 reasoning.effort，OpenAI 兼容使用 reasoning_effort，Qwen 兼容/本地模型仅按开关处理。",
       "reasoning_none": "关闭",
       "reasoning_minimal": "最小",
       "reasoning_low": "低",
@@ -187,7 +186,7 @@
       "api_key": "API 密钥",
       "app_id_hint": "火山控制台的 APP ID",
       "token_hint": "火山控制台的 Access Token",
-      "key_saved_hint": "已保存在系统凭据库；留空则不修改",
+      "key_saved_hint": "已保存在配置文件；留空则不修改",
       "load_policy": "加载策略",
       "load_policy_hint": "常驻更快；用完即卸更省内存",
       "load_policy_resident": "常驻内存",
@@ -267,7 +266,7 @@
       "onboarding_failed": "打开引导页失败"
     },
     "about": {
-      "privacy": "你的声音只会发送到你自己配置的服务。",
+      "privacy": "说，即所得",
       "new_version": "新版本 v{version}",
       "install": "下载并安装",
       "installing": "下载安装中…",

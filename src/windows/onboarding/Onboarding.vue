@@ -8,6 +8,7 @@ import AppIcon from "@/components/AppIcon.vue";
 import Kbd from "@/components/Kbd.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Input from "@/components/Input.vue";
+import Select from "@/components/Select.vue";
 import { commands, events, type HardwareTier, type LocalModelInfo, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
 import { formatBytes } from "@/shared/format";
 import { useSettingsStore } from "@/stores/settings";
@@ -384,11 +385,15 @@ onUnmounted(() => {
     <!-- 底部 -->
     <div class="foot">
       <template v-if="step === 1">
-        <select v-model="lang" class="lang-select">
-          <option value="system">{{ t("onboarding.lang_system") }}</option>
-          <option value="zh_cn">简体中文</option>
-          <option value="en">English</option>
-        </select>
+        <Select
+          v-model="lang"
+          class="lang-select"
+          :options="[
+            { value: 'system', label: t('onboarding.lang_system') },
+            { value: 'zh_cn', label: '简体中文' },
+            { value: 'en', label: 'English' },
+          ]"
+        />
         <Button variant="primary" @click="step = 2">{{ t("onboarding.start") }}</Button>
       </template>
       <template v-else-if="step === 5">
@@ -671,13 +676,9 @@ onUnmounted(() => {
 }
 .lang-select {
   min-width: 130px;
+}
+.lang-select :deep(.select) {
   height: 30px;
   font-size: 12.5px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-1);
-  padding: 0 8px;
-  font-family: inherit;
 }
 </style>

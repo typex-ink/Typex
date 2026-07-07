@@ -22,7 +22,7 @@
 
 - 会话状态机（orchestrator）+ HUD 全状态（录音/波形/处理/成功/失败/重试）。
 - F-9 文本整理：LlmProvider（chat_completions + responses）+ 整理提示词 + 失败降级 + 原样模式开关 + 测试样例集。
-- 设置窗口：模型服务页（STT/整理槽、预设模板、keyring 密钥、连接测试）、通用页、听写页、快捷键页（HotkeyRecorder）。
+- 设置窗口：模型服务页（STT/整理槽、预设模板、配置文件密钥、连接测试）、通用页、听写页、快捷键页（HotkeyRecorder）。
 - Onboarding 5 步（含 macOS 权限检测引导）。
 - VAD 静音裁剪；长录音自动切片；提示音三枚。
 - **验收**：[02 功能规格 F-1 验收标准](02-features.md) 全数通过（Linux 先只承诺 X11）。

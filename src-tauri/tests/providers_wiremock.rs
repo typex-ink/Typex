@@ -1,13 +1,24 @@
 //! Provider × wiremock 集成测试（08 §4.1）。
 
 use futures_util::StreamExt;
+use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use typex_lib::orchestrator::assistant::{AssistantOutcome, AssistantService};
+use typex_lib::orchestrator::pipeline::{self, ProcessOutcome};
 use typex_lib::providers::ProviderError;
+use typex_lib::providers::ProviderRegistry;
 use typex_lib::providers::llm::{
     LlmProvider, LlmRequest, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use typex_lib::providers::stt::{
     AudioInput, SttOptions, SttProvider, openai_compat::OpenAiCompatStt,
 };
+use typex_lib::settings::SettingsService;
+use typex_lib::settings::schema::{Settings, SlotConfig};
+use typex_lib::types::{ProviderCapability, ProviderKind, ProviderProfile, SessionMode, SlotKind};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -211,6 +222,201 @@ fn sse_body(chunks: &[&str]) -> String {
     }
     s.push_str("data: [DONE]\n\n");
     s
+}
+
+fn test_llm_profile(id: &str, base_url: &str) -> ProviderProfile {
+    ProviderProfile {
+        id: id.into(),
+        capability: ProviderCapability::Llm,
+        kind: ProviderKind::ChatCompletions,
+        label: id.into(),
+        base_url: base_url.into(),
+        model: "test-model".into(),
+        credentials: [("api_key".to_string(), "sk-llm".to_string())].into(),
+        extra_headers: HashMap::new(),
+        extra_form: HashMap::new(),
+        timeout_ms: 5_000,
+        options: HashMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn translation_uses_polished_transcript_when_enabled() {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_mock = calls.clone();
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            let idx = calls_for_mock.fetch_add(1, Ordering::SeqCst);
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            let content = v["messages"][1]["content"].as_str().unwrap();
+            match idx {
+                0 => {
+                    assert!(content.contains("<transcript>嗯 raw</transcript>"));
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(sse_body(&["clean"]))
+                }
+                1 => {
+                    assert!(content.contains("<text>clean</text>"));
+                    assert!(!content.contains("嗯 raw"));
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(sse_body(&["translated"]))
+                }
+                _ => panic!("unexpected LLM call"),
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let mut settings = Settings::default();
+    settings.dictation.polish_enabled = true;
+    settings.profiles = vec![
+        test_llm_profile("polish", &server.uri()),
+        test_llm_profile("translate", &server.uri()),
+    ];
+    settings.slots.insert(
+        SlotKind::Polish,
+        SlotConfig {
+            active_profile: Some("polish".into()),
+        },
+    );
+    settings.slots.insert(
+        SlotKind::Translate,
+        SlotConfig {
+            active_profile: Some("translate".into()),
+        },
+    );
+    let registry = Arc::new(ProviderRegistry::new(settings.clone()));
+
+    let out = pipeline::process(
+        SessionMode::Translation,
+        "嗯 raw".into(),
+        &settings,
+        &registry,
+    )
+    .await;
+
+    match out {
+        ProcessOutcome::Done(text) => assert_eq!(text, "translated"),
+        _ => panic!("expected translated output"),
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn translation_skips_polish_when_disabled() {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_mock = calls.clone();
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            calls_for_mock.fetch_add(1, Ordering::SeqCst);
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            let content = v["messages"][1]["content"].as_str().unwrap();
+            assert!(content.contains("<text>raw</text>"));
+            assert!(!content.contains("<transcript>raw</transcript>"));
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body(&["translated"]))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut settings = Settings::default();
+    settings.dictation.polish_enabled = false;
+    settings.profiles = vec![test_llm_profile("translate", &server.uri())];
+    settings.slots.insert(
+        SlotKind::Translate,
+        SlotConfig {
+            active_profile: Some("translate".into()),
+        },
+    );
+    let registry = Arc::new(ProviderRegistry::new(settings.clone()));
+
+    let out = pipeline::process(SessionMode::Translation, "raw".into(), &settings, &registry).await;
+
+    match out {
+        ProcessOutcome::Done(text) => assert_eq!(text, "translated"),
+        _ => panic!("expected translated output"),
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn assistant_uses_polished_instruction_when_enabled() {
+    let server = MockServer::start().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_mock = calls.clone();
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            let idx = calls_for_mock.fetch_add(1, Ordering::SeqCst);
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            let content = v["messages"][1]["content"].as_str().unwrap();
+            match idx {
+                0 => {
+                    assert!(content.contains("<transcript>呃 explain</transcript>"));
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(sse_body(&["explain"]))
+                }
+                1 => {
+                    assert!(content.contains("<question>explain</question>"));
+                    assert!(!content.contains("呃 explain"));
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "text/event-stream")
+                        .set_body_string(sse_body(&["answer"]))
+                }
+                _ => panic!("unexpected LLM call"),
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let mut settings = Settings::default();
+    settings.dictation.polish_enabled = true;
+    settings.profiles = vec![
+        test_llm_profile("polish", &server.uri()),
+        test_llm_profile("assistant", &server.uri()),
+    ];
+    settings.slots.insert(
+        SlotKind::Polish,
+        SlotConfig {
+            active_profile: Some("polish".into()),
+        },
+    );
+    settings.slots.insert(
+        SlotKind::Assistant,
+        SlotConfig {
+            active_profile: Some("assistant".into()),
+        },
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let settings_service = Arc::new(SettingsService::load(dir.path().to_path_buf()));
+    settings_service.update(settings.clone()).unwrap();
+    let registry = Arc::new(ProviderRegistry::new(settings));
+    let assistant = AssistantService::new(
+        settings_service,
+        registry,
+        Box::new(|_| {}),
+        Box::new(|_| Box::pin(async {})),
+    );
+
+    let out = assistant
+        .run("呃 explain".into(), None, false)
+        .await
+        .unwrap();
+
+    assert_eq!(out, AssistantOutcome::HandedOff);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

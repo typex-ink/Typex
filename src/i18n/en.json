@@ -99,7 +99,7 @@
     },
     "dictation": {
       "polish": "Text cleanup",
-      "polish_hint": "Removes filler words, fixes punctuation, keeps your final intent after self-corrections",
+      "polish_hint": "Removes filler words, fixes punctuation, technical terms, and mixed Chinese/English spacing",
       "prompt_label": "Cleanup prompt (advanced)",
       "prompt_hint": "Placeholders: {'{transcript}'} raw transcript · {'{dictionary}'} personal dictionary",
       "ph_help_prefix": "Available placeholders: ",
@@ -176,8 +176,7 @@
       "kind_chat": "Chat Completions (OpenAI-compatible)",
       "kind_responses": "Responses (OpenAI's new protocol)",
       "reasoning_effort": "Reasoning effort",
-      "reasoning_effort_hint": "Not sent by default; Responses uses reasoning.effort, OpenAI-compatible uses reasoning_effort, and Qwen-compatible/local models treat it as an on/off switch.",
-      "reasoning_auto": "Default (unspecified)",
+      "reasoning_effort_hint": "Off disables reasoning; Responses uses reasoning.effort, OpenAI-compatible uses reasoning_effort, and Qwen-compatible/local models treat it as an on/off switch.",
       "reasoning_none": "Off",
       "reasoning_minimal": "Minimal",
       "reasoning_low": "Low",
@@ -187,7 +186,7 @@
       "api_key": "API key",
       "app_id_hint": "APP ID from the Volcengine console",
       "token_hint": "Access Token from the Volcengine console",
-      "key_saved_hint": "Saved in the system keychain; leave empty to keep it",
+      "key_saved_hint": "Saved in the config file; leave empty to keep it",
       "load_policy": "Load policy",
       "load_policy_hint": "Resident is faster; unload after use saves memory",
       "load_policy_resident": "Keep in memory",
@@ -267,7 +266,7 @@
       "onboarding_failed": "Failed to open onboarding"
     },
     "about": {
-      "privacy": "Your voice is only ever sent to the services you configure.",
+      "privacy": "Speak. It types.",
       "new_version": "New version v{version}",
       "install": "Download & install",
       "installing": "Installing…",
