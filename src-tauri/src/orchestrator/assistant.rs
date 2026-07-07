@@ -86,13 +86,15 @@ impl AssistantService {
         instruction: String,
         selection: Option<String>,
         selection_read_failed: bool,
+        prompt_context: super::pipeline::PromptContext,
     ) -> Result<AssistantOutcome> {
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let s = self.settings.get();
         let llm = self.registry.llm_for(SlotKind::Assistant)?;
-        let instruction = super::pipeline::prepare_transcript(instruction, &s, &self.registry)
-            .await
-            .text;
+        let instruction =
+            super::pipeline::prepare_transcript(instruction, &s, &self.registry, &prompt_context)
+                .await
+                .text;
 
         // 选提示词：有选区 = 处理模板（F-3a）；无选区 = 问答模板（F-3b）
         let (template, custom) = if selection.is_some() {
@@ -111,6 +113,7 @@ impl AssistantService {
         if let Some(sel) = &selection {
             values.insert("{selection}", sel.clone());
         }
+        prompt_context.insert_values(&mut values);
         let rendered = prompt::render(&template, &values);
 
         let req = LlmRequest {

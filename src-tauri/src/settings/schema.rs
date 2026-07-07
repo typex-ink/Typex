@@ -5,7 +5,11 @@ use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+
+pub const DICTIONARY_MAX_TERMS: usize = 100;
+pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
+pub const DICTIONARY_MAX_TOTAL_CHARS: usize = 5_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
@@ -17,6 +21,7 @@ pub struct Settings {
     pub assistant: AssistantSettings,
     pub hotkeys: HotkeySettings,
     pub history: HistorySettings,
+    pub dictionary: DictionarySettings,
     /// 槽位 → active profile id
     pub slots: HashMap<SlotKind, SlotConfig>,
     pub profiles: Vec<ProviderProfile>,
@@ -33,6 +38,7 @@ impl Default for Settings {
             assistant: AssistantSettings::default(),
             hotkeys: HotkeySettings::default(),
             history: HistorySettings::default(),
+            dictionary: DictionarySettings::default(),
             slots: SlotKind::ALL
                 .iter()
                 .map(|k| (*k, SlotConfig::default()))
@@ -40,6 +46,13 @@ impl Default for Settings {
             profiles: Vec::new(),
             onboarding_done: false,
         }
+    }
+}
+
+impl Settings {
+    pub fn normalize_for_save(&mut self) {
+        self.schema_version = CURRENT_SCHEMA_VERSION;
+        self.dictionary.normalize();
     }
 }
 
@@ -234,6 +247,89 @@ impl Default for HistorySettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(default)]
+pub struct DictionarySettings {
+    /// 手动维护的高频词/专有名词表（F-10 v1：不区分来源/分类）。
+    pub terms: Vec<String>,
+}
+
+impl DictionarySettings {
+    pub fn normalize(&mut self) {
+        self.terms = normalize_dictionary_terms(self.terms.iter().map(String::as_str));
+    }
+
+    pub fn normalized_terms(&self) -> Vec<String> {
+        normalize_dictionary_terms(self.terms.iter().map(String::as_str))
+    }
+
+    pub fn stt_prompt(&self) -> Option<String> {
+        let terms = self.normalized_terms();
+        if terms.is_empty() {
+            None
+        } else {
+            Some(terms.join("\n"))
+        }
+    }
+
+    pub fn llm_context(&self) -> Option<String> {
+        let terms = self.normalized_terms();
+        if terms.is_empty() {
+            return None;
+        }
+        Some(
+            terms
+                .into_iter()
+                .map(|term| format!("- {}", escape_dictionary_xml(&term)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+}
+
+pub fn normalize_dictionary_terms<'a>(terms: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut total_chars = 0usize;
+
+    for raw in terms {
+        if out.len() >= DICTIONARY_MAX_TERMS {
+            break;
+        }
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let term: String = trimmed.chars().take(DICTIONARY_MAX_TERM_CHARS).collect();
+        if term.is_empty() || !seen.insert(term.clone()) {
+            continue;
+        }
+        let chars = term.chars().count();
+        if total_chars + chars > DICTIONARY_MAX_TOTAL_CHARS {
+            break;
+        }
+        total_chars += chars;
+        out.push(term);
+    }
+
+    out
+}
+
+fn escape_dictionary_xml(term: &str) -> String {
+    let mut out = String::with_capacity(term.len());
+    for ch in term.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,9 +344,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 2, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 3, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 2);
+        assert_eq!(s.schema_version, 3);
     }
 
     #[test]
@@ -260,5 +356,41 @@ mod tests {
         assert_eq!(h.translation.len(), 2);
         assert!(h.translation.contains(&h.dictation[0]));
         assert!(h.translation.contains(&h.assistant[0]));
+    }
+
+    #[test]
+    fn dictionary_terms_are_normalized_for_save() {
+        let mut s = Settings::default();
+        s.schema_version = 1;
+        s.dictionary.terms = vec![
+            " Typex ".into(),
+            "".into(),
+            "OpenAI".into(),
+            "Typex".into(),
+            "超长".repeat(40),
+        ];
+        s.normalize_for_save();
+        assert_eq!(s.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(s.dictionary.terms[0], "Typex");
+        assert_eq!(s.dictionary.terms[1], "OpenAI");
+        assert_eq!(
+            s.dictionary.terms[2].chars().count(),
+            DICTIONARY_MAX_TERM_CHARS
+        );
+        assert_eq!(s.dictionary.terms.len(), 3);
+    }
+
+    #[test]
+    fn dictionary_formats_stt_and_llm_context() {
+        let dictionary = DictionarySettings {
+            terms: vec!["Typex".into(), "A&B <tag>".into()],
+        };
+        let stt = dictionary.stt_prompt().unwrap();
+        assert!(stt.contains("Typex"));
+        assert!(stt.contains("A&B <tag>"));
+
+        let llm = dictionary.llm_context().unwrap();
+        assert!(llm.contains("- Typex"));
+        assert!(llm.contains("A&amp;B &lt;tag&gt;"));
     }
 }

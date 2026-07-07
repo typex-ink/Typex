@@ -1,4 +1,4 @@
-//! 目标应用识别（02 F-7 历史字段 / F-11 预留；CP-6.8）。
+//! 目标应用识别（02 F-7 历史字段 / 03 §3.4 prompt 上下文 / F-11 预留；CP-6.8）。
 //!
 //! macOS：NSWorkspace.frontmostApplication 读取前台应用本地化名。
 //! 其他平台返回 None（trait 扩展位随平台后端补）。

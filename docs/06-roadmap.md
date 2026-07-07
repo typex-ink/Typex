@@ -62,7 +62,7 @@
 
 1. 本地离线转写（whisper.cpp / sherpa-onnx SenseVoice，F-12）——隐私与离线杀手锏，**已确认排入 v1.1（[ADR-13](09-decisions.md)）**。
 2. **官方 STT 套餐服务上线**（[ADR-16](09-decisions.md)/D-16）：服务端建设独立于本仓库；客户端仅需新增一个官方预设（openai_compat 通道，零代码特权）。
-3. 个人词典/热词（F-10）。
+3. 个人词典增强：自动收集候选词、按应用/语言分组、别名与权重（F-10 v1 已支持手动词典/热词）。
 4. 按应用输出 Profile（F-11）。
 5. 流式转写（实时字幕式上屏；OpenAI Realtime / 火山二进制 WS / Deepgram adapter）。
 6. STT/LLM 更多 adapter（DashScope、Deepgram、ElevenLabs）。

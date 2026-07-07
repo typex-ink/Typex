@@ -10,14 +10,29 @@ import { useSettingsStore } from "@/stores/settings";
 
 const { t, te } = useI18n();
 const store = useSettingsStore();
-const tab = ref<"overview" | "history">("overview");
+const DICTIONARY_MAX_TERMS = 100;
+const DICTIONARY_MAX_TERM_CHARS = 50;
+
+const tab = ref<"overview" | "history" | "dictionary">("overview");
 const stats = ref<HistoryStats | null>(null);
 const recent = ref<HistoryItem[]>([]);
 const items = ref<HistoryItem[]>([]);
 const search = ref("");
 const expanded = ref<number | null>(null);
+const termDraft = ref("");
+const termSearch = ref("");
+const editingTerm = ref<string | null>(null);
+const editingDraft = ref("");
+const dictionaryError = ref("");
+const dictionaryTool = ref<"add" | "search" | null>(null);
 
 const historyEnabled = computed(() => store.settings?.history.enabled ?? true);
+const dictionaryTerms = computed(() => store.settings?.dictionary.terms ?? []);
+const filteredTerms = computed(() => {
+  const q = termSearch.value.trim().toLocaleLowerCase();
+  if (!q) return dictionaryTerms.value;
+  return dictionaryTerms.value.filter((term) => term.toLocaleLowerCase().includes(q));
+});
 
 // 统计口径（05 §8）
 const totalMinutes = computed(() => (stats.value?.total_duration_ms ?? 0) / 60000);
@@ -86,6 +101,81 @@ async function clearAll() {
   items.value = [];
 }
 
+function normalizeTerm(value: string) {
+  return value.trim().slice(0, DICTIONARY_MAX_TERM_CHARS);
+}
+
+async function saveTerms(terms: string[]) {
+  await store.mutate((d) => {
+    d.dictionary.terms = terms;
+  });
+}
+
+async function addTerm() {
+  const term = normalizeTerm(termDraft.value);
+  if (!term) {
+    dictionaryError.value = t("home.dictionary_empty");
+    return;
+  }
+  if (dictionaryTerms.value.includes(term)) {
+    dictionaryError.value = t("home.dictionary_duplicate");
+    return;
+  }
+  if (dictionaryTerms.value.length >= DICTIONARY_MAX_TERMS) {
+    dictionaryError.value = t("home.dictionary_limit", { n: DICTIONARY_MAX_TERMS });
+    return;
+  }
+  await saveTerms([...dictionaryTerms.value, term]);
+  termDraft.value = "";
+  dictionaryError.value = "";
+}
+
+function toggleDictionaryTool(tool: "add" | "search") {
+  dictionaryTool.value = dictionaryTool.value === tool ? null : tool;
+  dictionaryError.value = "";
+}
+
+function closeDictionaryTool() {
+  if (dictionaryTool.value === "add") termDraft.value = "";
+  if (dictionaryTool.value === "search") termSearch.value = "";
+  dictionaryTool.value = null;
+  dictionaryError.value = "";
+}
+
+function startEdit(term: string) {
+  editingTerm.value = term;
+  editingDraft.value = term;
+  dictionaryError.value = "";
+}
+
+function cancelEdit() {
+  editingTerm.value = null;
+  editingDraft.value = "";
+}
+
+async function commitEdit() {
+  const oldTerm = editingTerm.value;
+  const nextTerm = normalizeTerm(editingDraft.value);
+  if (!oldTerm) return;
+  if (!nextTerm) {
+    dictionaryError.value = t("home.dictionary_empty");
+    return;
+  }
+  if (nextTerm !== oldTerm && dictionaryTerms.value.includes(nextTerm)) {
+    dictionaryError.value = t("home.dictionary_duplicate");
+    return;
+  }
+  await saveTerms(dictionaryTerms.value.map((term) => (term === oldTerm ? nextTerm : term)));
+  cancelEdit();
+  dictionaryError.value = "";
+}
+
+async function deleteTerm(term: string) {
+  await saveTerms(dictionaryTerms.value.filter((item) => item !== term));
+  if (editingTerm.value === term) cancelEdit();
+  dictionaryError.value = "";
+}
+
 function openSettings() {
   commands.openSettingsWindow();
 }
@@ -131,6 +221,7 @@ onMounted(async () => {
       <nav>
         <div :class="{ on: tab === 'overview' }" @click="tab = 'overview'">⌂ {{ t("home.nav_overview") }}</div>
         <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">◷ {{ t("home.nav_history") }}</div>
+        <div :class="{ on: tab === 'dictionary' }" @click="tab = 'dictionary'">▤ {{ t("home.nav_dictionary") }}</div>
       </nav>
       <div class="mfoot">
         <button type="button" :title="t('home.settings')" :aria-label="t('home.settings')" @click="openSettings">⚙</button>
@@ -189,7 +280,7 @@ onMounted(async () => {
     </main>
 
     <!-- 历史记录页签 -->
-    <main v-else class="main hist">
+    <main v-else-if="tab === 'history'" class="main hist">
       <div class="hist-top">
         <Input v-model="search" :placeholder="t('home.search_ph')" @keydown.enter="doSearch" />
         <Button variant="danger" size="sm" @click="clearAll">{{ t("home.clear_all") }}</Button>
@@ -216,6 +307,94 @@ onMounted(async () => {
         <div v-if="!items.length" class="empty hist-empty">
           <div class="glyph">⌀</div>
           {{ t("home.no_match") }}
+        </div>
+      </div>
+    </main>
+
+    <!-- 词典页签 -->
+    <main v-else class="main dictionary">
+      <div class="dict-head">
+        <div class="dict-copy">
+          <h4>{{ t("home.dictionary_title") }}</h4>
+          <p>{{ t("home.dictionary_hint") }}</p>
+        </div>
+        <div class="dict-head-side">
+          <span>{{ t("home.dictionary_count", { n: dictionaryTerms.length, max: DICTIONARY_MAX_TERMS }) }}</span>
+          <div class="dict-tools">
+            <div v-if="dictionaryTool === 'add'" class="dict-tool-panel">
+              <Input
+                v-model="termDraft"
+                :placeholder="t('home.dictionary_add_ph')"
+                @keydown.enter="addTerm"
+                @keydown.esc="closeDictionaryTool"
+              />
+              <button
+                type="button"
+                class="dict-icon-btn"
+                :title="t('actions.add')"
+                :aria-label="t('actions.add')"
+                @click="addTerm"
+              >✓</button>
+            </div>
+            <button
+              v-else
+              type="button"
+              class="dict-icon-btn"
+              :title="t('actions.add')"
+              :aria-label="t('actions.add')"
+              @click="toggleDictionaryTool('add')"
+            >＋</button>
+            <div v-if="dictionaryTool === 'search'" class="dict-tool-panel">
+              <Input
+                v-model="termSearch"
+                :placeholder="t('home.dictionary_search_ph')"
+                @keydown.esc="closeDictionaryTool"
+              />
+              <button
+                type="button"
+                class="dict-icon-btn"
+                :title="t('actions.cancel')"
+                :aria-label="t('actions.cancel')"
+                @click="closeDictionaryTool"
+              >×</button>
+            </div>
+            <button
+              v-else
+              type="button"
+              class="dict-icon-btn dict-search-btn"
+              :title="t('actions.search')"
+              :aria-label="t('actions.search')"
+              @click="toggleDictionaryTool('search')"
+            >⌕</button>
+          </div>
+        </div>
+      </div>
+      <p v-if="dictionaryError" class="dict-error">{{ dictionaryError }}</p>
+      <div class="dict-list" :class="{ 'dict-list-empty': !filteredTerms.length }">
+        <template v-if="filteredTerms.length">
+          <div v-for="term in filteredTerms" :key="term" class="term-row">
+            <Input
+              v-if="editingTerm === term"
+              v-model="editingDraft"
+              @keydown.enter="commitEdit"
+              @keydown.esc="cancelEdit"
+            />
+            <span v-else>{{ term }}</span>
+            <div class="term-actions">
+              <template v-if="editingTerm === term">
+                <Button size="sm" @click="commitEdit">{{ t("actions.save") }}</Button>
+                <Button variant="ghost" size="sm" @click="cancelEdit">{{ t("actions.cancel") }}</Button>
+              </template>
+              <template v-else>
+                <Button variant="ghost" size="sm" @click="startEdit(term)">{{ t("actions.edit") }}</Button>
+                <Button variant="ghost" size="sm" @click="deleteTerm(term)">{{ t("actions.delete") }}</Button>
+              </template>
+            </div>
+          </div>
+        </template>
+        <div v-else class="empty hist-empty">
+          <div class="glyph">⌀</div>
+          {{ termSearch ? t("home.dictionary_no_match") : t("home.dictionary_empty_state") }}
         </div>
       </div>
     </main>
@@ -513,5 +692,150 @@ nav .on {
 .hist-empty {
   border: none;
   padding: 0;
+}
+.dictionary {
+  gap: 12px;
+}
+.dict-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  align-items: start;
+  gap: 16px;
+}
+.dict-copy {
+  min-width: 0;
+}
+.dict-head h4 {
+  font-size: 21px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.dict-head p {
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+  margin: 0;
+}
+.dict-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 200px;
+}
+.dict-head-side span {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.dict-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+}
+.dict-tool-panel {
+  display: grid;
+  grid-template-columns: 112px 34px;
+  align-items: center;
+  gap: 6px;
+}
+.dict-tool-panel :deep(.input) {
+  background: var(--surface);
+}
+.dict-icon-btn {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  color: var(--text-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.dict-icon-btn:hover {
+  background: var(--sel-bg);
+}
+.dict-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.dict-search-btn {
+  font-size: 22px;
+  padding-bottom: 2px;
+}
+.dict-error {
+  margin: -4px 0 0;
+  color: var(--error);
+  font-size: 12px;
+}
+.dict-list {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow-y: auto;
+}
+.dict-list-empty {
+  border-style: dashed;
+  border-color: var(--border-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.term-row {
+  min-height: 46px;
+  padding: 7px 10px 7px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.term-row:last-child {
+  border-bottom: none;
+}
+.term-row:hover {
+  background: var(--surface-2);
+}
+.term-row > span {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-row :deep(.input) {
+  flex: 1;
+  background: var(--surface);
+}
+.term-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .dict-head {
+    grid-template-columns: 1fr;
+  }
+  .dict-head-side {
+    width: 100%;
+  }
+  .dict-tools {
+    width: 100%;
+  }
+  .dict-tool-panel {
+    grid-template-columns: minmax(0, 1fr) 34px;
+  }
 }
 </style>

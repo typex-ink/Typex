@@ -49,18 +49,29 @@ impl VolcengineStt {
         self
     }
 
-    fn build_body(&self, audio: &AudioInput) -> serde_json::Value {
+    fn build_body(&self, audio: &AudioInput, opts: &SttOptions) -> serde_json::Value {
+        let mut request = serde_json::json!({
+            "model_name": "bigmodel",
+            "enable_punc": true,
+            "enable_itn": true,
+        });
+        if let Some(prompt) = opts
+            .prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            request["corpus"] = serde_json::json!({
+                "context": prompt,
+            });
+        }
         serde_json::json!({
             "user": { "uid": "typex" },
             "audio": {
                 "format": "wav",
                 "data": base64::engine::general_purpose::STANDARD.encode(&audio.wav_16k_mono),
             },
-            "request": {
-                "model_name": "bigmodel",
-                "enable_punc": true,
-                "enable_itn": true,
-            },
+            "request": request,
         })
     }
 }
@@ -100,9 +111,9 @@ impl SttProvider for VolcengineStt {
     async fn transcribe(
         &self,
         audio: AudioInput,
-        _opts: SttOptions,
+        opts: SttOptions,
     ) -> Result<Transcript, ProviderError> {
-        let body = self.build_body(&audio);
+        let body = self.build_body(&audio, &opts);
         http::with_retry(|| async {
             let resp = self
                 .client
@@ -153,7 +164,7 @@ impl SttProvider for VolcengineStt {
         SttCapabilities {
             // 极速版官方限制音频 ≤ 100 MB / 2 小时；取字节上限做切片阈值
             max_bytes: Some(100 * 1024 * 1024),
-            supports_prompt: false, // 热词经 corpus 参数（F-10 预留）
+            supports_prompt: true,
             supports_language: false,
         }
     }

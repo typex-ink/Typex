@@ -30,15 +30,39 @@ pub struct PreparedTranscript {
     pub degraded: bool,
 }
 
+/// 提示词渲染上下文：会话开始时采样，后续重试沿用同一份上下文。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptContext {
+    pub target_app: Option<String>,
+}
+
+impl PromptContext {
+    pub fn new(target_app: Option<String>) -> Self {
+        Self {
+            target_app: target_app.and_then(|app| {
+                let app = app.trim();
+                (!app.is_empty()).then(|| app.to_string())
+            }),
+        }
+    }
+
+    pub fn insert_values(&self, values: &mut HashMap<&'static str, String>) {
+        if let Some(app) = &self.target_app {
+            values.insert("{target_app}", app.clone());
+        }
+    }
+}
+
 pub async fn process(
     mode: SessionMode,
     transcript: String,
     settings: &Settings,
     registry: &Arc<ProviderRegistry>,
+    prompt_context: &PromptContext,
 ) -> ProcessOutcome {
     match mode {
-        SessionMode::Dictation => polish(transcript, settings, registry).await,
-        SessionMode::Translation => translate(transcript, settings, registry).await,
+        SessionMode::Dictation => polish(transcript, settings, registry, prompt_context).await,
+        SessionMode::Translation => translate(transcript, settings, registry, prompt_context).await,
         // F-3 在 CP-3.x 接入助手面板流式路径；此处直通防御
         SessionMode::Assistant => ProcessOutcome::Done(transcript),
     }
@@ -52,6 +76,7 @@ pub async fn prepare_transcript(
     transcript: String,
     settings: &Settings,
     registry: &Arc<ProviderRegistry>,
+    prompt_context: &PromptContext,
 ) -> PreparedTranscript {
     if !settings.dictation.polish_enabled {
         return PreparedTranscript {
@@ -77,7 +102,10 @@ pub async fn prepare_transcript(
     };
     let mut values = HashMap::new();
     values.insert("{transcript}", transcript.clone());
-    // {dictionary} 未启用（F-10 P2）→ 该行整体省略
+    prompt_context.insert_values(&mut values);
+    if let Some(dictionary) = settings.dictionary.llm_context() {
+        values.insert("{dictionary}", dictionary);
+    }
     let rendered = prompt::render(template, &values);
 
     let req = LlmRequest {
@@ -120,8 +148,9 @@ async fn polish(
     transcript: String,
     settings: &Settings,
     registry: &Arc<ProviderRegistry>,
+    prompt_context: &PromptContext,
 ) -> ProcessOutcome {
-    let prepared = prepare_transcript(transcript, settings, registry).await;
+    let prepared = prepare_transcript(transcript, settings, registry, prompt_context).await;
     if prepared.degraded {
         ProcessOutcome::Degraded(prepared.text)
     } else {
@@ -134,12 +163,13 @@ async fn translate(
     transcript: String,
     settings: &Settings,
     registry: &Arc<ProviderRegistry>,
+    prompt_context: &PromptContext,
 ) -> ProcessOutcome {
     let llm = match registry.llm_for(SlotKind::Translate) {
         Ok(l) => l,
         Err(e) => return ProcessOutcome::Failed(e),
     };
-    let transcript = prepare_transcript(transcript, settings, registry)
+    let transcript = prepare_transcript(transcript, settings, registry, prompt_context)
         .await
         .text;
     let template = if settings.translation.translate_prompt.is_empty() {
@@ -157,6 +187,7 @@ async fn translate(
         "{target_language}",
         settings.translation.target_language.clone(),
     );
+    prompt_context.insert_values(&mut values);
     // 双向翻译子句：开关关闭时不注入值 → 模板中该行按可选段规则整体省略
     if settings.translation.bidirectional {
         values.insert(

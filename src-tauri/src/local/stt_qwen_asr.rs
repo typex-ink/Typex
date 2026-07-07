@@ -116,14 +116,26 @@ fn wav_to_samples(wav: &[u8]) -> Result<Vec<f32>, ProviderError> {
 }
 
 /// 阻塞转写：音频 chunk 评估进 KV cache 后贪心解码。
-fn transcribe_blocking(loaded: &LoadedAsr, samples: &[f32]) -> Result<String, ProviderError> {
+fn transcribe_blocking(
+    loaded: &LoadedAsr,
+    samples: &[f32],
+    dictionary_prompt: Option<String>,
+) -> Result<String, ProviderError> {
     let invalid = |e: &dyn std::fmt::Display| ProviderError::InvalidRequest(format!("{e}"));
     let model = &loaded.model;
     let mtmd = &loaded.mtmd;
 
     // prompt：用户消息 = 音频 marker + 转写指令（模板优先模型内置，缺失拼 ChatML）
     let marker = mtmd_default_marker();
-    let user_content = format!("{marker}请转写这段音频。");
+    let user_content = match dictionary_prompt {
+        Some(prompt) if !prompt.trim().is_empty() => {
+            format!(
+                "{marker}请转写这段音频。以下是用户词典，请在听到相近发音时优先使用这些标准写法，不要输出词典中没有被说出的词：\n{}",
+                prompt.trim()
+            )
+        }
+        _ => format!("{marker}请转写这段音频。"),
+    };
     let prompt = if let Ok(template) = model.chat_template(None) {
         let chat = vec![
             LlamaChatMessage::new("user".into(), user_content.clone()).map_err(|e| invalid(&e))?,
@@ -192,14 +204,17 @@ impl SttProvider for QwenAsrStt {
     async fn transcribe(
         &self,
         audio: AudioInput,
-        _opts: SttOptions,
+        opts: SttOptions,
     ) -> Result<Transcript, ProviderError> {
         let samples = wav_to_samples(&audio.wav_16k_mono)?;
         let loaded = self.ensure_loaded()?;
+        let dictionary_prompt = opts.prompt;
         // 推理是秒级 CPU/GPU 阻塞调用：挪到 blocking 线程池，别占 async 线程
-        let text = tokio::task::spawn_blocking(move || transcribe_blocking(&loaded, &samples))
-            .await
-            .map_err(|e| ProviderError::InvalidRequest(format!("转写线程异常: {e}")))??;
+        let text = tokio::task::spawn_blocking(move || {
+            transcribe_blocking(&loaded, &samples, dictionary_prompt)
+        })
+        .await
+        .map_err(|e| ProviderError::InvalidRequest(format!("转写线程异常: {e}")))??;
         Ok(transcript_from_provider_text(text, None))
     }
 
@@ -207,7 +222,7 @@ impl SttProvider for QwenAsrStt {
         SttCapabilities {
             // 保守上限强制 VAD 切片，规避 llama.cpp 长音频 bug（ADR-22）
             max_bytes: Some(MAX_AUDIO_BYTES),
-            supports_prompt: false,
+            supports_prompt: true,
             supports_language: false,
         }
     }
@@ -240,6 +255,7 @@ mod tests {
         let stt = QwenAsrStt::new(PathBuf::from("/tmp/a"), PathBuf::from("/tmp/b"), 4);
         let caps = stt.capabilities();
         assert_eq!(caps.max_bytes, Some(MAX_AUDIO_BYTES));
+        assert!(caps.supports_prompt);
     }
 
     #[test]

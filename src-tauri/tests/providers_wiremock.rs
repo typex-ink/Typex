@@ -241,6 +241,53 @@ fn test_llm_profile(id: &str, base_url: &str) -> ProviderProfile {
 }
 
 #[tokio::test]
+async fn dictation_polish_receives_target_app_context() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            let content = v["messages"][1]["content"].as_str().unwrap();
+            assert!(content.contains("<transcript>raw text</transcript>"));
+            assert!(content.contains("<target_app>Terminal</target_app>"));
+            assert!(content.contains("<dictionary>- Typex\n- OpenAI</dictionary>"));
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body(&["polished text"]))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut settings = Settings::default();
+    settings.dictation.polish_enabled = true;
+    settings.dictionary.terms = vec!["Typex".into(), "OpenAI".into()];
+    settings.profiles = vec![test_llm_profile("polish", &server.uri())];
+    settings.slots.insert(
+        SlotKind::Polish,
+        SlotConfig {
+            active_profile: Some("polish".into()),
+        },
+    );
+    let registry = Arc::new(ProviderRegistry::new(settings.clone()));
+    let prompt_context = pipeline::PromptContext::new(Some("Terminal".into()));
+
+    let out = pipeline::process(
+        SessionMode::Dictation,
+        "raw text".into(),
+        &settings,
+        &registry,
+        &prompt_context,
+    )
+    .await;
+
+    match out {
+        ProcessOutcome::Done(text) => assert_eq!(text, "polished text"),
+        _ => panic!("expected polished output"),
+    }
+}
+
+#[tokio::test]
 async fn translation_uses_polished_transcript_when_enabled() {
     let server = MockServer::start().await;
     let calls = Arc::new(AtomicUsize::new(0));
@@ -254,12 +301,14 @@ async fn translation_uses_polished_transcript_when_enabled() {
             match idx {
                 0 => {
                     assert!(content.contains("<transcript>嗯 raw</transcript>"));
+                    assert!(content.contains("<target_app>Slack</target_app>"));
                     ResponseTemplate::new(200)
                         .insert_header("content-type", "text/event-stream")
                         .set_body_string(sse_body(&["clean"]))
                 }
                 1 => {
                     assert!(content.contains("<text>clean</text>"));
+                    assert!(content.contains("<target_app>Slack</target_app>"));
                     assert!(!content.contains("嗯 raw"));
                     ResponseTemplate::new(200)
                         .insert_header("content-type", "text/event-stream")
@@ -291,12 +340,14 @@ async fn translation_uses_polished_transcript_when_enabled() {
         },
     );
     let registry = Arc::new(ProviderRegistry::new(settings.clone()));
+    let prompt_context = pipeline::PromptContext::new(Some("Slack".into()));
 
     let out = pipeline::process(
         SessionMode::Translation,
         "嗯 raw".into(),
         &settings,
         &registry,
+        &prompt_context,
     )
     .await;
 
@@ -319,6 +370,7 @@ async fn translation_skips_polish_when_disabled() {
             let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
             let content = v["messages"][1]["content"].as_str().unwrap();
             assert!(content.contains("<text>raw</text>"));
+            assert!(content.contains("<target_app>Mail</target_app>"));
             assert!(!content.contains("<transcript>raw</transcript>"));
             ResponseTemplate::new(200)
                 .insert_header("content-type", "text/event-stream")
@@ -338,8 +390,16 @@ async fn translation_skips_polish_when_disabled() {
         },
     );
     let registry = Arc::new(ProviderRegistry::new(settings.clone()));
+    let prompt_context = pipeline::PromptContext::new(Some("Mail".into()));
 
-    let out = pipeline::process(SessionMode::Translation, "raw".into(), &settings, &registry).await;
+    let out = pipeline::process(
+        SessionMode::Translation,
+        "raw".into(),
+        &settings,
+        &registry,
+        &prompt_context,
+    )
+    .await;
 
     match out {
         ProcessOutcome::Done(text) => assert_eq!(text, "translated"),
@@ -362,12 +422,14 @@ async fn assistant_uses_polished_instruction_when_enabled() {
             match idx {
                 0 => {
                     assert!(content.contains("<transcript>呃 explain</transcript>"));
+                    assert!(content.contains("<target_app>VS Code</target_app>"));
                     ResponseTemplate::new(200)
                         .insert_header("content-type", "text/event-stream")
                         .set_body_string(sse_body(&["explain"]))
                 }
                 1 => {
                     assert!(content.contains("<question>explain</question>"));
+                    assert!(content.contains("<target_app>VS Code</target_app>"));
                     assert!(!content.contains("呃 explain"));
                     ResponseTemplate::new(200)
                         .insert_header("content-type", "text/event-stream")
@@ -411,7 +473,12 @@ async fn assistant_uses_polished_instruction_when_enabled() {
     );
 
     let out = assistant
-        .run("呃 explain".into(), None, false)
+        .run(
+            "呃 explain".into(),
+            None,
+            false,
+            pipeline::PromptContext::new(Some("VS Code".into())),
+        )
         .await
         .unwrap();
 
@@ -620,6 +687,7 @@ async fn volc_request_shape_and_response_parse() {
             assert_eq!(body["audio"]["format"], "wav");
             assert_eq!(body["request"]["model_name"], "bigmodel");
             assert_eq!(body["request"]["enable_punc"], true);
+            assert_eq!(body["request"]["corpus"]["context"], "Typex\nOpenAI");
             // 音频是合法 base64
             use base64::Engine;
             let data = body["audio"]["data"].as_str().unwrap();
@@ -636,7 +704,13 @@ async fn volc_request_shape_and_response_parse() {
 
     let stt = VolcengineStt::new(client(), server.uri(), "app-1", "tok-1");
     let t = stt
-        .transcribe(wav_stub(), SttOptions::default())
+        .transcribe(
+            wav_stub(),
+            SttOptions {
+                prompt: Some("Typex\nOpenAI".into()),
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
     assert_eq!(t.text, "火山转写结果");

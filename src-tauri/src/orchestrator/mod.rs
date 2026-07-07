@@ -66,7 +66,7 @@ struct Exec {
     /// 会话原始转写（历史记录用：id → (transcript, duration_ms)）
     transcript_store: HashMap<u64, (String, u64)>,
     recording_started: Option<Instant>,
-    /// 录音开始时的前台应用名（历史 app_name / F-11 预留）
+    /// 录音开始时的前台应用名（历史 app_name / prompt 上下文 / F-11 预留）
     target_app: Option<String>,
     tx: mpsc::UnboundedSender<Event>,
 }
@@ -245,7 +245,9 @@ impl Orchestrator {
                     )
                 });
                 let registry = self.registry.clone();
-                let lang = self.settings.get().dictation.language.clone();
+                let settings = self.settings.get();
+                let lang = settings.dictation.language.clone();
+                let stt_prompt = settings.dictionary.stt_prompt();
                 let tx = exec.tx.clone();
                 tokio::spawn(async move {
                     let selection_fut = async {
@@ -277,7 +279,7 @@ impl Orchestrator {
                             },
                             SttOptions {
                                 language: Some(lang),
-                                prompt: None,
+                                prompt: stt_prompt,
                                 temperature: None,
                             },
                         )
@@ -322,9 +324,13 @@ impl Orchestrator {
                     let read_failed = self
                         .selection_read_failed
                         .load(std::sync::atomic::Ordering::Relaxed);
+                    let prompt_context = pipeline::PromptContext::new(exec.target_app.clone());
                     let tx = exec.tx.clone();
                     tokio::spawn(async move {
-                        let event = match assistant.run(transcript, selection, read_failed).await {
+                        let event = match assistant
+                            .run(transcript, selection, read_failed, prompt_context)
+                            .await
+                        {
                             Ok(assistant::AssistantOutcome::Rewrite(text)) => {
                                 Event::ProcessResult { session_id, text }
                             }
@@ -340,9 +346,16 @@ impl Orchestrator {
                 let tx = exec.tx.clone();
                 let settings = self.settings.get();
                 let registry = self.registry.clone();
+                let prompt_context = pipeline::PromptContext::new(exec.target_app.clone());
                 tokio::spawn(async move {
-                    let event = match pipeline::process(mode, transcript, &settings, &registry)
-                        .await
+                    let event = match pipeline::process(
+                        mode,
+                        transcript,
+                        &settings,
+                        &registry,
+                        &prompt_context,
+                    )
+                    .await
                     {
                         pipeline::ProcessOutcome::Done(text) => {
                             Event::ProcessResult { session_id, text }

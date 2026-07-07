@@ -5805,7 +5805,7 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "typex"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "async-stream",
@@ -5833,6 +5833,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sherpa-rs",
+ "sherpa-rs-sys",
  "specta",
  "specta-typescript",
  "sysinfo",

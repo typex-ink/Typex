@@ -59,6 +59,7 @@
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 剪贴板恢复逻辑（`inject/paste.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；恢复失败不吞注入成功的结果 |
 | PromptKit 模板渲染 | 变量替换（target_language、词典注入）、`ANSWER:` 前缀解析 |
+| F-10 词典 | settings 迁移与规范化；STT prompt / 火山 corpus / 本地 hotwords 注入；空词典时 LLM `<dictionary>` 行省略 |
 | 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误 |
 
 ## 4. Rust 集成测试（`src-tauri/tests/`）

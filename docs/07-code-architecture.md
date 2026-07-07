@@ -340,7 +340,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 分组 | Command | 说明 |
 |---|---|---|
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
-| 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置 |
+| 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置；F-10 词典作为 `Settings.dictionary.terms[]` 随设置同步 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |

@@ -44,7 +44,8 @@ impl SettingsService {
     }
 
     /// 全量替换并落盘 + 广播。
-    pub fn update(&self, new: Settings) -> Result<Settings> {
+    pub fn update(&self, mut new: Settings) -> Result<Settings> {
+        new.normalize_for_save();
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| {
                 TypexError::new(ErrorCode::Internal, format!("创建配置目录失败: {e}"))
@@ -75,7 +76,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 2);
+        assert_eq!(svc.get().schema_version, 3);
 
         svc.mutate(|s| s.general.autostart = false).unwrap();
         let svc2 = SettingsService::load(dir.clone());
@@ -89,7 +90,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 2);
+        assert_eq!(svc.get().schema_version, 3);
         assert!(dir.join("settings.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -122,7 +123,7 @@ mod tests {
 
         let svc = SettingsService::load(dir.clone());
         let s = svc.get();
-        assert_eq!(s.schema_version, 2);
+        assert_eq!(s.schema_version, 3);
         assert_eq!(
             s.profiles[0].capability,
             crate::types::ProviderCapability::Llm
