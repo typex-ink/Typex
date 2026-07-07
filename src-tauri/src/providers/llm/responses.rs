@@ -14,6 +14,7 @@ pub struct ResponsesLlm {
     api_key: String,
     model: String,
     extra_headers: HashMap<String, String>,
+    reasoning_effort: Option<String>,
 }
 
 impl ResponsesLlm {
@@ -29,11 +30,17 @@ impl ResponsesLlm {
             api_key: api_key.into(),
             model: model.into(),
             extra_headers: HashMap::new(),
+            reasoning_effort: None,
         }
     }
 
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
         self.extra_headers = headers;
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+        self.reasoning_effort = effort;
         self
     }
 
@@ -61,6 +68,9 @@ impl ResponsesLlm {
         });
         if let Some(mt) = req.max_tokens {
             body["max_output_tokens"] = mt.into();
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
         }
         body
     }
@@ -176,5 +186,24 @@ mod tests {
             parse_event("response.output_item.added", "{}"),
             ResponsesEvent::Other
         ));
+    }
+
+    #[test]
+    fn build_body_includes_reasoning_effort_when_configured() {
+        let llm = ResponsesLlm::new(
+            reqwest::Client::new(),
+            "https://api.example.com/v1",
+            "k",
+            "m",
+        )
+        .with_reasoning_effort(Some("high".into()));
+        let req = LlmRequest {
+            system: "sys".into(),
+            messages: vec![],
+            temperature: 0.2,
+            max_tokens: None,
+        };
+        let body = llm.build_body(&req);
+        assert_eq!(body["reasoning"]["effort"], "high");
     }
 }

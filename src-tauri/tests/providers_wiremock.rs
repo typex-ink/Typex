@@ -267,6 +267,30 @@ async fn chat_completions_sends_thinking_option_and_strips_think_blocks() {
 }
 
 #[tokio::test]
+async fn chat_completions_sends_reasoning_effort_when_configured() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(move |req: &Request| {
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(v["reasoning_effort"], "high");
+            assert!(v.get("enable_thinking").is_none());
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body(&["ok"]))
+        })
+        .mount(&server)
+        .await;
+
+    let llm = ChatCompletionsLlm::new(client(), server.uri(), "sk-llm", "test-model")
+        .with_reasoning_effort(Some("high".into()));
+    let mut stream = llm.complete(llm_req());
+    while let Some(d) = stream.next().await {
+        d.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn chat_completions_error_status_maps() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -307,6 +331,31 @@ async fn responses_streams_output_text_delta() {
         out.push_str(&d.unwrap().text);
     }
     assert_eq!(out, "Hello");
+}
+
+#[tokio::test]
+async fn responses_sends_reasoning_effort_when_configured() {
+    let server = MockServer::start().await;
+    let body = "event: response.output_text.delta\ndata: {\"delta\":\"ok\"}\n\n\
+                event: response.completed\ndata: {}\n\n";
+    Mock::given(method("POST"))
+        .and(path("/responses"))
+        .respond_with(move |req: &Request| {
+            let v: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(v["reasoning"]["effort"], "high");
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body)
+        })
+        .mount(&server)
+        .await;
+
+    let llm = ResponsesLlm::new(client(), server.uri(), "k", "gpt-test")
+        .with_reasoning_effort(Some("high".into()));
+    let mut stream = llm.complete(llm_req());
+    while let Some(d) = stream.next().await {
+        d.unwrap();
+    }
 }
 
 #[tokio::test]

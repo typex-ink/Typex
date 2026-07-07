@@ -29,21 +29,42 @@ pub struct ProviderRegistry {
     models_data_dir: Mutex<Option<std::path::PathBuf>>,
 }
 
+const REASONING_EFFORT_VALUES: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh"];
+
+fn profile_reasoning_effort(profile: &ProviderProfile) -> Option<String> {
+    let effort = profile
+        .options
+        .get("reasoning_effort")
+        .and_then(|v| v.as_str())?;
+    REASONING_EFFORT_VALUES
+        .contains(&effort)
+        .then(|| effort.to_string())
+}
+
+fn reasoning_effort_enables_thinking(effort: &str) -> bool {
+    effort != "none"
+}
+
 fn chat_completions_thinking_option(profile: &ProviderProfile) -> Option<bool> {
     if supports_enable_thinking_param(profile) {
-        Some(
-            profile
-                .options
-                .get("enable_thinking")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        )
+        Some(profile_enable_thinking(profile))
     } else {
         None
     }
 }
 
+fn chat_completions_reasoning_effort(profile: &ProviderProfile) -> Option<String> {
+    if supports_enable_thinking_param(profile) {
+        None
+    } else {
+        profile_reasoning_effort(profile)
+    }
+}
+
 fn profile_enable_thinking(profile: &ProviderProfile) -> bool {
+    if let Some(effort) = profile_reasoning_effort(profile) {
+        return reasoning_effort_enables_thinking(&effort);
+    }
     profile
         .options
         .get("enable_thinking")
@@ -62,7 +83,8 @@ fn supports_enable_thinking_param(profile: &ProviderProfile) -> bool {
     }
 
     let model = profile.model.to_ascii_lowercase();
-    profile.options.contains_key("enable_thinking")
+    (profile.options.contains_key("enable_thinking")
+        || profile.options.contains_key("reasoning_effort"))
         && model.contains("qwen")
         && !base_url.contains("api.openai.com")
         && !base_url.contains("openrouter")
@@ -348,7 +370,8 @@ impl ProviderRegistry {
                         profile.model.clone(),
                     )
                     .with_headers(profile.extra_headers.clone())
-                    .with_thinking(chat_completions_thinking_option(profile)),
+                    .with_thinking(chat_completions_thinking_option(profile))
+                    .with_reasoning_effort(chat_completions_reasoning_effort(profile)),
                 ))
             }
             ProviderKind::Responses => {
@@ -356,7 +379,8 @@ impl ProviderRegistry {
                 let client = self.http_client(profile.timeout_ms);
                 Ok(Arc::new(
                     ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
-                        .with_headers(profile.extra_headers.clone()),
+                        .with_headers(profile.extra_headers.clone())
+                        .with_reasoning_effort(profile_reasoning_effort(profile)),
                 ))
             }
             #[cfg(feature = "local-models")]
@@ -580,6 +604,23 @@ mod tests {
     }
 
     #[test]
+    fn qwen_compatible_endpoint_maps_reasoning_effort_to_thinking_bool() {
+        let mut p = llm_profile("qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("high".into()),
+        );
+        assert_eq!(chat_completions_thinking_option(&p), Some(true));
+        assert_eq!(chat_completions_reasoning_effort(&p), None);
+
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("none".into()),
+        );
+        assert_eq!(chat_completions_thinking_option(&p), Some(false));
+    }
+
+    #[test]
     fn explicit_qwen_custom_endpoint_sends_thinking_param() {
         let mut p = llm_profile("qwen-custom", "https://qwen.example.com/v1");
         p.options
@@ -588,12 +629,24 @@ mod tests {
     }
 
     #[test]
-    fn profile_enable_thinking_defaults_false_and_reads_bool() {
+    fn profile_enable_thinking_defaults_false_and_reads_bool_or_effort() {
         let mut p = llm_profile("local-qwen", "");
         assert!(!profile_enable_thinking(&p));
 
         p.options
             .insert("enable_thinking".into(), serde_json::Value::Bool(true));
+        assert!(profile_enable_thinking(&p));
+
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("none".into()),
+        );
+        assert!(!profile_enable_thinking(&p));
+
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("medium".into()),
+        );
         assert!(profile_enable_thinking(&p));
     }
 
@@ -603,6 +656,28 @@ mod tests {
         p.options
             .insert("enable_thinking".into(), serde_json::Value::Bool(true));
         assert_eq!(chat_completions_thinking_option(&p), None);
+    }
+
+    #[test]
+    fn non_qwen_endpoint_uses_generic_reasoning_effort() {
+        let mut p = llm_profile("openai", "https://api.openai.com/v1");
+        p.model = "gpt-5-mini".into();
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("high".into()),
+        );
+        assert_eq!(chat_completions_thinking_option(&p), None);
+        assert_eq!(chat_completions_reasoning_effort(&p), Some("high".into()));
+    }
+
+    #[test]
+    fn reasoning_effort_rejects_unknown_values() {
+        let mut p = llm_profile("openai", "https://api.openai.com/v1");
+        p.options.insert(
+            "reasoning_effort".into(),
+            serde_json::Value::String("maximum".into()),
+        );
+        assert_eq!(profile_reasoning_effort(&p), None);
     }
 
     /// ADR-20：问答槽无本地兜底——未配置一律 NotConfigured。

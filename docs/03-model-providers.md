@@ -125,9 +125,10 @@ Authorization: Bearer {api_key}
 
 SSE `data:` 行解析 `choices[0].delta.content`。覆盖 OpenAI、DeepSeek、Groq、SiliconFlow、OpenRouter、Ollama、火山方舟（豆包 LLM 也提供 OpenAI 兼容端点）等几乎全部生态。
 
-Qwen3 / 千问类模型可能默认输出 `<think>...</think>` 推理块，语音助手会表现为长时间“思考”且把内部推理显示到回答弹窗。Provider 层必须做两件事：
+Qwen3 / 千问类模型可能默认输出 `<think>...</think>` 推理块，语音助手会表现为长时间“思考”且把内部推理显示到回答弹窗。Reasoning 模型还可能支持显式 effort 等级。Provider 层必须做三件事：
 
-- `profiles[].options.enable_thinking` 是用户可配置布尔值，默认 `false`；对已知支持该扩展的 Qwen 兼容 Chat Completions 端点（SiliconFlow、DashScope/阿里兼容模式等），以及用户显式保存该选项的自定义 Qwen 端点，请求体发送顶层 `enable_thinking`。
+- `profiles[].options.reasoning_effort` 是用户可配置字符串，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；缺省表示“不指定”，不向 OpenAI 兼容端点发送通用 reasoning 字段。对普通 OpenAI 兼容 Chat Completions 端点，请求体发送顶层 `reasoning_effort`。
+- `profiles[].options.enable_thinking` 是兼容旧配置和 Qwen 兼容端点的布尔值；对已知支持该扩展的 Qwen 兼容 Chat Completions 端点（SiliconFlow、DashScope/阿里兼容模式等），以及用户显式保存 thinking 配置的自定义 Qwen 端点，请求体发送顶层 `enable_thinking`。`reasoning_effort=none` 映射为 `false`，其他等级映射为 `true`，不把通用 `reasoning_effort` 发给这些端点。
 - 不论端点是否支持该参数，所有 LLM 流式 delta 在进入 orchestrator 前都要过滤完整或跨 chunk 分片的 `<think>...</think>` 块；内部推理不得出现在助手弹窗、整理/翻译结果或注入文本中。
 
 ### 3.2 内置实现二：`responses`（OpenAI Responses 格式）
@@ -141,6 +142,8 @@ Authorization: Bearer {api_key}
 
 SSE 事件流：处理 `response.output_text.delta`（增量文本）、`response.completed`、`response.failed`。这是 OpenAI 的新主协议（也是 Codex 生态的唯一 wire 协议），必须一等支持。
 
+`profiles[].options.reasoning_effort` 设置为 `none` / `minimal` / `low` / `medium` / `high` / `xhigh` 时，请求体发送 `reasoning: { "effort": "..." }`；缺省时不发送 `reasoning` 字段。
+
 ### 3.3 内置实现三：`local`（本地推理，v1.1，[ADR-20](09-decisions.md)）
 
 进程内推理，实现同一个 `LlmProvider` trait（流式返回 delta 与云端一致）：
@@ -149,7 +152,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 - **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B，Q4_K_M），按硬件档位下载（见 §8）。Apache 2.0，多语言，中文分词效率高。
 - **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B 级模型（[ADR-22](09-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。
-- **思考模式**：`profiles[].options.enable_thinking` 默认 `false`；本地 Qwen LLM 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
+- **思考模式**：本地 Qwen LLM 仅支持开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。Provider 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
 
 ### 3.4 内置提示词与占位符（可在高级设置中覆盖）
@@ -356,7 +359,7 @@ F-3 不引入新的 Provider 类型：
 要点：
 
 - `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值一律是 keyring 引用，明文不落盘。
-- LLM `options.enable_thinking` 控制 thinking 模式，缺省为 `false`；云端只对支持端点发送 `enable_thinking` 参数，避免破坏 OpenAI / Responses 等严格协议；本地 Qwen LLM 通过 `/think` / `/no_think` 控制词实现。
+- LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；缺省为“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。
 

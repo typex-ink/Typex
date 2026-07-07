@@ -7,7 +7,6 @@ import FormRow from "@/components/FormRow.vue";
 import Input from "@/components/Input.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Select from "@/components/Select.vue";
-import Toggle from "@/components/Toggle.vue";
 import { presetsForCapability } from "@/shared/presets";
 import { formatBytes } from "@/shared/format";
 import {
@@ -34,6 +33,23 @@ const CAPABILITY_LABEL_KEY: Record<ProviderCapability, string> = {
 };
 
 const presets = presetsForCapability(props.capability);
+const REASONING_AUTO = "auto";
+const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
+function initialReasoningEffort(profile: ProviderProfile | null): string {
+  const raw = profile?.options?.["reasoning_effort"];
+  if (isReasoningEffort(raw)) return raw;
+  const legacy = profile?.options?.["enable_thinking"];
+  if (legacy === true) return "medium";
+  if (legacy === false) return "none";
+  return REASONING_AUTO;
+}
+
 const presetId = ref<string>(
   props.profile?.kind === "local"
     ? (presets.find((p) => p.kind === "local")?.id ?? presets[presets.length - 1].id)
@@ -54,12 +70,20 @@ const saving = ref(false);
 const isNew = computed(() => !props.profile);
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
-const isCloudChatLlm = computed(
-  () => !isLocal.value && props.capability !== "stt" && kind.value === "chat_completions",
+const canConfigureReasoning = computed(
+  () =>
+    props.capability !== "stt" &&
+    (kind.value === "chat_completions" || kind.value === "responses" || kind.value === "local"),
 );
-const canConfigureThinking = computed(
-  () => props.capability !== "stt" && (kind.value === "chat_completions" || kind.value === "local"),
-);
+const reasoningOptions = computed(() => [
+  { value: REASONING_AUTO, label: t("settings.profile.reasoning_auto") },
+  { value: "none", label: t("settings.profile.reasoning_none") },
+  { value: "minimal", label: t("settings.profile.reasoning_minimal") },
+  { value: "low", label: t("settings.profile.reasoning_low") },
+  { value: "medium", label: t("settings.profile.reasoning_medium") },
+  { value: "high", label: t("settings.profile.reasoning_high") },
+  { value: "xhigh", label: t("settings.profile.reasoning_xhigh") },
+]);
 const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
 const hasExistingVolcKeys = computed(
   () =>
@@ -73,7 +97,7 @@ const localModels = ref<LocalModelInfo[]>([]);
 const loadPolicy = ref<string>(
   (props.profile?.options?.["load_policy"] as string) ?? "resident",
 );
-const thinkingEnabled = ref(props.profile?.options?.["enable_thinking"] === true);
+const reasoningEffort = ref(initialReasoningEffort(props.profile));
 const downloadPct = ref<number | null>(null);
 let unlistenProgress: (() => void) | null = null;
 
@@ -153,9 +177,11 @@ async function save(): Promise<string | null> {
   const id = props.profile?.id ?? `p-${Date.now().toString(36)}`;
   const options = { ...(props.profile?.options ?? {}) };
   if (isLocal.value) options["load_policy"] = loadPolicy.value;
-  if (canConfigureThinking.value) {
-    options["enable_thinking"] = thinkingEnabled.value;
+  if (canConfigureReasoning.value && isReasoningEffort(reasoningEffort.value)) {
+    options["reasoning_effort"] = reasoningEffort.value;
+    options["enable_thinking"] = reasoningEffort.value !== "none";
   } else {
+    delete options["reasoning_effort"];
     delete options["enable_thinking"];
   }
   const profile: ProviderProfile = {
@@ -297,11 +323,11 @@ onUnmounted(() => unlistenProgress?.());
         />
       </FormRow>
       <FormRow
-        v-if="canConfigureThinking"
-        :label="t('settings.profile.thinking')"
-        :hint="t('settings.profile.thinking_hint')"
+        v-if="canConfigureReasoning"
+        :label="t('settings.profile.reasoning_effort')"
+        :hint="t('settings.profile.reasoning_effort_hint')"
       >
-        <Toggle v-model="thinkingEnabled" />
+        <Select v-model="reasoningEffort" :options="reasoningOptions" />
       </FormRow>
       <p class="local-note">{{ t("settings.profile.local_note") }}</p>
     </template>
@@ -327,11 +353,11 @@ onUnmounted(() => unlistenProgress?.());
         />
       </FormRow>
       <FormRow
-        v-if="isCloudChatLlm"
-        :label="t('settings.profile.thinking')"
-        :hint="t('settings.profile.thinking_hint')"
+        v-if="canConfigureReasoning"
+        :label="t('settings.profile.reasoning_effort')"
+        :hint="t('settings.profile.reasoning_effort_hint')"
       >
-        <Toggle v-model="thinkingEnabled" />
+        <Select v-model="reasoningEffort" :options="reasoningOptions" />
       </FormRow>
       <template v-if="isVolc">
         <FormRow

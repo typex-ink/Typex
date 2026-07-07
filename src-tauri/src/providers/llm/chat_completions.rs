@@ -15,6 +15,7 @@ pub struct ChatCompletionsLlm {
     model: String,
     extra_headers: HashMap<String, String>,
     enable_thinking: Option<bool>,
+    reasoning_effort: Option<String>,
 }
 
 impl ChatCompletionsLlm {
@@ -31,6 +32,7 @@ impl ChatCompletionsLlm {
             model: model.into(),
             extra_headers: HashMap::new(),
             enable_thinking: None,
+            reasoning_effort: None,
         }
     }
 
@@ -41,6 +43,11 @@ impl ChatCompletionsLlm {
 
     pub fn with_thinking(mut self, enable_thinking: Option<bool>) -> Self {
         self.enable_thinking = enable_thinking;
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+        self.reasoning_effort = effort;
         self
     }
 
@@ -60,6 +67,9 @@ impl ChatCompletionsLlm {
         }
         if let Some(enable) = self.enable_thinking {
             body["enable_thinking"] = enable.into();
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            body["reasoning_effort"] = effort.clone().into();
         }
         body
     }
@@ -144,5 +154,25 @@ mod tests {
     #[test]
     fn parse_delta_none_for_invalid_json() {
         assert_eq!(parse_delta("not json"), None);
+    }
+
+    #[test]
+    fn build_body_includes_reasoning_effort_when_configured() {
+        let llm = ChatCompletionsLlm::new(
+            reqwest::Client::new(),
+            "https://api.example.com/v1",
+            "k",
+            "m",
+        )
+        .with_reasoning_effort(Some("high".into()));
+        let req = LlmRequest {
+            system: "sys".into(),
+            messages: vec![],
+            temperature: 0.2,
+            max_tokens: None,
+        };
+        let body = llm.build_body(&req);
+        assert_eq!(body["reasoning_effort"], "high");
+        assert!(body.get("enable_thinking").is_none());
     }
 }
