@@ -5,7 +5,7 @@ use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
@@ -248,9 +248,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 1, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 2, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 1);
+        assert_eq!(s.schema_version, 2);
     }
 
     #[test]

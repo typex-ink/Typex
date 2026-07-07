@@ -53,6 +53,7 @@
   .btn-secondary { background:transparent; color:var(--text-1); border:1px solid var(--border-2); }
   .btn-ghost { background:transparent; color:var(--text-2); text-decoration:underline; text-underline-offset:3px; }
   .btn-danger { background:transparent; color:var(--error); border:1px solid currentColor; }
+  .btn-danger:hover { background:var(--recording-soft); }
   .btn-sm { height:26px; font-size:12px; padding:0 10px; }
   .btn-focus { outline:2px solid var(--focus-ring); outline-offset:2px; }
   .btn[disabled] { opacity:.45; cursor:default; }
@@ -434,18 +435,25 @@
             </div>
             <div class="content">
               <h5>模型服务</h5>
+              <div style="font-size:12px;color:var(--text-2);font-weight:600;margin:12px 0 8px">功能分配</div>
               <div class="slot-h"><span>语音转文字</span></div>
               <div class="prov on"><div class="logo">G</div><div class="meta"><b>Groq</b> · whisper-large-v3-turbo<br><small>openai_compat · 已连接</small></div><span class="lat">✓ 320ms</span><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
-              <div class="slot-h"><span>文本整理</span><span style="font-size:11.5px;color:var(--text-2)">与翻译共用 <span class="toggle on"></span></span></div>
+              <div class="slot-h"><span>文本整理</span></div>
+              <div class="prov"><div class="logo">D</div><div class="meta"><b>DeepSeek V3</b> · deepseek-chat<br><small>chat_completions · 使用中：文本整理 · 翻译模型</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
               <div class="slot-h"><span>翻译模型</span></div>
-              <div class="prov"><div class="logo">◉</div><div class="meta"><b>本地 · Qwen3.5-2B</b><br><small>local · 已下载 · 1.3 GB · 离线</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
+              <div class="prov"><div class="logo">D</div><div class="meta"><b>DeepSeek V3</b> · deepseek-chat<br><small>chat_completions · 使用中：文本整理 · 翻译模型</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
               <div class="slot-h"><span>问答模型</span></div>
               <div class="prov"><div class="logo">C</div><div class="meta"><b>Claude</b> · claude-fable-5<br><small>responses · 已连接</small></div><span class="lat">✓ 640ms</span><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button><button class="btn btn-ghost btn-sm">切换 ▾</button></div>
               <p style="font-size:11px;color:var(--text-3);margin-top:12px">已下载模型:Qwen3-ASR-0.6B 1.0 GB · Qwen3.5-2B 1.3 GB · <a href="#">管理…</a></p>
+              <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text-2);font-weight:600;margin:18px 0 8px"><span>配置池</span><span><button class="btn btn-secondary btn-sm">新建 STT 服务</button> <button class="btn btn-secondary btn-sm">新建 LLM 服务</button></span></div>
+              <div class="slot-h"><span>STT 服务</span></div>
+              <div class="prov on"><div class="logo">G</div><div class="meta"><b>Groq</b> · whisper-large-v3-turbo<br><small>openai_compat · 使用中：语音转文字</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button></div>
+              <div class="slot-h"><span>LLM 服务</span></div>
+              <div class="prov on"><div class="logo">D</div><div class="meta"><b>DeepSeek V3</b> · deepseek-chat<br><small>chat_completions · 使用中：文本整理 · 翻译模型</small></div><button class="btn btn-secondary btn-sm">测试</button><button class="btn btn-secondary btn-sm">编辑</button></div>
             </div>
           </div>
         </div>
-        <p class="lbl">2.5 模型服务(选中 ProviderCard = 灰底;翻译槽演示本地模型混搭;问答槽可手动选择本地模型)</p>
+        <p class="lbl">2.5 模型服务(上方功能分配;底部配置池;同一 LLM 服务可同时分配给文本整理与翻译)</p>
       </div>
       <div>
         <div class="win settings">
@@ -755,7 +763,7 @@
           </div>
           <div class="foot"><button class="btn btn-ghost">稍后配置</button><button class="btn btn-primary">继续 →</button></div>
         </div>
-        <p class="lbl">步骤 3 · 模型:本地一键(推荐) 或 云端直填(STT + LLM 两组端点+密钥;LLM 三槽共用;无厂商推荐,ADR-21)</p>
+        <p class="lbl">步骤 3 · 模型:本地一键(推荐) 或 云端直填(STT + LLM 两组端点+密钥;三个 LLM 功能默认共用;无厂商推荐,ADR-21)</p>
       </div>
       <div>
         <div class="win onb">

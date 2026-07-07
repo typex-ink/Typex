@@ -317,7 +317,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 - **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多，此项为 v1 必备；代理凭据同样入 keyring。
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
-- 密钥：`keyring` crate 存 OS 凭据库，settings.json 只存 `keyring://typex/<slot>/<profile-id>` 引用；导出配置时不含密钥。
+- 密钥：`keyring` crate 存 OS 凭据库，settings.json 只存 `keyring://typex/<capability>/<profile-id>/<field>` 引用；导出配置时不含密钥。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。
 
 运行时磁盘布局：
@@ -325,7 +325,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 内容 | 位置（平台标准目录） | 说明 |
 |---|---|---|
 | `settings.json` | config dir（如 `~/Library/Application Support/ink.typex.app/`） | 无密钥明文 |
-| 密钥 | OS 凭据库 | service=`typex`，account=`<slot>/<profile-id>/<field>` |
+| 密钥 | OS 凭据库 | service=`typex`，account=`<capability>/<profile-id>/<field>` |
 | `history.sqlite` | data dir | WAL 模式；启动时跑保留期清理 |
 | 失败重试音频 | cache dir `/pending/` | 会话结束/放弃即删；启动时清孤儿文件 |
 | 日志 | log dir，按天滚动，保留 7 天 | 经 redact 层 |
@@ -342,7 +342,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 |---|---|---|
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置 |
-| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `test_profile { id }` | 密钥字段单独走 `set_profile_secret`（不随 profile JSON 往返） |
+| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段单独走 `set_profile_secret`（不随 profile JSON 往返） |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |

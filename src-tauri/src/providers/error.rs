@@ -95,17 +95,16 @@ fn upstream_error_message(body: &str) -> Option<String> {
         if !candidate.starts_with('{') {
             continue;
         }
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate) {
-            if let Some(msg) = v
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(candidate)
+            && let Some(msg) = v
                 .pointer("/error/message")
                 .and_then(|x| x.as_str())
                 .or_else(|| v.pointer("/message").and_then(|x| x.as_str()))
                 .or_else(|| v.pointer("/error").and_then(|x| x.as_str()))
-            {
-                let msg = msg.trim();
-                if !msg.is_empty() {
-                    return Some(msg.to_string());
-                }
+        {
+            let msg = msg.trim();
+            if !msg.is_empty() {
+                return Some(msg.to_string());
             }
         }
     }

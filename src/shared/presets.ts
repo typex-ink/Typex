@@ -1,5 +1,5 @@
 // 预设模板（03 §6：前端内置数据、仅作表单填充器、无推荐标注——ADR-21）
-import type { ProviderKind, SlotKind } from "@/ipc/bindings";
+import type { ProviderCapability, ProviderKind, SlotKind } from "@/ipc/bindings";
 
 export interface Preset {
   id: string;
@@ -34,6 +34,10 @@ export const PRESETS: Preset[] = [
   { id: "custom-llm", label: "自定义", labelKey: "settings.profile.preset_custom", kind: "chat_completions", base_url: "", models: [], for: "llm" },
 ];
 
+export function presetsForCapability(capability: ProviderCapability): Preset[] {
+  return PRESETS.filter((p) => p.for === capability);
+}
+
 export function presetsForSlot(slot: SlotKind): Preset[] {
-  return PRESETS.filter((p) => p.for === (slot === "stt" ? "stt" : "llm"));
+  return presetsForCapability(slot === "stt" ? "stt" : "llm");
 }

@@ -5,7 +5,7 @@ use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
 use crate::settings::schema::{Settings, SlotConfig};
 use crate::settings::secrets::SecretStore;
-use crate::types::{ProviderProfile, SlotKind};
+use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
@@ -107,12 +107,48 @@ pub fn list_profiles(settings: SettingsState<'_>) -> Vec<ProviderProfile> {
     settings.get().profiles
 }
 
+fn capability_name(capability: ProviderCapability) -> &'static str {
+    match capability {
+        ProviderCapability::Stt => "stt",
+        ProviderCapability::Llm => "llm",
+    }
+}
+
+fn profile_kind_matches_capability(profile: &ProviderProfile) -> bool {
+    match profile.capability {
+        ProviderCapability::Stt => matches!(
+            profile.kind,
+            ProviderKind::OpenaiCompat | ProviderKind::Volcengine | ProviderKind::Local
+        ),
+        ProviderCapability::Llm => matches!(
+            profile.kind,
+            ProviderKind::ChatCompletions | ProviderKind::Responses | ProviderKind::Local
+        ),
+    }
+}
+
+fn ensure_profile_compatible(slot: SlotKind, profile: &ProviderProfile) -> Result<(), TypexError> {
+    if profile.capability != slot.capability() {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            format!("档案 {} 不能用于 {slot:?} 槽", profile.id),
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn upsert_profile(
     settings: SettingsState<'_>,
     profile: ProviderProfile,
 ) -> Result<Settings, TypexError> {
+    if !profile_kind_matches_capability(&profile) {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            format!("{:?} 与 {:?} 不兼容", profile.kind, profile.capability),
+        ));
+    }
     settings.mutate(|s| {
         s.profiles.retain(|p| p.id != profile.id);
         s.profiles.push(profile.clone());
@@ -149,9 +185,13 @@ pub fn activate_profile(
     slot: SlotKind,
     profile_id: String,
 ) -> Result<Settings, TypexError> {
-    if !settings.get().profiles.iter().any(|p| p.id == profile_id) {
-        return Err(TypexError::new(ErrorCode::InvalidRequest, "档案不存在"));
-    }
+    let current = settings.get();
+    let profile = current
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
+    ensure_profile_compatible(slot, profile)?;
     settings.mutate(|s| {
         s.slots.insert(
             slot,
@@ -177,12 +217,9 @@ pub fn set_profile_secret(
         .iter()
         .find(|p| p.id == profile_id)
         .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
-    let slot_name = profile
-        .slots
-        .first()
-        .map(|s| format!("{s:?}").to_lowercase())
-        .unwrap_or_else(|| "misc".into());
-    let reference = crate::settings::secrets::make_ref(&slot_name, &profile_id, &field);
+    let reference = profile.credentials.get(&field).cloned().unwrap_or_else(|| {
+        crate::settings::secrets::make_ref(capability_name(profile.capability), &profile_id, &field)
+    });
     secrets.set(&reference, &secret)?;
     settings.mutate(|s| {
         if let Some(p) = s.profiles.iter_mut().find(|p| p.id == profile_id) {
@@ -321,12 +358,7 @@ pub async fn test_profile(
         .find(|p| p.id == profile_id)
         .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
     let start = std::time::Instant::now();
-    // Local kind 同时覆盖 STT 与 LLM（is_stt 恒 true）——按档案槽位判定走向
-    let treat_as_stt = if profile.kind == crate::types::ProviderKind::Local {
-        profile.slots.contains(&SlotKind::Stt)
-    } else {
-        profile.kind.is_stt()
-    };
+    let treat_as_stt = profile.capability == ProviderCapability::Stt;
     if treat_as_stt {
         let stt = registry.build_stt(profile)?;
         // 2 秒 440Hz 正弦波样音（内容不重要，只测连通）
@@ -805,6 +837,23 @@ pub async fn delete_local_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn profile(capability: ProviderCapability, kind: ProviderKind) -> ProviderProfile {
+        ProviderProfile {
+            id: "p".into(),
+            capability,
+            kind,
+            label: "p".into(),
+            base_url: "https://api.example.com/v1".into(),
+            model: "m".into(),
+            credentials: HashMap::new(),
+            extra_headers: HashMap::new(),
+            extra_form: HashMap::new(),
+            timeout_ms: 30_000,
+            options: HashMap::new(),
+        }
+    }
 
     #[tokio::test]
     async fn assistant_window_ready_waits_until_marked() {
@@ -824,5 +873,28 @@ mod tests {
     async fn assistant_window_ready_timeout_returns_false() {
         let ready = AssistantWindowReady::default();
         assert!(!ready.wait_ready(std::time::Duration::from_millis(1)).await);
+    }
+
+    #[test]
+    fn profile_kind_must_match_capability() {
+        assert!(profile_kind_matches_capability(&profile(
+            ProviderCapability::Stt,
+            ProviderKind::OpenaiCompat,
+        )));
+        assert!(profile_kind_matches_capability(&profile(
+            ProviderCapability::Llm,
+            ProviderKind::Responses,
+        )));
+        assert!(!profile_kind_matches_capability(&profile(
+            ProviderCapability::Stt,
+            ProviderKind::ChatCompletions,
+        )));
+    }
+
+    #[test]
+    fn slot_activation_requires_matching_capability() {
+        let llm = profile(ProviderCapability::Llm, ProviderKind::ChatCompletions);
+        assert!(ensure_profile_compatible(SlotKind::Translate, &llm).is_ok());
+        assert!(ensure_profile_compatible(SlotKind::Stt, &llm).is_err());
     }
 }

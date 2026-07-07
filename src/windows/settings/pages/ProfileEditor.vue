@@ -8,32 +8,32 @@ import Input from "@/components/Input.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Select from "@/components/Select.vue";
 import Toggle from "@/components/Toggle.vue";
-import { presetsForSlot } from "@/shared/presets";
+import { presetsForCapability } from "@/shared/presets";
 import { formatBytes } from "@/shared/format";
 import {
   commands,
   events,
   type LocalModelInfo,
+  type ProviderCapability,
   type ProviderProfile,
   type SlotKind,
 } from "@/ipc/bindings";
 
 const props = defineProps<{
-  slotKind: SlotKind;
+  capability: ProviderCapability;
   profile: ProviderProfile | null;
+  assignTo?: SlotKind | null;
 }>();
 const emit = defineEmits<{ back: []; saved: [] }>();
 
 const { t } = useI18n();
 
-const SLOT_LABEL_KEY: Record<SlotKind, string> = {
-  stt: "settings.providers.slot_stt",
-  polish: "settings.providers.slot_polish",
-  translate: "settings.providers.slot_translate",
-  assistant: "settings.providers.slot_assistant",
+const CAPABILITY_LABEL_KEY: Record<ProviderCapability, string> = {
+  stt: "settings.providers.service_stt",
+  llm: "settings.providers.service_llm",
 };
 
-const presets = presetsForSlot(props.slotKind);
+const presets = presetsForCapability(props.capability);
 const presetId = ref<string>(
   props.profile?.kind === "local"
     ? (presets.find((p) => p.kind === "local")?.id ?? presets[presets.length - 1].id)
@@ -42,7 +42,7 @@ const presetId = ref<string>(
 const label = ref(props.profile?.label ?? "");
 const baseUrl = ref(props.profile?.base_url ?? "");
 const model = ref(props.profile?.model ?? "");
-const kind = ref(props.profile?.kind ?? (props.slotKind === "stt" ? "openai_compat" : "chat_completions"));
+const kind = ref(props.profile?.kind ?? (props.capability === "stt" ? "openai_compat" : "chat_completions"));
 const apiKey = ref("");
 // volcengine 双凭据（03 §2.2）
 const appKey = ref("");
@@ -55,10 +55,10 @@ const isNew = computed(() => !props.profile);
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
 const isCloudChatLlm = computed(
-  () => !isLocal.value && props.slotKind !== "stt" && kind.value === "chat_completions",
+  () => !isLocal.value && props.capability !== "stt" && kind.value === "chat_completions",
 );
 const canConfigureThinking = computed(
-  () => props.slotKind !== "stt" && (kind.value === "chat_completions" || kind.value === "local"),
+  () => props.capability !== "stt" && (kind.value === "chat_completions" || kind.value === "local"),
 );
 const hasExistingKey = computed(() => !!props.profile?.credentials?.["api_key"]);
 const hasExistingVolcKeys = computed(
@@ -77,7 +77,7 @@ const thinkingEnabled = ref(props.profile?.options?.["enable_thinking"] === true
 const downloadPct = ref<number | null>(null);
 let unlistenProgress: (() => void) | null = null;
 
-const slotPurpose = props.slotKind === "stt" ? "stt" : "llm";
+const slotPurpose = props.capability;
 const localOptions = computed(() =>
   localModels.value
     .filter((m) => m.purpose === slotPurpose)
@@ -160,7 +160,7 @@ async function save(): Promise<string | null> {
   }
   const profile: ProviderProfile = {
     id,
-    slots: props.profile?.slots ?? [props.slotKind],
+    capability: props.profile?.capability ?? props.capability,
     kind: kind.value,
     label: label.value.trim(),
     base_url: isLocal.value ? "" : baseUrl.value.trim().replace(/\/+$/, ""),
@@ -188,8 +188,8 @@ async function save(): Promise<string | null> {
   } else if (apiKey.value.trim()) {
     await commands.setProfileSecret(id, "api_key", apiKey.value.trim());
   }
-  if (isNew.value) {
-    await commands.activateProfile(props.slotKind, id);
+  if (isNew.value && props.assignTo) {
+    await commands.activateProfile(props.assignTo, id);
   }
   saving.value = false;
   return id;
@@ -254,7 +254,7 @@ onUnmounted(() => unlistenProgress?.());
     <p class="back"><a @click="emit('back')">← {{ t("settings.nav_providers") }}</a></p>
     <h5 class="page-title">
       {{ isNew ? t("settings.profile.title_new") : t("settings.profile.title_edit") }} —
-      {{ t(SLOT_LABEL_KEY[slotKind]) }}
+      {{ t(CAPABILITY_LABEL_KEY[capability]) }}
     </h5>
 
     <FormRow :label="t('settings.profile.preset')">
@@ -317,7 +317,7 @@ onUnmounted(() => unlistenProgress?.());
       <FormRow :label="t('settings.profile.model')">
         <span class="w280"><Input v-model="model" mono :placeholder="t('settings.profile.model_ph')" /></span>
       </FormRow>
-      <FormRow v-if="slotKind !== 'stt'" :label="t('settings.profile.api_format')">
+      <FormRow v-if="capability !== 'stt'" :label="t('settings.profile.api_format')">
         <Select
           v-model="kind"
           :options="[

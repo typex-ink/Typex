@@ -111,7 +111,7 @@ pub fn run() {
                         st.profiles.retain(|p| p.id != "env-stt");
                         st.profiles.push(crate::types::ProviderProfile {
                             id: "env-stt".into(),
-                            slots: vec![crate::types::SlotKind::Stt],
+                            capability: crate::types::ProviderCapability::Stt,
                             kind: crate::types::ProviderKind::OpenaiCompat,
                             label: "环境变量 STT".into(),
                             base_url: base,

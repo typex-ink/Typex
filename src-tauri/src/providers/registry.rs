@@ -13,7 +13,7 @@ use crate::providers::stt::{
 };
 use crate::settings::schema::Settings;
 use crate::settings::secrets::SecretStore;
-use crate::types::{ProviderKind, ProviderProfile, SlotKind};
+use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -117,17 +117,25 @@ impl ProviderRegistry {
         let active = s.slots.get(&slot).and_then(|c| c.active_profile.clone());
         let Some(active) = active else {
             drop(s);
-            // 零配置兜底（ADR-20）：STT/整理/翻译三槽未配置时指向本地档案
+            // 零配置兜底（ADR-20）：STT/整理/翻译功能未配置时指向本地服务配置
             // （模型已下载前提）；问答槽无兜底。
             return self.local_fallback_profile(slot);
         };
-        s.profiles
+        let profile = s
+            .profiles
             .iter()
             .find(|p| p.id == active)
             .cloned()
             .ok_or_else(|| {
                 TypexError::new(ErrorCode::NotConfigured, format!("档案 {active} 不存在"))
-            })
+            })?;
+        if profile.capability != slot.capability() {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("档案 {active} 不能用于 {slot:?} 槽"),
+            ));
+        }
+        Ok(profile)
     }
 
     /// ADR-20 零配置兜底：合成本地档案（不落盘）。
@@ -167,7 +175,7 @@ impl ProviderRegistry {
             })?;
         Ok(ProviderProfile {
             id: format!("local-{}", model.id),
-            slots: vec![slot],
+            capability: slot.capability(),
             kind: ProviderKind::Local,
             label: format!("本地 · {}", model.display_name),
             base_url: String::new(),
@@ -233,6 +241,12 @@ impl ProviderRegistry {
 
     /// 由 profile 直接构建（测试连接用——不走 slot 指针）。
     pub fn build_stt(&self, profile: &ProviderProfile) -> Result<Arc<dyn SttProvider>> {
+        if profile.capability != ProviderCapability::Stt {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 不是 STT 服务配置", profile.label),
+            ));
+        }
         match profile.kind {
             ProviderKind::OpenaiCompat => {
                 let key = self.resolve_secret(profile, "api_key")?;
@@ -316,6 +330,12 @@ impl ProviderRegistry {
     }
 
     pub fn build_llm(&self, profile: &ProviderProfile) -> Result<Arc<dyn LlmProvider>> {
+        if profile.capability != ProviderCapability::Llm {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 不是 LLM 服务配置", profile.label),
+            ));
+        }
         match profile.kind {
             ProviderKind::ChatCompletions => {
                 let key = self.resolve_secret(profile, "api_key")?;
@@ -392,7 +412,7 @@ mod tests {
     fn profile(id: &str, kind: ProviderKind) -> ProviderProfile {
         ProviderProfile {
             id: id.into(),
-            slots: vec![SlotKind::Stt],
+            capability: ProviderCapability::Stt,
             kind,
             label: id.into(),
             base_url: "https://api.example.com/v1".into(),
@@ -412,14 +432,14 @@ mod tests {
     fn llm_profile(id: &str, base_url: &str) -> ProviderProfile {
         ProviderProfile {
             id: id.into(),
-            slots: vec![SlotKind::Assistant],
+            capability: ProviderCapability::Llm,
             kind: ProviderKind::ChatCompletions,
             label: id.into(),
             base_url: base_url.into(),
             model: "Qwen/Qwen3-14B".into(),
             credentials: [(
                 "api_key".to_string(),
-                format!("keyring://typex/assistant/{id}/api_key"),
+                format!("keyring://typex/llm/{id}/api_key"),
             )]
             .into(),
             extra_headers: HashMap::new(),
@@ -498,6 +518,54 @@ mod tests {
     }
 
     #[test]
+    fn same_llm_profile_can_back_multiple_slots() {
+        let secrets = Arc::new(MemoryStore::default());
+        secrets
+            .set("keyring://typex/llm/shared/api_key", "sk-llm")
+            .unwrap();
+        let mut s = Settings::default();
+        s.profiles
+            .push(llm_profile("shared", "https://api.example.com/v1"));
+        for slot in [SlotKind::Translate, SlotKind::Assistant] {
+            s.slots.insert(
+                slot,
+                SlotConfig {
+                    active_profile: Some("shared".into()),
+                },
+            );
+        }
+        let reg = ProviderRegistry::new(s, secrets);
+
+        let translate = reg.llm_for(SlotKind::Translate).unwrap();
+        let assistant = reg.llm_for(SlotKind::Assistant).unwrap();
+        assert!(Arc::ptr_eq(&translate, &assistant));
+    }
+
+    #[test]
+    fn incompatible_profile_slot_is_rejected() {
+        let (reg, _) = setup();
+        let err = match reg.llm_for(SlotKind::Assistant) {
+            Err(e) => e,
+            Ok(_) => panic!("STT 档案不应可用于 LLM 槽"),
+        };
+        assert_eq!(err.code, ErrorCode::NotConfigured);
+
+        let mut s = reg.settings.lock().unwrap().clone();
+        s.slots.insert(
+            SlotKind::Assistant,
+            SlotConfig {
+                active_profile: Some("p1".into()),
+            },
+        );
+        reg.on_settings_changed(s);
+        let err = match reg.llm_for(SlotKind::Assistant) {
+            Err(e) => e,
+            Ok(_) => panic!("STT 档案不应可用于 LLM 槽"),
+        };
+        assert_eq!(err.code, ErrorCode::InvalidRequest);
+    }
+
+    #[test]
     fn qwen_compatible_endpoint_sends_thinking_disabled_by_default() {
         let p = llm_profile("qwen", "https://api.siliconflow.cn/v1");
         assert_eq!(chat_completions_thinking_option(&p), Some(false));
@@ -570,7 +638,7 @@ mod tests {
 
         let profile = ProviderProfile {
             id: "local-llm".into(),
-            slots: vec![SlotKind::Translate],
+            capability: ProviderCapability::Llm,
             kind: ProviderKind::Local,
             label: "本地 · Qwen3.5".into(),
             base_url: String::new(),

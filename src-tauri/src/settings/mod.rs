@@ -1,4 +1,5 @@
 //! SettingsService：读写、校验、变更广播（07 §5.1 / §9）。
+pub mod migrate;
 pub mod schema;
 pub mod secrets;
 
@@ -18,7 +19,10 @@ impl SettingsService {
     pub fn load(config_dir: PathBuf) -> Self {
         let path = config_dir.join("settings.json");
         let settings = match std::fs::read_to_string(&path) {
-            Ok(text) => match serde_json::from_str::<Settings>(&text) {
+            Ok(text) => match serde_json::from_str::<serde_json::Value>(&text)
+                .map(crate::settings::migrate::migrate)
+                .and_then(serde_json::from_value::<Settings>)
+            {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!("settings.json 解析失败，回退默认: {e}");
@@ -72,7 +76,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 1);
+        assert_eq!(svc.get().schema_version, 2);
 
         svc.mutate(|s| s.general.autostart = false).unwrap();
         let svc2 = SettingsService::load(dir.clone());
@@ -86,8 +90,44 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 1);
+        assert_eq!(svc.get().schema_version, 2);
         assert!(dir.join("settings.json.bak").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_migrates_v1_profile_slots_to_capability() {
+        let dir = std::env::temp_dir().join(format!("typex-test-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"
+            {
+              "schema_version": 1,
+              "profiles": [
+                {
+                  "id": "old-llm",
+                  "slots": ["polish", "translate"],
+                  "kind": "chat_completions",
+                  "label": "Old LLM",
+                  "base_url": "https://api.example.com/v1",
+                  "model": "m",
+                  "credentials": {}
+                }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let svc = SettingsService::load(dir.clone());
+        let s = svc.get();
+        assert_eq!(s.schema_version, 2);
+        assert_eq!(
+            s.profiles[0].capability,
+            crate::types::ProviderCapability::Llm
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

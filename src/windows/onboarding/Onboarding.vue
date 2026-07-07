@@ -43,7 +43,7 @@ const llmModel = ref("");
 const configuring = ref(false);
 const configError = ref("");
 
-// 本地路径（CP-8.8 / mockup 步骤 3/3b）：档位检测 → 一键下载 → 三槽指向 local 档案
+// 本地路径（CP-8.8 / mockup 步骤 3/3b）：档位检测 → 一键下载 → 三个功能指向 local 服务配置
 const hw = ref<HardwareTier | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
 const chosenTier = ref<string>("standard");
@@ -81,7 +81,7 @@ async function startLocalDownload() {
   await downloadNext(queue.map((m) => m.id));
 }
 
-/** 串行下载：完成一个再启动下一个；全部完成后落库三槽档案 */
+/** 串行下载：完成一个再启动下一个；全部完成后落库本地服务配置 */
 async function downloadNext(queue: string[]) {
   const [head, ...rest] = queue;
   if (!head) {
@@ -110,13 +110,13 @@ async function cancelLocalDownload() {
   localPhase.value = "idle";
 }
 
-/** 下载完成 → STT/整理/翻译三槽指向合成的 local 档案（ADR-20；问答槽不指向） */
+/** 下载完成 → STT/整理/翻译功能指向 local 服务配置（ADR-20；问答槽不指向） */
 async function adoptLocalProfiles() {
   const stt = tierModels.value.find((m) => m.purpose === "stt");
   const llm = tierModels.value.find((m) => m.purpose === "llm");
   if (stt) {
     await commands.upsertProfile({
-      id: `local-${stt.id}`, slots: ["stt"], kind: "local",
+      id: `local-${stt.id}`, capability: "stt", kind: "local",
       label: t("onboarding.local_profile_stt"), base_url: "",
       model: stt.id, credentials: {}, extra_headers: {}, extra_form: {},
       timeout_ms: 30000, options: {},
@@ -125,7 +125,7 @@ async function adoptLocalProfiles() {
   }
   if (llm) {
     await commands.upsertProfile({
-      id: `local-${llm.id}`, slots: ["polish", "translate"], kind: "local",
+      id: `local-${llm.id}`, capability: "llm", kind: "local",
       label: t("onboarding.local_profile_llm"), base_url: "",
       model: llm.id, credentials: {}, extra_headers: {}, extra_form: {},
       timeout_ms: 30000, options: {},
@@ -152,7 +152,7 @@ async function saveModels(): Promise<boolean> {
   try {
     if (hasStt) {
       await commands.upsertProfile({
-        id: "onboarding-stt", slots: ["stt"], kind: "openai_compat",
+        id: "onboarding-stt", capability: "stt", kind: "openai_compat",
         label: t("onboarding.stt_profile_label"), base_url: sttUrl.value.trim().replace(/\/+$/, ""),
         model: sttModel.value.trim(), credentials: {},
         extra_headers: {}, extra_form: {}, timeout_ms: 30000, options: {},
@@ -163,7 +163,7 @@ async function saveModels(): Promise<boolean> {
     if (hasLlm) {
       // 三 LLM 槽共用同一连接（02 F-4）
       await commands.upsertProfile({
-        id: "onboarding-llm", slots: ["polish", "translate", "assistant"],
+        id: "onboarding-llm", capability: "llm",
         kind: "chat_completions", label: t("onboarding.llm_profile_label"),
         base_url: llmUrl.value.trim().replace(/\/+$/, ""),
         model: llmModel.value.trim(), credentials: {},
@@ -273,7 +273,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 步骤 3 · 模型：本地一键（推荐）或云端直填（STT + LLM 两组；LLM 三槽共用） -->
+    <!-- 步骤 3 · 模型：本地一键（推荐）或云端直填（STT + LLM 两组；三个 LLM 功能默认共用） -->
     <div v-else-if="step === 3" class="body">
       <h5>{{ t("onboarding.models_title") }}</h5>
 

@@ -275,25 +275,25 @@ F-3 不引入新的 Provider 类型：
 ## 5. 配置槽位与 Provider 的关系
 
 ```
-设置槽位            实现走向
-──────────────────────────────────────────
-语音转文字   ──▶  SttProvider（openai_compat | volcengine | local）
-文本整理     ──▶  LlmProvider + 整理提示词（推荐轻量快模型；可用 local）
-翻译模型     ──▶  LlmProvider + 翻译提示词（可用 local）
-问答模型     ──▶  LlmProvider + 处理/问答提示词（推荐强模型；可手动选择 local）
+功能槽位             服务池能力         实现走向
+────────────────────────────────────────────────────────────
+语音转文字   ──▶  stt profile   ──▶  SttProvider（openai_compat | volcengine | local）
+文本整理     ──▶  llm profile   ──▶  LlmProvider + 整理提示词（推荐轻量快模型；可用 local）
+翻译模型     ──▶  llm profile   ──▶  LlmProvider + 翻译提示词（可用 local）
+问答模型     ──▶  llm profile   ──▶  LlmProvider + 处理/问答提示词（推荐强模型；可手动选择 local）
 ```
 
-共用规则：LLM 三槽默认共用同一个「连接配置」（base_url + 密钥），仅模型名与提示词不同；用户可随时把某个槽切换为完全独立的配置。onboarding 只需配置 STT + 一个 LLM 连接即全功能可用。
+共用规则：设置中维护一个全局 `profiles[]` 服务配置池；`slots.*.active_profile` 只是功能槽位指针。同一个 LLM profile 可以同时被文本整理、翻译和问答三个功能选择，因此远端 LLM 的 base_url / model / 密钥只需配置一次。onboarding 只需配置 STT + 一个 LLM 连接即全功能可用。
 
-**多配置档案（[ADR-21](09-decisions.md)）**：`profiles[]` 天然支持同一槽位多个档案，`slots.*.active_profile` 只是指针——切换 = 改指针，不删档案。切换入口：设置页 ProviderCard「切换 ▾」与托盘「模型 ▸」子菜单（听写/翻译/问答 三组），即时生效。
+**多配置档案（[ADR-21](09-decisions.md)）**：`profiles[]` 支持保存多个 STT / LLM 服务配置；切换 = 改某个功能槽位的指针，不删档案。切换入口：设置页功能分配卡片「切换 ▾」与托盘「模型 ▸」子菜单（听写/文本整理/翻译/问答 四组），即时生效。
 
-**零配置兜底（[ADR-20](09-decisions.md)）**：STT / 整理 / 翻译三槽在用户未配置任何档案时默认指向 `local` 档案（模型已下载的前提下）；问答槽无兜底，未配置时助手功能显示配置引导。本地与云端可槽位级混搭（如 STT 本地 + 翻译云端）。
+**零配置兜底（[ADR-20](09-decisions.md)）**：STT / 整理 / 翻译功能在用户未配置任何服务时默认指向 `local` 服务配置（模型已下载的前提下）；问答槽无兜底，未配置时助手功能显示配置引导。本地与云端可功能级混搭（如 STT 本地 + 翻译云端）。
 
 ## 6. 配置 Schema（settings.json 中的形态）
 
 ```jsonc
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "general": {
     "model_download_source": "auto" // auto | huggingface | modelscope；仅影响本地模型下载
   },
@@ -305,16 +305,16 @@ F-3 不引入新的 Provider 类型：
   },
   "profiles": [
     {
-      "id": "groq-fast", "slot": "stt", "kind": "openai_compat",
+      "id": "groq-fast", "capability": "stt", "kind": "openai_compat",
       "label": "Groq · whisper-large-v3-turbo",
       "base_url": "https://api.groq.com/openai/v1",
       "model": "whisper-large-v3-turbo",
-      "credentials": { "api_key": "keyring://typex/stt/groq-fast" },
+      "credentials": { "api_key": "keyring://typex/stt/groq-fast/api_key" },
       "extra_headers": {}, "extra_form": {}, "timeout_ms": 30000,
       "options": { "language": "auto", "temperature": 0 }
     },
     {
-      "id": "doubao", "slot": "stt", "kind": "volcengine",
+      "id": "doubao", "capability": "stt", "kind": "volcengine",
       "label": "豆包 · 极速版",
       "base_url": "https://openspeech.bytedance.com",
       "model": "bigmodel",
@@ -325,26 +325,26 @@ F-3 不引入新的 Provider 类型：
       "options": { "resource_id": "volc.bigasr.auc_turbo", "enable_punc": true, "enable_itn": true }
     },
     {
-      "id": "deepseek", "slot": "polish|translate", "kind": "chat_completions",
+      "id": "deepseek", "capability": "llm", "kind": "chat_completions",
       "label": "DeepSeek V3",
       "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat",
-      "credentials": { "api_key": "keyring://typex/llm/deepseek" },
+      "credentials": { "api_key": "keyring://typex/llm/deepseek/api_key" },
       "options": { "temperature": 0.2 }
     },
     {
-      "id": "openai-gpt", "slot": "assistant", "kind": "responses",
+      "id": "openai-gpt", "capability": "llm", "kind": "responses",
       "label": "OpenAI · gpt-5",
       "base_url": "https://api.openai.com/v1", "model": "gpt-5",
-      "credentials": { "api_key": "keyring://typex/assistant/openai-gpt" }
+      "credentials": { "api_key": "keyring://typex/llm/openai-gpt/api_key" }
     },
     {
-      "id": "local-qwen-asr", "slot": "stt", "kind": "local",
+      "id": "local-qwen-asr", "capability": "stt", "kind": "local",
       "label": "本地 · Qwen3-ASR-0.6B",
       "model": "qwen3-asr-0.6b-q8",           // 指向模型库中的条目，无 base_url、无凭据
       "options": { "language": "auto" }
     },
     {
-      "id": "local-qwen", "slot": "polish|translate", "kind": "local",
+      "id": "local-qwen", "capability": "llm", "kind": "local",
       "label": "本地 · Qwen3.5-2B",
       "model": "qwen3.5-2b-q4",
       "options": { "preload": "on_record" }    // resident | on_record
@@ -355,7 +355,7 @@ F-3 不引入新的 Provider 类型：
 
 要点：
 
-- `kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值一律是 keyring 引用，明文不落盘。
+- `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值一律是 keyring 引用，明文不落盘。
 - LLM `options.enable_thinking` 控制 thinking 模式，缺省为 `false`；云端只对支持端点发送 `enable_thinking` 参数，避免破坏 OpenAI / Responses 等严格协议；本地 Qwen LLM 通过 `/think` / `/no_think` 控制词实现。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。

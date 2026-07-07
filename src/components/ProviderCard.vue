@@ -1,20 +1,23 @@
 <script setup lang="ts">
 // ProviderCard（04 §7 / mockup 2.5）：label + 模型 + 状态 + 测试/编辑/切换
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import { commands, type ProviderProfile } from "@/ipc/bindings";
 
 const { t, te } = useI18n();
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   profile: ProviderProfile | null;
   active?: boolean;
   /** 该槽位全部可切换档案 */
-  alternatives: ProviderProfile[];
+  alternatives?: ProviderProfile[];
   /** 副标题覆盖（本地档案显示引擎与模型状态，CP-8.7；缺省显示 kind） */
   subtitle?: string;
-}>();
+}>(), {
+  active: false,
+  alternatives: () => [],
+});
 
 const emit = defineEmits<{
   edit: [];
@@ -26,6 +29,7 @@ const testing = ref(false);
 const testResult = ref<string | null>(null);
 const testError = ref(false);
 const switchOpen = ref(false);
+const showSwitch = computed(() => props.alternatives.length > 0);
 
 async function runTest() {
   if (!props.profile) return;
@@ -62,7 +66,7 @@ function errText(code: string): string {
         {{ testing ? t("components.provider_card.testing") : t("actions.test") }}
       </Button>
       <Button size="sm" @click="emit('edit')">{{ t("actions.edit") }}</Button>
-      <span class="switch-wrap">
+      <span v-if="showSwitch" class="switch-wrap">
         <Button variant="ghost" size="sm" @click="switchOpen = !switchOpen">
           {{ t("actions.switch") }} {{ switchOpen ? "▴" : "▾" }}
         </Button>

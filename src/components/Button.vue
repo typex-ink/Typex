@@ -62,6 +62,9 @@ defineProps<{
   color: var(--error);
   border: 1px solid currentColor;
 }
+.btn-danger:hover:not(:disabled) {
+  background: var(--recording-soft);
+}
 .btn-sm {
   height: 26px;
   font-size: 12px;

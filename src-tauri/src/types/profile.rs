@@ -20,6 +20,21 @@ impl SlotKind {
         SlotKind::Translate,
         SlotKind::Assistant,
     ];
+
+    pub fn capability(self) -> ProviderCapability {
+        match self {
+            SlotKind::Stt => ProviderCapability::Stt,
+            SlotKind::Polish | SlotKind::Translate | SlotKind::Assistant => ProviderCapability::Llm,
+        }
+    }
+}
+
+/// 服务配置能力：语音转文字或文本模型（02 F-4）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderCapability {
+    Stt,
+    Llm,
 }
 
 /// adapter 走向（03 §1）。`local` 是 v1.1 扩展位。
@@ -63,8 +78,8 @@ pub enum ModelDownloadSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ProviderProfile {
     pub id: String,
-    /// 此档案适用的槽位（多槽共用连接时含多个）
-    pub slots: Vec<SlotKind>,
+    /// 此服务配置提供的能力；功能槽位只保存指向 profile id 的指针。
+    pub capability: ProviderCapability,
     pub kind: ProviderKind,
     pub label: String,
     #[serde(default)]

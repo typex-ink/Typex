@@ -59,7 +59,7 @@ fn build_menu<R: Runtime>(
         let profiles: Vec<_> = s
             .profiles
             .iter()
-            .filter(|p| p.slots.contains(&slot))
+            .filter(|p| p.capability == slot.capability())
             .collect();
         if profiles.is_empty() {
             continue;
