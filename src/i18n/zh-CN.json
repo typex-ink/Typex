@@ -335,6 +335,7 @@
   },
   "assistant": {
     "close": "关闭",
+    "streaming": "正在等待模型…",
     "selection_chip": "⌗ 选中内容 · {n} 字",
     "degraded_hint": "读取选区失败，已按普通提问处理"
   },

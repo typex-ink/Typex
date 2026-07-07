@@ -335,6 +335,7 @@
   },
   "assistant": {
     "close": "Close",
+    "streaming": "Waiting for model…",
     "selection_chip": "⌗ Selection · {n} chars",
     "degraded_hint": "Couldn't read selection — treated as a plain question"
   },

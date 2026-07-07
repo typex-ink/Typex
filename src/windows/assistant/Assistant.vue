@@ -206,7 +206,7 @@ function onKey(e: KeyboardEvent) {
       <!-- 回答区（流式 Markdown，文本可选中复制） -->
       <div v-if="answer || streaming" class="ans">
         <div class="bubble md" v-html="rendered" />
-        <p v-if="streaming" class="streaming-hint">…</p>
+        <p v-if="streaming" class="streaming-hint">{{ t("assistant.streaming") }}</p>
       </div>
       <div v-if="errorText" class="ans">
         <p class="err">⚠ {{ errorText }}</p>

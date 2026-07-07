@@ -16,6 +16,9 @@ use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+const ASSISTANT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// 回答弹窗事件回调：started（重置 + 指令回显）/ delta / done / error。
 pub enum AssistantEvent {
@@ -157,8 +160,16 @@ impl RunCtx<'_> {
 /// - 无选区：立即呼出弹窗，全程流式；
 /// - 有选区：缓冲流首部直到能判定 `ANSWER:` 前缀——回答型转弹窗流式，改写型静默收全文。
 async fn drive(
+    stream: BoxStream<'static, std::result::Result<LlmDelta, ProviderError>>,
+    ctx: RunCtx<'_>,
+) -> Result<AssistantOutcome> {
+    drive_with_idle_timeout(stream, ctx, ASSISTANT_STREAM_IDLE_TIMEOUT).await
+}
+
+async fn drive_with_idle_timeout(
     mut stream: BoxStream<'static, std::result::Result<LlmDelta, ProviderError>>,
     ctx: RunCtx<'_>,
+    idle_timeout: Duration,
 ) -> Result<AssistantOutcome> {
     let prefix = prompt::ANSWER_PREFIX;
     let mut full = String::new();
@@ -171,7 +182,22 @@ async fn drive(
     // 有选区时的判定结论：None = 仍在嗅探
     let mut is_rewrite: Option<bool> = if ctx.had_selection { None } else { Some(false) };
 
-    while let Some(item) = stream.next().await {
+    loop {
+        let item = match tokio::time::timeout(idle_timeout, stream.next()).await {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
+            Err(_) => {
+                let err = TypexError::new(ErrorCode::Timeout, "助手回答超时");
+                if panel_open {
+                    (ctx.sink)(AssistantEvent::Error {
+                        request_id: ctx.request_id,
+                        error: err,
+                    });
+                    return Ok(AssistantOutcome::HandedOff);
+                }
+                return Err(err);
+            }
+        };
         let delta = match item {
             Ok(d) => d,
             Err(e) => {
@@ -280,6 +306,28 @@ mod tests {
             chunks: Vec<std::result::Result<&str, ProviderError>>,
             had_selection: bool,
         ) -> Result<AssistantOutcome> {
+            // BoxStream<'static> 要求 owned 数据
+            let owned: Vec<std::result::Result<LlmDelta, ProviderError>> = chunks
+                .into_iter()
+                .map(|c| {
+                    c.map(|t| LlmDelta {
+                        text: t.to_string(),
+                    })
+                })
+                .collect();
+            self.run_stream_with_timeout(
+                futures_util::stream::iter(owned).boxed(),
+                had_selection,
+                ASSISTANT_STREAM_IDLE_TIMEOUT,
+            )
+        }
+
+        fn run_stream_with_timeout(
+            &self,
+            stream: BoxStream<'static, std::result::Result<LlmDelta, ProviderError>>,
+            had_selection: bool,
+            idle_timeout: Duration,
+        ) -> Result<AssistantOutcome> {
             let events = self.events.clone();
             let panel_shows = self.panel_shows.clone();
             let sink = move |e: AssistantEvent| {
@@ -295,16 +343,6 @@ mod tests {
                 panel_shows.lock().unwrap().push(has_sel);
                 futures_util::future::ready(()).boxed()
             };
-            // BoxStream<'static> 要求 owned 数据
-            let owned: Vec<std::result::Result<LlmDelta, ProviderError>> = chunks
-                .into_iter()
-                .map(|c| {
-                    c.map(|t| LlmDelta {
-                        text: t.to_string(),
-                    })
-                })
-                .collect();
-            let stream = futures_util::stream::iter(owned).boxed();
             let ctx = RunCtx {
                 request_id: 1,
                 instruction: "指令".into(),
@@ -315,9 +353,10 @@ mod tests {
                 show_panel: &show_panel,
             };
             tokio::runtime::Builder::new_current_thread()
+                .enable_time()
                 .build()
                 .unwrap()
-                .block_on(drive(stream, ctx))
+                .block_on(drive_with_idle_timeout(stream, ctx, idle_timeout))
         }
 
         fn events(&self) -> Vec<String> {
@@ -411,6 +450,33 @@ mod tests {
             .unwrap();
         assert_eq!(out, AssistantOutcome::HandedOff);
         assert!(h.events().last().unwrap().starts_with("error:"));
+    }
+
+    #[test]
+    fn idle_timeout_after_panel_shown_in_panel() {
+        let h = Harness::new();
+        let out = h
+            .run_stream_with_timeout(
+                futures_util::stream::pending().boxed(),
+                false,
+                Duration::from_millis(1),
+            )
+            .unwrap();
+        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(h.panel_count(), 1);
+        assert_eq!(h.events(), vec!["started:指令", "error:助手回答超时"]);
+    }
+
+    #[test]
+    fn idle_timeout_before_panel_is_err_for_hud() {
+        let h = Harness::new();
+        let r = h.run_stream_with_timeout(
+            futures_util::stream::pending().boxed(),
+            true,
+            Duration::from_millis(1),
+        );
+        assert!(r.is_err(), "弹窗未呼出的超时走 HUD 失败态");
+        assert_eq!(h.panel_count(), 0);
     }
 
     #[test]
