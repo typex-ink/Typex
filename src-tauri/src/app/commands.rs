@@ -315,6 +315,14 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), TypexError> {
         .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
 }
 
+/// 打开首次启动引导（设置 → 调试）。
+#[tauri::command]
+#[specta::specta]
+pub fn open_onboarding_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+    crate::app::windows::show_onboarding(&app)
+        .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
+}
+
 /// HUD 翻译徽标点击：在最近使用的目标语言间轮换（05 §3.2）。
 #[tauri::command]
 #[specta::specta]

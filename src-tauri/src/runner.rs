@@ -35,6 +35,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::delete_history_item,
             commands::clear_history,
             commands::open_settings_window,
+            commands::open_onboarding_window,
             commands::get_diagnostics,
             commands::open_log_dir,
             commands::check_update,

@@ -373,7 +373,7 @@ src/
 ├── windows/                  # 每窗口一个 Vite HTML 入口（vite 多页构建）
 │   ├── hud/        main.ts + Hud.vue
 │   ├── assistant/  main.ts + Assistant.vue
-│   ├── settings/   main.ts + Settings.vue + pages/（General/Dictation/…/Diagnostics）
+│   ├── settings/   main.ts + Settings.vue + pages/（General/Dictation/…/Diagnostics/Debug）
 │   ├── onboarding/ main.ts + 5 个 Step 组件
 │   └── home/       main.ts + Home.vue + pages/（Overview/History；侧边栏布局）
 ├── components/               # 04 章组件库：Button/Input/SecretInput/Select/Toggle/

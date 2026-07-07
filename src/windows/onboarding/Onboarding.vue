@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 首次启动引导 640×480，5 步（05 §6 / mockup §6）
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
@@ -194,12 +195,16 @@ async function finish() {
     s.onboarding_done = true;
     s.general.autostart = autostartOn.value;
   });
-  window.close();
+  await getCurrentWindow().close();
 }
 
 async function next() {
   if (step.value === 3 && !(await saveModels())) return;
   step.value += 1;
+}
+
+function back() {
+  if (step.value > 1) step.value -= 1;
 }
 
 onMounted(async () => {
@@ -387,12 +392,15 @@ onUnmounted(() => {
         <Button variant="primary" @click="step = 2">{{ t("onboarding.start") }}</Button>
       </template>
       <template v-else-if="step === 5">
-        <span />
+        <Button variant="ghost" @click="back">{{ t("onboarding.back") }}</Button>
         <Button variant="primary" @click="finish">{{ t("onboarding.finish") }}</Button>
       </template>
       <template v-else>
-        <Button variant="ghost" @click="step += 1">{{ step === 3 ? t("onboarding.later") : t("onboarding.skip") }}</Button>
-        <Button variant="primary" :disabled="configuring" @click="next">{{ t("onboarding.next") }}</Button>
+        <Button variant="ghost" @click="back">{{ t("onboarding.back") }}</Button>
+        <span class="foot-actions">
+          <Button variant="ghost" @click="step += 1">{{ step === 3 ? t("onboarding.later") : t("onboarding.skip") }}</Button>
+          <Button variant="primary" :disabled="configuring" @click="next">{{ t("onboarding.next") }}</Button>
+        </span>
       </template>
     </div>
   </div>
@@ -652,8 +660,14 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 14px 32px 18px;
   flex-shrink: 0;
+}
+.foot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .lang-select {
   min-width: 130px;

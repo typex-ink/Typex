@@ -742,7 +742,7 @@
             <div class="perm"><span>⌨</span><span>辅助功能<br><small style="color:var(--text-3)">把文字输入到光标处、读取选中文本</small></span><button class="btn btn-secondary btn-sm s">去授权</button></div>
             <div class="perm"><span>👂</span><span>输入监听<br><small style="color:var(--text-3)">监听全局快捷键(按住说话)</small></span><button class="btn btn-secondary btn-sm s">去授权</button></div>
           </div>
-          <div class="foot"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary" disabled>继续 →</button></div>
+          <div class="foot"><button class="btn btn-ghost">← 上一步</button><span style="display:flex;gap:8px"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary" disabled>继续 →</button></span></div>
         </div>
         <p class="lbl">步骤 2 · 权限(实时 ✓/✗ 轮询;权限未齐时主按钮禁用)</p>
       </div>
@@ -760,7 +760,7 @@
             <div class="frow"><span class="l">API 端点</span><input class="input" style="width:250px" placeholder="https://api.example.com/v1"></div>
             <div class="frow"><span class="l">API 密钥</span><div class="secret" style="width:250px"><input placeholder="sk-…"><button>👁</button><button>📋</button></div></div>
           </div>
-          <div class="foot"><button class="btn btn-ghost">稍后配置</button><button class="btn btn-primary">继续 →</button></div>
+          <div class="foot"><button class="btn btn-ghost">← 上一步</button><span style="display:flex;gap:8px"><button class="btn btn-ghost">稍后配置</button><button class="btn btn-primary">继续 →</button></span></div>
         </div>
         <p class="lbl">步骤 3 · 模型:本地一键(推荐) 或 云端直填(STT + LLM 两组端点+密钥;三个 LLM 功能默认共用;无厂商推荐,ADR-21)</p>
       </div>
@@ -769,11 +769,11 @@
           <div class="steps"><i></i><i></i><i class="on"></i><i></i><i></i></div>
           <div class="body">
             <h5 style="font-size:16px;margin-bottom:14px">连接模型服务</h5>
-            <div class="prov on"><div class="logo">◉</div><div class="meta"><b>本地模型(离线) · 标准档</b><br><small>正在下载 Qwen3-ASR-0.6B … 430 MB / 1.0 GB</small><div class="pbar" style="margin-top:7px;width:100%"><i style="width:42%"></i></div></div></div>
+            <div class="prov on"><div class="logo">◉</div><div class="meta"><b>本地模型(离线) · 标准档</b><br><small>正在下载 Qwen3-ASR-0.6B … 430 MB / 1.0 GB</small><div class="pbar" style="margin-top:7px;width:100%"><i style="width:42%"></i></div></div><button class="btn btn-ghost btn-sm">取消下载</button></div>
             <div class="prov"><div class="logo">◉</div><div class="meta"><b>Qwen3.5-2B(整理 / 翻译)</b><br><small>排队中 · 1.3 GB</small></div></div>
             <p style="font-size:11px;color:var(--text-3);margin-top:8px">下载完成前可先完成余下步骤,语音输入将在模型就绪后可用。</p>
           </div>
-          <div class="foot"><button class="btn btn-ghost">取消下载</button><button class="btn btn-primary">继续 →</button></div>
+          <div class="foot"><button class="btn btn-ghost">← 上一步</button><span style="display:flex;gap:8px"><button class="btn btn-ghost">稍后配置</button><button class="btn btn-primary">继续 →</button></span></div>
         </div>
         <p class="lbl">步骤 3b · 本地模型下载中(按设备推荐档位,ADR-22;可后台继续;进度条 = --text-1 实底,无彩色)</p>
       </div>
@@ -790,7 +790,7 @@
               <input class="input" placeholder="文字会出现在这里…">
             </div>
           </div>
-          <div class="foot"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary">继续 →</button></div>
+          <div class="foot"><button class="btn btn-ghost">← 上一步</button><span style="display:flex;gap:8px"><button class="btn btn-ghost">跳过</button><button class="btn btn-primary">继续 →</button></span></div>
         </div>
         <p class="lbl">步骤 4 · 快捷键 + 练习输入框</p>
       </div>
@@ -801,9 +801,9 @@
             <span style="font-size:28px;color:var(--success)">✓</span>
             <h5 style="font-size:16px">一切就绪</h5>
           </div>
-          <div class="foot"><span></span><button class="btn btn-primary">完成</button></div>
+          <div class="foot"><button class="btn btn-ghost">← 上一步</button><button class="btn btn-primary">完成</button></div>
         </div>
-        <p class="lbl">步骤 5 · 完成(仅 ✓ + 一句话;开机自启默认开启,设置-通用可关)</p>
+        <p class="lbl">步骤 5 · 完成(仅 ✓ + 一句话;可回到上一步;开机自启默认开启,设置-通用可关)</p>
       </div>
     </div>
   </div>

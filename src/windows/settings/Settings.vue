@@ -11,6 +11,7 @@ import ProvidersPage from "./pages/ProvidersPage.vue";
 import HotkeysPage from "./pages/HotkeysPage.vue";
 import HistoryPage from "./pages/HistoryPage.vue";
 import DiagnosticsPage from "./pages/DiagnosticsPage.vue";
+import DebugPage from "./pages/DebugPage.vue";
 import AboutPage from "./pages/AboutPage.vue";
 
 const { t } = useI18n();
@@ -24,6 +25,7 @@ const pages = [
   { id: "hotkeys", key: "settings.nav_hotkeys", comp: HotkeysPage },
   { id: "history", key: "settings.nav_history", comp: HistoryPage },
   { id: "diagnostics", key: "settings.nav_diagnostics", comp: DiagnosticsPage },
+  { id: "debug", key: "settings.nav_debug", comp: DebugPage },
   { id: "about", key: "settings.nav_about", comp: AboutPage },
 ] as const;
 

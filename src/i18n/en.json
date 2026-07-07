@@ -78,6 +78,7 @@
     "nav_hotkeys": "Hotkeys",
     "nav_history": "History",
     "nav_diagnostics": "Diagnostics",
+    "nav_debug": "Debug",
     "nav_about": "About",
     "general": {
       "language": "Language",
@@ -257,6 +258,14 @@
       "export_done": "Exported: {path}",
       "export_failed": "Export failed"
     },
+    "debug": {
+      "onboarding": "First-run onboarding",
+      "onboarding_hint": "Reopen the 5-step flow to test permissions, model setup, and the practice step.",
+      "reopen_onboarding": "Reopen onboarding",
+      "opening": "Opening…",
+      "onboarding_opened": "Onboarding opened",
+      "onboarding_failed": "Failed to open onboarding"
+    },
     "about": {
       "privacy": "Your voice is only ever sent to the services you configure.",
       "new_version": "New version v{version}",
@@ -342,6 +351,7 @@
     "done_title": "All set",
     "autostart": "Launch Typex at login",
     "start": "Start →",
+    "back": "← Back",
     "finish": "Finish",
     "later": "Configure later",
     "skip": "Skip",
