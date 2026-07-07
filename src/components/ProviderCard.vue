@@ -29,6 +29,7 @@ const testing = ref(false);
 const testResult = ref<string | null>(null);
 const testError = ref(false);
 const switchOpen = ref(false);
+const testTooltipId = `provider-test-${Math.random().toString(36).slice(2)}`;
 const showSwitch = computed(() => props.alternatives.length > 0);
 const configureText = computed(() =>
   showSwitch.value
@@ -84,10 +85,33 @@ function configureEmpty() {
         <b>{{ profile.label }}</b> · {{ profile.model }}<br />
         <small>{{ subtitle ?? profile.kind }}</small>
       </div>
-      <span v-if="testResult" class="lat" :class="{ err: testError }">{{ testResult }}</span>
-      <Button size="sm" :disabled="testing" @click="runTest">
-        {{ testing ? t("components.provider_card.testing") : t("actions.test") }}
-      </Button>
+      <span v-if="testResult && !testError" class="lat">{{ testResult }}</span>
+      <span class="test-wrap">
+        <Button
+          :variant="testError ? 'danger' : 'secondary'"
+          size="sm"
+          :disabled="testing"
+          :title="testError && testResult ? testResult : undefined"
+          :aria-describedby="testError && testResult ? testTooltipId : undefined"
+          @click="runTest"
+        >
+          {{
+            testing
+              ? t("components.provider_card.testing")
+              : testError
+                ? t("components.provider_card.test_failed")
+                : t("actions.test")
+          }}
+        </Button>
+        <span
+          v-if="testError && testResult"
+          :id="testTooltipId"
+          class="test-tip"
+          role="tooltip"
+        >
+          {{ testResult }}
+        </span>
+      </span>
       <Button size="sm" @click="emit('edit')">{{ t("actions.edit") }}</Button>
       <span v-if="showSwitch" class="switch-wrap">
         <Button variant="ghost" size="sm" @click="switchOpen = !switchOpen">
@@ -189,15 +213,47 @@ function configureEmpty() {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
-.lat.err {
+.test-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.test-tip {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(360px, 48vw);
+  max-width: calc(100vw - 48px);
+  padding: 8px 10px;
+  border: 1px solid var(--error);
+  border-radius: var(--radius-control);
+  background: var(--surface);
   color: var(--error);
-  border-color: var(--error);
-  max-width: min(360px, 42vw);
-  white-space: normal;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
+  opacity: 0;
+  transform: translateY(-2px);
+  pointer-events: none;
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+  z-index: 20;
+}
+.test-wrap:hover .test-tip,
+.test-wrap:focus-within .test-tip {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .test-tip {
+    transition: none;
+  }
 }
 .switch-wrap {
   position: relative;
+  flex-shrink: 0;
 }
 .menu {
   position: absolute;

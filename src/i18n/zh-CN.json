@@ -365,6 +365,7 @@
     },
     "provider_card": {
       "testing": "测试中…",
+      "test_failed": "测试失败",
       "switch_menu": "切换配置档案",
       "new_config": "＋ 新建配置…",
       "unconfigured": "未配置",

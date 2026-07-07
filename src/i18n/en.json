@@ -365,6 +365,7 @@
     },
     "provider_card": {
       "testing": "Testing…",
+      "test_failed": "Test failed",
       "switch_menu": "Switch profile",
       "new_config": "＋ New configuration…",
       "unconfigured": "Not configured",
