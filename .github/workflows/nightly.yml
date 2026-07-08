@@ -1,0 +1,119 @@
+name: Nightly
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate IPC bindings
+        run: pnpm gen:ipc
+
+      - name: Build macOS app
+        run: >
+          pnpm tauri build
+          --target universal-apple-darwin
+          --bundles dmg
+          --no-sign
+          --ci
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Prepare nightly assets
+        run: |
+          mkdir -p nightly-assets
+
+          DMG_PATH="$(find src-tauri/target -path '*/bundle/dmg/*.dmg' -type f | sort | head -n 1)"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No macOS dmg found under src-tauri/target"
+            find src-tauri/target -path '*/bundle/*' -type f | sort
+            exit 1
+          fi
+
+          cp "$DMG_PATH" nightly-assets/Typex-nightly-macos-universal.dmg
+          shasum -a 256 nightly-assets/Typex-nightly-macos-universal.dmg > nightly-assets/SHA256SUMS.txt
+
+          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          cat > nightly-assets/nightly.json <<EOF
+          {
+            "tag": "nightly",
+            "commit": "${GITHUB_SHA}",
+            "branch": "${GITHUB_REF_NAME}",
+            "workflow_run": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "built_at": "${BUILD_TIME}",
+            "platforms": ["macos-universal"],
+            "assets": ["Typex-nightly-macos-universal.dmg", "SHA256SUMS.txt", "nightly.json"]
+          }
+          EOF
+
+          cat > nightly-notes.md <<EOF
+          Typex nightly build.
+
+          - Commit: \`${GITHUB_SHA}\`
+          - Branch: \`${GITHUB_REF_NAME}\`
+          - Built at: \`${BUILD_TIME}\`
+          - Platform: macOS universal DMG only
+          - Signing: unsigned nightly build
+
+          This release is updated automatically on every push to the main development branch.
+          EOF
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f nightly "$GITHUB_SHA"
+          git push origin refs/tags/nightly --force
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly \
+              --title "Typex Nightly" \
+              --prerelease \
+              --notes-file nightly-notes.md
+          else
+            gh release create nightly \
+              --title "Typex Nightly" \
+              --prerelease \
+              --latest=false \
+              --verify-tag \
+              --notes-file nightly-notes.md
+          fi
+
+          gh release upload nightly nightly-assets/* --clobber
