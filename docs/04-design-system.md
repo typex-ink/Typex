@@ -106,6 +106,7 @@
 | `--error` | `#C93B34` | `#F26D6D` | 错误文本、危险操作 |
 | `--focus-ring` | `rgba(23,23,25,.40)` | `rgba(242,242,244,.45)` | 2px 焦点环 |
 | `--shadow` | `0 8px 24px rgba(23,23,25,.10)` | `0 8px 24px rgba(0,0,0,.50)` | 浮层阴影 |
+| `--shadow-hud` | `0 3px 10px rgba(23,23,25,.08)` | `0 3px 10px rgba(0,0,0,.28)` | HUD 胶囊轻阴影，避免透明窗口边界感 |
 | `--icon-bg` | `#000000` | `#FFFFFF` | App glyph / mini 图标底色 |
 | `--icon-fg` | `#FFFFFF` | `#000000` | App glyph / mini 图标前景 |
 | `--logo` | `#000000` | `#FFFFFF` | 横排 logotype 字色 |

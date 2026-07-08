@@ -27,6 +27,7 @@ import en from "@/i18n/en.json";
 const L = navigator.language.toLowerCase().startsWith("zh") ? zhCN : en;
 const HUD_BOTTOM_GAP = 48;
 const HUD_SCREEN_MARGIN = 12;
+const HUD_WINDOW_PADDING = 16;
 
 const snap = reactive<SessionSnapshot>({
   session_id: 0,
@@ -211,8 +212,8 @@ async function syncHudWindowFrame(force = false) {
   const rect = hud.getBoundingClientRect();
   const maxWidth = workArea ? Math.max(160, workArea.width - HUD_SCREEN_MARGIN * 2) : 520;
   const size = {
-    width: Math.min(Math.ceil(rect.width) + 2, maxWidth),
-    height: Math.ceil(rect.height),
+    width: Math.min(Math.ceil(rect.width) + HUD_WINDOW_PADDING * 2, maxWidth),
+    height: Math.ceil(rect.height) + HUD_WINDOW_PADDING * 2,
   };
 
   try {
@@ -225,7 +226,11 @@ async function syncHudWindowFrame(force = false) {
       await win.setSize(new LogicalSize(size.width, size.height));
     }
     if (workArea) {
-      const position = bottomCenteredRect(size, workArea, HUD_BOTTOM_GAP);
+      const position = bottomCenteredRect(
+        size,
+        workArea,
+        Math.max(0, HUD_BOTTOM_GAP - HUD_WINDOW_PADDING),
+      );
       await win.setPosition(
         new LogicalPosition(Math.round(position.x), Math.round(position.y)),
       );
@@ -313,6 +318,8 @@ async function syncHudWindowFrame(force = false) {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  padding: 16px;
   background: transparent;
   overflow: hidden;
 }
@@ -329,7 +336,7 @@ async function syncHudWindowFrame(force = false) {
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-hud);
   font-size: 12.5px;
   color: var(--text-1);
   white-space: nowrap;

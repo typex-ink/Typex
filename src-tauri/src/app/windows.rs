@@ -75,11 +75,14 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
     if let Ok(Some(monitor)) = hud.current_monitor() {
         let screen = monitor.size();
         let scale = monitor.scale_factor();
+        // WebView 外层为 HUD 阴影/毛玻璃预留 16px 透明安全区；
+        // 初始定位要扣掉这圈安全区，视觉胶囊底边才仍是 48px。
+        let visual_gap = (48.0 - 16.0) * scale;
         let hud_size = hud
             .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(320, 44));
+            .unwrap_or(tauri::PhysicalSize::new(352, 76));
         let x = (screen.width as i32 - hud_size.width as i32) / 2;
-        let y = screen.height as i32 - hud_size.height as i32 - (48.0 * scale) as i32;
+        let y = screen.height as i32 - hud_size.height as i32 - visual_gap as i32;
         let _ = hud.set_position(tauri::PhysicalPosition::new(x, y));
     }
 }
