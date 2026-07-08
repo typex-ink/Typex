@@ -62,7 +62,9 @@ fn input_monitoring_granted() -> bool {
     unsafe { IOHIDCheckAccess(1) == 0 }
 }
 
-/// 检测全部权限状态（macOS 主动检测；其他平台按需扩展）。
+/// 检测全部权限状态。
+///
+/// 当前可用平台是 macOS；Windows / Linux 适配时在这里补齐对应权限探测。
 pub fn check_all() -> Vec<PermissionStatus> {
     #[cfg(target_os = "macos")]
     {

@@ -136,7 +136,7 @@ cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 
 ## 平台验证
 
-- macOS 是当前主战场，代码保持三平台 trait 可扩展。
+- 当前可用平台是 macOS；Windows / Linux 适配即将展开，代码保持三平台 trait 可扩展。
 - HUD 必须是 nonactivating NSPanel。
 - rdev 未获辅助功能权限时会静默无事件，排查热键问题先看权限。
 - cpal Stream 非 Send；录音相关问题优先检查专属线程与 callback 是否只做轻量拷贝。

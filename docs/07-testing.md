@@ -120,7 +120,7 @@
 
 ## 7. 人工回归清单（发布门槛）
 
-`docs/09-release-checklist.md` 随功能追加，按 [02 章各功能验收标准](02-features.md) 展开为逐条可勾选项，**三平台各过一遍**（macOS / Windows / Ubuntu X11 必过；KDE Wayland 尽力）。结构：
+`docs/09-release-checklist.md` 随功能追加，按 [02 章各功能验收标准](02-features.md) 展开为逐条可勾选项。当前 macOS 必过；Windows / Ubuntu X11 / KDE Wayland 随对应平台后端适配推进纳入回归范围。结构：
 
 1. 安装与首启（onboarding 全流程、权限引导、跳过路径）
 2. F-1/F-2/F-3 验收标准逐条

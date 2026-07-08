@@ -2,7 +2,7 @@
 //!
 //! 探测 RAM 总量 + CPU 核数；GPU 加速：
 //! - macOS = Metal 恒可用（Apple Silicon / Intel GPU 均支持）
-//! - 其他平台 = false 占位（CUDA / Vulkan 探测留给后续 CP）
+//! - Windows / Linux = false 占位，适配时补齐 CUDA / Vulkan 探测
 //!
 //! 纯函数 `recommend_tier` 根据硬件返回推荐档位。
 
@@ -91,7 +91,7 @@ pub fn detect() -> HardwareInfo {
 /// GPU 加速探测。
 ///
 /// macOS：Metal 始终可用（Apple Silicon + Intel GPU 均支持 Metal）→ 返回 `true`。
-/// 其他平台：暂返回 `false`；CUDA / Vulkan 探测留待后续 CP 实现。
+/// Windows / Linux：暂返回 `false`；平台适配时补齐 CUDA / Vulkan 探测。
 fn probe_gpu() -> bool {
     #[cfg(target_os = "macos")]
     {

@@ -1,7 +1,7 @@
 //! 目标应用识别（02 F-7 历史字段 / 03 §3.4 prompt 上下文 / F-11 预留）。
 //!
 //! macOS：NSWorkspace.frontmostApplication 读取前台应用本地化名。
-//! 其他平台返回 None（trait 扩展位随平台后端补）。
+//! Windows / Linux 适配时补齐对应前台应用探测；当前非 macOS 返回 None。
 
 /// 当前前台应用名（注入目标；录音开始时采样）。
 pub fn frontmost_app_name() -> Option<String> {

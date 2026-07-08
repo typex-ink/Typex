@@ -245,6 +245,8 @@ pub enum SessionPhase {
 
 ### 7.1 平台适配矩阵（总览）
 
+当前可用平台是 macOS；Windows 与 Linux 是接下来要适配的目标平台。下表同时作为目标方案与验收边界，不表示所有平台后端已经落地。
+
 | 能力 | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
 | 全局按住说话 | rdev（需辅助功能/输入监听权限） | rdev（WH_KEYBOARD_LL） | rdev（XTEST/XRecord） | Portal GlobalShortcuts（ashpd）；evdev 兜底 |
