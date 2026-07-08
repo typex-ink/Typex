@@ -219,9 +219,28 @@ onMounted(async () => {
         <b>Typex</b>
       </div>
       <nav>
-        <div :class="{ on: tab === 'overview' }" @click="tab = 'overview'">⌂ {{ t("home.nav_overview") }}</div>
-        <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">◷ {{ t("home.nav_history") }}</div>
-        <div :class="{ on: tab === 'dictionary' }" @click="tab = 'dictionary'">▤ {{ t("home.nav_dictionary") }}</div>
+        <div :class="{ on: tab === 'overview' }" @click="tab = 'overview'">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4.5 10.5 12 4l7.5 6.5" />
+            <path d="M6.5 9.5v9h11v-9" />
+          </svg>
+          <span class="nav-label">{{ t("home.nav_overview") }}</span>
+        </div>
+        <div :class="{ on: tab === 'history' }" @click="tab = 'history'; doSearch()">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="7.5" />
+            <path d="M12 7.8v4.6l3.1 1.9" />
+          </svg>
+          <span class="nav-label">{{ t("home.nav_history") }}</span>
+        </div>
+        <div :class="{ on: tab === 'dictionary' }" @click="tab = 'dictionary'">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 6.5v13" />
+            <path d="M4.5 5.5h4.2c1.8 0 3.3 1.5 3.3 3.3v10.7c0-1.5-1.2-2.7-2.7-2.7H4.5z" />
+            <path d="M19.5 5.5h-4.2c-1.8 0-3.3 1.5-3.3 3.3v10.7c0-1.5 1.2-2.7 2.7-2.7h4.8z" />
+          </svg>
+          <span class="nav-label">{{ t("home.nav_dictionary") }}</span>
+        </div>
       </nav>
       <div class="mfoot">
         <button type="button" :title="t('home.settings')" :aria-label="t('home.settings')" @click="openSettings">⚙</button>
@@ -492,6 +511,19 @@ nav .on {
   background: var(--sel-bg);
   color: var(--text-1);
   font-weight: 600;
+}
+.nav-icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.nav-label {
+  line-height: 16px;
 }
 .mfoot {
   margin-top: auto;
