@@ -13,6 +13,26 @@
 2. **语音翻译** — 按住 `右 ⌘ + 右 ⌥` 说 A 语言、上屏 B 语言；双向自动判向。
 3. **文本处理与语音问答** — 选中文本 + 按住 `右 ⌥` 口述指令 = 原地改写；或随时呼出助手面板单轮问答。
 
+## Nightly 下载
+
+最新 macOS nightly 构建见 [Typex Nightly](https://github.com/typex-ink/Typex/releases/tag/nightly)。
+
+当前 nightly 构建尚未做 Apple Developer ID 签名与公证，首次打开时 macOS 可能提示“无法验证是否包含恶意软件”。如果你信任这个 GitHub Release 下载来源，先把 Typex 拖到 `/Applications`，然后运行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Typex.app
+open /Applications/Typex.app
+```
+
+如果提示权限不足：
+
+```bash
+sudo xattr -dr com.apple.quarantine /Applications/Typex.app
+open /Applications/Typex.app
+```
+
+这只会移除 `Typex.app` 的下载隔离标记，不会全局关闭 Gatekeeper。不要使用 `spctl --master-disable`。
+
 ## 开发
 
 ```bash
