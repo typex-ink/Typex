@@ -1,5 +1,5 @@
 <p align="right">
-  <strong>English</strong> | <a href="README.zh-CN.md">简体中文</a>
+  <strong>English</strong> | <a href="README_ZH.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
 <h1 align="center">Typex</h1>
 
 <p align="center">
-  <strong>Say it, get it.</strong>
+  <strong>Speak. It types.</strong>
 </p>
 
 ## About
