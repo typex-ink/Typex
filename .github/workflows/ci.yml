@@ -9,7 +9,49 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  lint-and-test:
+  rustfmt:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: rustfmt
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+  clippy:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  cargo-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  frontend-build:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
@@ -24,8 +66,6 @@ jobs:
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -34,23 +74,11 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
-      - name: rustfmt
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
-
-      - name: clippy
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-
-      - name: cargo test（含 bindings 导出）
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-
-      - name: bindings 新鲜度（生成物与提交一致性 → 生成后前端可编译）
-        run: test -f src/ipc/bindings.ts
+      - name: Generate IPC bindings
+        run: pnpm gen:ipc
 
       - name: vue-tsc + vite build
         run: pnpm build
-
-      - name: vitest
-        run: pnpm test
 
       - name: hud chunk 体积断言（07 §11：< 150 KB gzip）
         run: |
@@ -58,3 +86,32 @@ jobs:
           SIZE=$(gzip -c "$HUD_JS" | wc -c)
           echo "hud chunk gzip = $SIZE bytes"
           test "$SIZE" -lt 153600
+
+  frontend-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate IPC bindings
+        run: pnpm gen:ipc
+
+      - name: vitest
+        run: pnpm test
