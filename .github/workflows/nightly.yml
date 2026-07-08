@@ -105,15 +105,18 @@ jobs:
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly \
               --title "Typex Nightly" \
-              --prerelease \
               --notes-file nightly-notes.md
           else
             gh release create nightly \
               --title "Typex Nightly" \
-              --prerelease \
               --latest=false \
               --verify-tag \
               --notes-file nightly-notes.md
           fi
+
+          RELEASE_ID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" --jq '.id')"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F prerelease=false \
+            -f make_latest=false
 
           gh release upload nightly nightly-assets/* --clobber
