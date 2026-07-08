@@ -1,8 +1,7 @@
 # 04 · 设计系统（品牌 · 图标 · 配色 · 字体 · 动效）
 
 > Typex 产品设计书 · 第四章
-> 本章 token 是前端 `src/lib/tokens.css` 的唯一事实来源；界面应用见 [05 UX 规格](05-ux-spec.md)。
-> **可视化配套物见 [`mockups/`](mockups/README.md)**：定稿 HTML mockup、渲染截图、tokens.css 起步文件——用 AI 辅助实现 UI 时把它们一并提供给模型，避免模型凭空想象界面外观。
+> 本章是 UI 外观、品牌与 design tokens 的唯一事实来源；前端 token 落地在 `src/styles/tokens.css`；界面结构与行为见 [05 UX 规格](05-ux-spec.md)。
 
 ---
 
@@ -80,6 +79,7 @@
 - 成功/警告**灰阶化**，语义由符号（✓ / ⚠）+ 明度承担，不再占用绿/黄色相。
 - 波形与电平使用墨色（`--voice` 保留为语义 token，当前值 = `--text-1`；录音动画本身即「活着」的信号）。
 - 主按钮是页面上唯一保持实底反色的元素（一个页面需要一处最重的锚点）；侧边栏选中、卡片选中、tag 一律用 `--sel-bg` 灰底，**禁止反色实底**（刺眼）与粗黑描边。
+- 链接与 Ghost 按钮用下划线表达，不靠颜色；所有界面颜色必须引用 `src/styles/tokens.css` 变量，组件内禁止硬编码色值。
 - 所有正文级前景/背景组合满足 WCAG AA（≥ 4.5:1），已逐项校验。
 
 ### 3.2 Token 总表
@@ -105,6 +105,7 @@
 | `--warning` | `#5C5C62` | `#A2A2AA` | 警告（灰阶 + ⚠ 符号承担语义） |
 | `--error` | `#C93B34` | `#F26D6D` | 错误文本、危险操作 |
 | `--focus-ring` | `rgba(23,23,25,.40)` | `rgba(242,242,244,.45)` | 2px 焦点环 |
+| `--overlay` | `rgba(23,23,25,.42)` | `rgba(0,0,0,.58)` | 模态/浮层遮罩 |
 | `--shadow` | `0 8px 24px rgba(23,23,25,.10)` | `0 8px 24px rgba(0,0,0,.50)` | 浮层阴影 |
 | `--shadow-hud` | `0 3px 10px rgba(23,23,25,.08)` | `0 3px 10px rgba(0,0,0,.28)` | HUD 胶囊轻阴影，避免透明窗口边界感 |
 | `--icon-bg` | `#000000` | `#FFFFFF` | App glyph / mini 图标底色 |
@@ -150,7 +151,7 @@
 
 提示音（`assets/sounds/`，皆 < 150 ms、-14 LUFS、可关闭）：开始 = 上行双音「叮·咚」（清爽、不刺耳）；成功 = 单音短「嗒」；错误 = 低频闷「噗」。三枚音色同一乐器族（木琴系），构成品牌听觉签名。
 
-## 7. 组件规范（前端 `src/lib/components/`）
+## 7. 组件规范（前端 `src/components/`）
 
 `Button`（primary/secondary/ghost/danger，高 32，radius 8）· `Input`/`SecretInput`（密钥用，带显隐与粘贴按钮，高 32）· `Select`（应用内自绘 listbox，禁止使用系统原生下拉；支持方向键/Enter/Esc、外部点击关闭）· `Toggle` · `HotkeyRecorder`（录制快捷键专用控件，见 06 §7）· `ProviderCard`（配置档案卡片：厂商 logo 位 + label + 模型名 + 测试按钮 + 延迟徽标）· `Waveform`（Canvas 封装，输入电平数组）· `StatusPill`（HUD 核心容器）· `Kbd`（快捷键展示）· `EmptyState` · `Callout`（info/warn/error）。
 

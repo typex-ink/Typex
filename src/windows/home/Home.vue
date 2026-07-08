@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 主页窗口 880×560（05 §8 / ADR-19 / mockup §1）：侧边栏 + 首页/历史记录页签
+// 主页窗口 880×560（05 §8 / ADR-19）：侧边栏 + 首页/历史记录页签
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Kbd from "@/components/Kbd.vue";
@@ -457,7 +457,7 @@ onMounted(async () => {
   gap: 8px;
   padding: 0 10px 16px;
 }
-/* mini 图标 = 小尺寸 glyph 规则：三柱 + 竖笔（04 §2.2）——此处沿 mockup 用五柱缩微 */
+/* mini 图标 = 小尺寸 glyph 规则（04 §2.2）；此处用五柱缩微保持与托盘波形一致 */
 .mini {
   width: 26px;
   height: 26px;

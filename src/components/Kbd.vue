@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Kbd：快捷键展示（mockup .kbd）
+// Kbd：快捷键展示（04 §7）
 </script>
 
 <template>

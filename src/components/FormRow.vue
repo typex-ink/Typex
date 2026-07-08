@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 设置表单行（mockup .frow）：左标签（可带说明小字）+ 右控件
+// 设置表单行：左标签（可带说明小字）+ 右控件
 defineProps<{ label: string; hint?: string }>();
 </script>
 

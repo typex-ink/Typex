@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 通用页（mockup 2.1）
+// 通用页（05 §5.2）
 import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";
 import Select from "@/components/Select.vue";

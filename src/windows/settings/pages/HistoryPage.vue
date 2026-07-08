@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 历史设置页（mockup 2.11）
+// 历史设置页（05 §5.2）
 import FormRow from "@/components/FormRow.vue";
 import Select from "@/components/Select.vue";
 import Toggle from "@/components/Toggle.vue";

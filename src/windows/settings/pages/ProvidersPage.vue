@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 模型服务页（05 §5.1 / mockup 2.5–2.9）：功能分配 + 底部服务配置池
+// 模型服务页（05 §5.1）：功能分配 + 底部服务配置池
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
@@ -38,7 +38,7 @@ const managing = ref(false);
 const profiles = computed(() => store.settings?.profiles ?? []);
 // 本地模型状态（本地卡片副标题：引擎 + 已下载·体积 / 未下载）
 const localModels = ref<LocalModelInfo[]>([]);
-// 底部摘要行（mockup 2.5）：已下载模型列表；feature 未启用时 localModels 恒空 → 整行隐藏
+// 底部摘要行（05 §5.1）：已下载模型列表；feature 未启用时 localModels 恒空 → 整行隐藏
 const downloadedModels = computed(() => localModels.value.filter((m) => m.downloaded));
 const localAvailable = computed(() => localModels.value.length > 0);
 
@@ -71,7 +71,7 @@ function localEngineLabel(engine: string): string {
   return engine;
 }
 
-/** 本地档案卡片副标题（mockup 2.8：`local · 已下载 · 1.3 GB · 离线`）；云端显示 adapter。 */
+/** 本地档案卡片副标题（05 §5.1：`local · 已下载 · 1.3 GB · 离线`）；云端显示 adapter。 */
 function subtitleOfProfile(p: ProviderProfile | null): string | undefined {
   if (!p) return undefined;
   let base: string = p.kind;
@@ -183,7 +183,7 @@ onMounted(loadLocalModels);
         @switch="(id) => switchProfile(slot, id)"
       />
     </template>
-    <!-- 底部摘要行（mockup 2.5）：已下载模型 + 「管理…」入口；feature 未启用时隐藏 -->
+    <!-- 底部摘要行（05 §5.1）：已下载模型 + 「管理…」入口；feature 未启用时隐藏 -->
     <p v-if="localAvailable" class="models-line">
       <template v-if="downloadedModels.length">
         {{ t("settings.providers.downloaded_prefix") }}

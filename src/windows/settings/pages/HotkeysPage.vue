@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 快捷键页（mockup 2.10）
+// 快捷键页（05 §7）
 import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";
 import HotkeyRecorder from "@/components/HotkeyRecorder.vue";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 听写页（mockup 2.2 / 2.2b）：整理开关 + 提示词模板编辑器 + 注入方式 + 麦克风
+// 听写页（05 §5.2）：整理开关 + 提示词模板编辑器 + 注入方式 + 麦克风
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";

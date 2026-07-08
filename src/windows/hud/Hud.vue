@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// HUD 状态胶囊 — 严格对照 docs/mockups/ui-mono.html §3 与 05 §3
+// HUD 状态胶囊 — 严格对照 04 设计系统与 05 §3
 // 极简纪律（07 §11）：无 Pinia、无路由、无 Markdown
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
@@ -324,7 +324,7 @@ async function syncHudWindowFrame(force = false) {
   overflow: hidden;
 }
 
-/* 胶囊本体（mockup .hud）：高 44、全圆角、毛玻璃 */
+/* 胶囊本体（04 §5 / 05 §3.1）：高 44、全圆角、毛玻璃 */
 .hud {
   display: inline-flex;
   align-items: center;

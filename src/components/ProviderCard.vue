@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// ProviderCard（04 §7 / mockup 2.5）：label + 模型 + 状态 + 测试/编辑/切换
+// ProviderCard（04 §7 / 05 §5.1）：label + 模型 + 状态 + 测试/编辑/切换
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 设置窗口 720×520：左导航 160px + 内容区（05 §5 / mockup §2）
+// 设置窗口 720×520：左导航 160px + 内容区（05 §5）
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/settings";

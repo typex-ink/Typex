@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 首次启动引导 640×480，5 步（05 §6 / mockup §6）
+// 首次启动引导 640×480，5 步（05 §6）
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useI18n } from "vue-i18n";
@@ -45,7 +45,7 @@ const llmModel = ref("");
 const configuring = ref(false);
 const configError = ref("");
 
-// 本地路径（CP-8.8 / mockup 步骤 3/3b）：档位检测 → 一键下载 → 三个功能指向 local 服务配置
+// 本地路径（05 §6 第 3 步 / CP-8.8）：档位检测 → 一键下载 → 三个功能指向 local 服务配置
 const hw = ref<HardwareTier | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
 const chosenTier = ref<string>("standard");
@@ -283,7 +283,7 @@ onUnmounted(() => {
     <div v-else-if="step === 3" class="body">
       <h5>{{ t("onboarding.models_title") }}</h5>
 
-      <!-- 本地模型推荐卡（CP-8.8 / mockup 步骤 3/3b；local-models 未启用时不显示） -->
+      <!-- 本地模型推荐卡（05 §6 第 3 步 / CP-8.8；local-models 未启用时不显示） -->
       <div v-if="localAvailable && localPhase === 'idle'" class="prov on">
         <div class="plogo">◉</div>
         <div class="pmeta2">
@@ -311,7 +311,7 @@ onUnmounted(() => {
         <Button size="sm" @click="startLocalDownload">{{ t("onboarding.local_download_use") }}</Button>
       </div>
 
-      <!-- 下载中 / 完成 / 失败（mockup 步骤 3b：进度条 = --text-1 实底） -->
+      <!-- 下载中 / 完成 / 失败（进度条 = --text-1 实底） -->
       <div v-else-if="localAvailable" class="prov on">
         <div class="plogo">◉</div>
         <div class="pmeta2">
@@ -531,7 +531,7 @@ onUnmounted(() => {
   font-size: 11px;
   margin-top: 8px;
 }
-/* 本地推荐卡（mockup 步骤 3/3b） */
+/* 本地推荐卡（05 §6 第 3 步） */
 .prov {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -615,7 +615,7 @@ onUnmounted(() => {
 .tier-menu a.cur {
   font-weight: 600;
 }
-/* 进度条 = --text-1 实底，无彩色（mockup 步骤 3b） */
+/* 进度条 = --text-1 实底，无彩色（04 §3） */
 .pbar {
   display: block;
   width: 100%;

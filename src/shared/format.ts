@@ -1,4 +1,4 @@
-// 通用格式化（CP-8.7：模型体积显示，mockup 2.7/2.9 的「1.3 GB / 1.0 GB」形态）
+// 通用格式化（CP-8.7：模型体积显示，05 §5.1 的「1.3 GB / 1.0 GB」形态）
 export function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 3) {
     const gb = bytes / 1024 ** 3;

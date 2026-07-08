@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 诊断页（mockup 2.12）：环境自检 + 日志目录
+// 诊断页（05 §5.2）：环境自检 + 日志目录
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";

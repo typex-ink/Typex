@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 关于页（mockup 2.13）：图标 + logotype + 版本 + 检查更新（CP-6.3 / ADR-11）
+// 关于页：图标 + logotype + 版本 + 检查更新（CP-6.3 / ADR-11）
 import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";

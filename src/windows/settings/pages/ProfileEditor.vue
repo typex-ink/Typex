@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// ProviderCard 编辑子页（mockup 2.6 云端 / 2.7 本地）：预设下拉 → 按 kind 动态字段 → 保存/测试/删除
+// ProviderCard 编辑子页（05 §5.1 云端/本地档案编辑）：预设下拉 → 按 kind 动态字段 → 保存/测试/删除
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
@@ -102,7 +102,7 @@ const hasExistingVolcKeys = computed(
     hasStoredSecret(props.profile?.credentials?.["access_token"]),
 );
 
-// ── 本地档案编辑态（CP-8.7 / mockup 2.7）──
+// ── 本地档案编辑态（CP-8.7 / 05 §5.1）──
 // 模型下拉来自模型库，按槽位 purpose 过滤：stt 槽列 stt 模型，其余槽列 llm。
 const localModels = ref<LocalModelInfo[]>([]);
 const loadPolicy = ref<string>(
@@ -230,7 +230,7 @@ async function save(): Promise<string | null> {
     return null;
   }
   if (isLocal.value) {
-    // 本地推理无凭据（mockup 2.7）
+    // 本地推理无凭据（05 §5.1）
   } else if (isVolc.value) {
     if (appKey.value.trim()) {
       if (!(await saveSecret(id, "app_key", appKey.value.trim()))) {
@@ -328,7 +328,7 @@ onUnmounted(() => unlistenProgress?.());
       <span class="w280"><Input v-model="label" :placeholder="t('settings.profile.name_ph')" /></span>
     </FormRow>
 
-    <!-- 本地档案编辑态（mockup 2.7）：模型下拉 + 加载策略；无端点/密钥 -->
+    <!-- 本地档案编辑态（05 §5.1）：模型下拉 + 加载策略；无端点/密钥 -->
     <template v-if="isLocal">
       <FormRow :label="t('settings.profile.model')">
         <span class="local-model">
@@ -366,7 +366,7 @@ onUnmounted(() => unlistenProgress?.());
       <p class="local-note">{{ t("settings.profile.local_note") }}</p>
     </template>
 
-    <!-- 云端编辑态（mockup 2.6） -->
+    <!-- 云端编辑态（05 §5.1） -->
     <template v-else>
       <FormRow v-if="!isVolc" label="Base URL">
         <span class="w280"><Input v-model="baseUrl" mono placeholder="https://api.example.com/v1" /></span>
@@ -448,7 +448,7 @@ onUnmounted(() => unlistenProgress?.());
   align-items: center;
   gap: 8px;
 }
-/* 进度条 = --text-1 实底，无彩色（mockup 步骤 3b 同款纪律） */
+/* 进度条 = --text-1 实底，无彩色（04 §3） */
 .pbar {
   width: 90px;
   height: 4px;

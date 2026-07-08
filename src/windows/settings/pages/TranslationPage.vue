@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 翻译页（mockup 2.3）
+// 翻译页（05 §5.2）
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import FormRow from "@/components/FormRow.vue";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 已下载模型管理子页（05 §5.1 / mockup 2.9 / CP-8.7）：
+// 已下载模型管理子页（05 §5.1 / CP-8.7）：
 // 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（硬件要求 + 本机检测 ✓/✗）+ 占用合计。
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -90,7 +90,7 @@ function usedBySlots(modelId: string): string[] {
   return out;
 }
 
-/** 行内硬件要求 + 本机检测结果（mockup 2.9：「需 GPU 加速（本机 ✓ Metal）」） */
+/** 行内硬件要求 + 本机检测结果（05 §5.1：「需 GPU 加速（本机 ✓ Metal）」） */
 function hardwareLine(m: LocalModelInfo): string {
   const parts: string[] = [];
   if (m.requires_gpu) {
