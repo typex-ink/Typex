@@ -30,8 +30,12 @@ defineProps<{
   border: none;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.12s ease-out, color 0.12s ease-out;
+  transition: background 0.12s ease-out, border-color 0.12s ease-out, color 0.12s ease-out;
   white-space: nowrap;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .btn-primary {
   background: var(--primary);
@@ -46,7 +50,8 @@ defineProps<{
   border: 1px solid var(--border-2);
 }
 .btn-secondary:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--sel-bg);
+  border-color: var(--text-3);
 }
 .btn-ghost {
   background: transparent;

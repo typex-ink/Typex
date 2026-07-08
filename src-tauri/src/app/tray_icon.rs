@@ -17,6 +17,8 @@ const GAP: usize = 2;
 const IDLE_HEIGHTS: [usize; 5] = [6, 10, 14, 10, 6];
 /// 录音红 / 错误红（04 §3 唯一彩色）
 const RED: [u8; 4] = [226, 61, 45, 255];
+/// macOS 菜单栏常驻深色/壁纸融合背景；非 template 帧也必须可见。
+const WHITE: [u8; 4] = [255, 255, 255, 255];
 
 /// 托盘视觉状态（snapshot/level 回调写入，动画 task 读取）。
 #[derive(Default)]
@@ -70,7 +72,12 @@ fn draw_bar(buf: &mut [u8], idx: usize, h: usize, alpha: u8) {
     let base = (SIZE + 14) / 2; // 柱体在 14px 高的带内底对齐，垂直居中
     for dy in 0..h.min(14) {
         for dx in 0..BAR_W {
-            put(buf, x0 + dx, base - 1 - dy, [0, 0, 0, alpha]);
+            put(
+                buf,
+                x0 + dx,
+                base - 1 - dy,
+                [WHITE[0], WHITE[1], WHITE[2], alpha],
+            );
         }
     }
 }
@@ -90,9 +97,9 @@ fn draw_badge(buf: &mut [u8]) {
 /// 斜杠角标（暂停）。
 fn draw_slash(buf: &mut [u8]) {
     for i in 0..SIZE {
-        put(buf, i, SIZE - 1 - i, [0, 0, 0, 255]);
+        put(buf, i, SIZE - 1 - i, WHITE);
         if i + 1 < SIZE {
-            put(buf, i + 1, SIZE - 1 - i, [0, 0, 0, 255]);
+            put(buf, i + 1, SIZE - 1 - i, WHITE);
         }
     }
 }
@@ -137,7 +144,6 @@ fn render(visual: &TrayVisual, tick: u64) -> Frame {
         }
         3 => {
             // 错误：静态五柱 + 红点（需真彩，非 template）
-            // template 关闭后柱体固定黑色——深色菜单栏对比度降低是已知妥协
             for (i, h) in IDLE_HEIGHTS.iter().enumerate() {
                 draw_bar(&mut buf, i, *h, 255);
             }
@@ -180,8 +186,8 @@ pub fn spawn_animator<R: Runtime>(app: AppHandle<R>) {
             let frame = render(&visual, tick);
             if let Some(tray) = app.tray_by_id("main") {
                 let img = tauri::image::Image::new_owned(frame.rgba, SIZE as u32, SIZE as u32);
-                let _ = tray.set_icon_as_template(frame.template);
                 let _ = tray.set_icon(Some(img));
+                let _ = tray.set_icon_as_template(frame.template);
             }
         }
     });
@@ -214,6 +220,11 @@ mod tests {
             .chunks(4)
             .any(|p| p[0] == RED[0] && p[1] == RED[1] && p[3] == 255);
         assert!(has_red, "缺红点角标");
+        let has_white = f
+            .rgba
+            .chunks(4)
+            .any(|p| p[0] == WHITE[0] && p[1] == WHITE[1] && p[2] == WHITE[2] && p[3] == 255);
+        assert!(has_white, "错误帧柱体应为白色");
     }
 
     #[test]

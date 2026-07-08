@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::{
     AppHandle, Manager, Runtime,
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
 const TARGET_LANGS: [&str; 6] = [
@@ -141,8 +141,22 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 .expect("tray icon"),
         )
         .icon_as_template(true)
+        .tooltip("Typex")
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
+        .on_tray_icon_event(|tray, event| {
+            if cfg!(target_os = "macos") {
+                return;
+            }
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let _ = crate::app::windows::show_home(tray.app_handle());
+            }
+        })
         .on_menu_event(move |app, event| {
             let id = event.id().as_ref();
             match id {
