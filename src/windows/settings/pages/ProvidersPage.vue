@@ -64,6 +64,13 @@ function usedSlotLabels(profileId: string): string[] {
     .map(({ key }) => t(key));
 }
 
+function localEngineLabel(engine: string): string {
+  if (engine === "llama") return "llama.cpp";
+  if (engine === "sherpa_whisper") return "sherpa-onnx Whisper";
+  if (engine === "sherpa") return "sherpa-onnx";
+  return engine;
+}
+
 /** 本地档案卡片副标题（mockup 2.8：`local · 已下载 · 1.3 GB · 离线`）；云端显示 adapter。 */
 function subtitleOfProfile(p: ProviderProfile | null): string | undefined {
   if (!p) return undefined;
@@ -75,7 +82,7 @@ function subtitleOfProfile(p: ProviderProfile | null): string | undefined {
       const status = m.downloaded
         ? t("settings.providers.local_downloaded", { size: formatBytes(m.bytes) })
         : t("settings.providers.local_not_downloaded");
-      base = `${m.engine} · ${status} · ${t("settings.providers.local_offline")}`;
+      base = `${localEngineLabel(m.engine)} · ${status} · ${t("settings.providers.local_offline")}`;
     }
   }
   const used = usedSlotLabels(p.id);

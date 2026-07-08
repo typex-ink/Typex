@@ -23,6 +23,8 @@ pub enum ImportError {
     InvalidEngine(String),
     #[error("本地 LLM 仅支持 llama.cpp GGUF")]
     UnsupportedLlmEngine,
+    #[error("Whisper 导入暂不支持，请使用内置可下载模型")]
+    UnsupportedWhisperImport,
     #[error("SenseVoice/sherpa 导入需要 .onnx 模型和 tokens.txt")]
     MissingSherpaFiles,
     #[error("llama ASR 导入需要主 GGUF 和 mmproj GGUF")]
@@ -138,8 +140,11 @@ fn validate_files(
                 return Err(ImportError::InvalidLlmFiles);
             }
         }
-        (ModelPurpose::Llm, ModelEngine::Sherpa) => {
+        (ModelPurpose::Llm, ModelEngine::Sherpa | ModelEngine::SherpaWhisper) => {
             return Err(ImportError::UnsupportedLlmEngine);
+        }
+        (ModelPurpose::Stt, ModelEngine::SherpaWhisper) => {
+            return Err(ImportError::UnsupportedWhisperImport);
         }
         (ModelPurpose::Stt, ModelEngine::Sherpa) => {
             let has_onnx = names.iter().any(|name| name.ends_with(".onnx"));

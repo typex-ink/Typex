@@ -40,7 +40,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | macOS 权限 | `tauri-plugin-macos-permissions` + `macos-accessibility-client` | 检测 + 引导跳转 |
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
-| 本地推理（v1.1，[ADR-20](09-decisions.md)/[ADR-22](09-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；轻量档 STT：`sherpa-onnx`（官方 crate，静态链接）；硬件探测：`sysinfo` | feature flag `local-models` 集中管理（v0.1.1 起默认启用，可 `--no-default-features` 裁剪；2026-07-06 项目所有者拍板），模型按硬件档位下载（[03 §8](03-model-providers.md)）；whisper.cpp 降为可选扩展 |
+| 本地推理（v1.1，[ADR-20](09-decisions.md)/[ADR-22](09-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`（官方 crate，静态链接）；硬件探测：`sysinfo` | feature flag `local-models` 集中管理（v0.1.1 起默认启用，可 `--no-default-features` 裁剪；2026-07-06 项目所有者拍板），推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)）；whisper.cpp 降为可选扩展 |
 
 ## 2. 进程与窗口模型
 

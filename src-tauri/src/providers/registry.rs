@@ -311,10 +311,10 @@ impl ProviderRegistry {
         }
     }
 
-    /// 本地 STT（v1.1）：按 model id 选引擎（sherpa / llama mtmd）。
+    /// 本地 STT（v1.1）：按 model id 选引擎（sherpa / sherpa_whisper / llama mtmd）。
     #[cfg(feature = "local-models")]
     fn build_local_stt(&self, profile: &ProviderProfile) -> Result<Arc<dyn SttProvider>> {
-        use crate::local::{manifest, stt_qwen_asr, stt_sense_voice};
+        use crate::local::{manifest, stt_qwen_asr, stt_sense_voice, stt_whisper};
         let dir = self
             .models_data_dir
             .lock()
@@ -348,6 +348,36 @@ impl ProviderRegistry {
                     .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺 tokens.txt"))?;
                 Ok(Arc::new(stt_sense_voice::SenseVoiceStt::from_files(
                     model,
+                    tokens,
+                    threads as i32,
+                )))
+            }
+            manifest::ModelEngine::SherpaWhisper => {
+                let encoder = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.contains("encoder") && f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| {
+                        TypexError::new(ErrorCode::Internal, "清单缺 Whisper encoder 文件")
+                    })?;
+                let decoder = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.contains("decoder") && f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| {
+                        TypexError::new(ErrorCode::Internal, "清单缺 Whisper decoder 文件")
+                    })?;
+                let tokens = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.ends_with("tokens.txt"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺 tokens.txt"))?;
+                Ok(Arc::new(stt_whisper::WhisperStt::from_files(
+                    encoder,
+                    decoder,
                     tokens,
                     threads as i32,
                 )))

@@ -643,6 +643,7 @@ pub fn list_local_models(
                     },
                     engine: match e.engine {
                         manifest::ModelEngine::Sherpa => "sherpa".into(),
+                        manifest::ModelEngine::SherpaWhisper => "sherpa_whisper".into(),
                         manifest::ModelEngine::Llama => "llama".into(),
                     },
                     bytes: e.files.iter().map(|f| f.bytes).sum(),
@@ -899,6 +900,7 @@ pub fn import_local_model(
             },
             engine: match entry.engine {
                 manifest::ModelEngine::Sherpa => "sherpa".into(),
+                manifest::ModelEngine::SherpaWhisper => "sherpa_whisper".into(),
                 manifest::ModelEngine::Llama => "llama".into(),
             },
             bytes,

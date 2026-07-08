@@ -36,6 +36,9 @@ pub enum ModelPurpose {
 pub enum ModelEngine {
     /// sherpa-onnx（SenseVoice 轻量 STT）。
     Sherpa,
+    /// sherpa-onnx Whisper（高配 STT）。
+    #[serde(rename = "sherpa_whisper")]
+    SherpaWhisper,
     /// llama.cpp（Qwen3-ASR / Qwen3.5 GGUF）。
     Llama,
 }
@@ -189,6 +192,35 @@ pub fn catalog() -> Vec<ModelEntry> {
             min_ram_gb: 8,
             requires_gpu: true,
         },
+        ModelEntry {
+            id: "whisper-large-v3-int8".into(),
+            display_name: "Whisper large-v3 (int8)".into(),
+            purpose: ModelPurpose::Stt,
+            engine: ModelEngine::SherpaWhisper,
+            files: vec![
+                ModelFile {
+                    name: "large-v3-encoder.int8.onnx".into(),
+                    bytes: 767_000_000,
+                    sha256: "".into(),
+                },
+                ModelFile {
+                    name: "large-v3-decoder.int8.onnx".into(),
+                    bytes: 1_010_000_000,
+                    sha256: "".into(),
+                },
+                ModelFile {
+                    name: "large-v3-tokens.txt".into(),
+                    bytes: 817_000,
+                    sha256: "".into(),
+                },
+            ],
+            license: "MIT".into(),
+            sources: vec![hf(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3/resolve/main",
+            )],
+            min_ram_gb: 16,
+            requires_gpu: false,
+        },
         // ── LLM ───────────────────────────────────────────────────────────────
         ModelEntry {
             id: "qwen3.5-0.8b-q4".into(),
@@ -260,6 +292,60 @@ pub fn catalog() -> Vec<ModelEntry> {
                 ms("https://modelscope.cn/models/unsloth/Qwen3.5-9B-GGUF/resolve/master"),
             ],
             min_ram_gb: 24,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "qwen3-14b-q4".into(),
+            display_name: "Qwen3 14B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3-14B-Q4_K_M.gguf".into(),
+                bytes: 9_000_000_000,
+                sha256: "".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/Qwen/Qwen3-14B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 32,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "qwen3-30b-a3b-q4".into(),
+            display_name: "Qwen3 30B-A3B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3-30B-A3B-Q4_K_M.gguf".into(),
+                bytes: 18_600_000_000,
+                sha256: "".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/Qwen/Qwen3-30B-A3B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 32,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "qwen3-32b-q4".into(),
+            display_name: "Qwen3 32B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3-32B-Q4_K_M.gguf".into(),
+                bytes: 19_800_000_000,
+                sha256: "".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/Qwen/Qwen3-32B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/Qwen/Qwen3-32B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 48,
             requires_gpu: true,
         },
         ModelEntry {
@@ -399,7 +485,7 @@ mod tests {
 
     #[test]
     fn catalog_has_expanded_entries() {
-        assert!(catalog().len() >= 10);
+        assert!(catalog().len() >= 14);
     }
 
     #[test]
@@ -425,6 +511,9 @@ mod tests {
         assert!(gpu_required.contains(&"qwen3-asr-1.7b-q8".to_string()));
         assert!(gpu_required.contains(&"qwen3.5-4b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3.5-9b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3-14b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3-30b-a3b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3-32b-q4".to_string()));
     }
 
     #[test]
@@ -433,6 +522,29 @@ mod tests {
             let names = file_names(&entry_by_id(id));
             assert!(names.iter().any(|name| name.starts_with("mmproj")));
         }
+    }
+
+    #[test]
+    fn high_end_manual_models_are_available_but_not_tier_defaults() {
+        for id in [
+            "whisper-large-v3-int8",
+            "qwen3-14b-q4",
+            "qwen3-30b-a3b-q4",
+            "qwen3-32b-q4",
+        ] {
+            let entry = entry_by_id(id);
+            assert!(entry.min_ram_gb >= 16, "{id} 应标为高配模型");
+            assert!(
+                !crate::local::hardware::Tier::ALL
+                    .iter()
+                    .any(|tier| tier.model_ids().contains(&id)),
+                "{id} 不应进入自动硬件分档"
+            );
+        }
+        assert_eq!(
+            entry_by_id("whisper-large-v3-int8").engine,
+            ModelEngine::SherpaWhisper
+        );
     }
 
     #[test]
