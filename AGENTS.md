@@ -147,5 +147,5 @@ cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 
 - 使用 Conventional Commits：`feat(audio): …`、`fix(providers): …`、`docs: …`。
 - scope 优先使用 06 章模块名：`hotkey` / `audio` / `inject` / `selection` / `providers` / `settings` / `history` / `orchestrator` / `app` / `platform`。
-- 提交信息用中文。
+- 提交信息优先使用英文。
 - 产品名一律写作 **Typex**；bundle id 为 `ink.typex.app`。
