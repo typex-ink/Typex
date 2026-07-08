@@ -6,6 +6,7 @@
 //! 子模块：
 //! - [`manifest`]：内置模型清单（6 条目，ADR-22）
 //! - [`hardware`]：RAM / CPU / GPU 探测 → 轻量 / 标准 / 性能三档
+//! - [`import`]：用户已下载模型的托管导入
 //! - [`download`]：HTTP Range 断点续传、SHA-256 校验、换源重试
 //! - [`stt_sense_voice`]：SenseVoice 轻量档 STT（sherpa-onnx，CP-8.3）
 //! - [`stt_qwen_asr`]：Qwen3-ASR 标准/性能档 STT（llama.cpp mtmd，CP-8.4）
@@ -16,6 +17,7 @@
 
 pub mod download;
 pub mod hardware;
+pub mod import;
 pub mod llm_llama;
 pub mod manifest;
 pub mod stt_qwen_asr;

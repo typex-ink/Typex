@@ -158,16 +158,27 @@ impl Drop for LoadedSenseVoice {
 pub struct SenseVoiceStt {
     /// 惰性初始化：模型加载 1s 级，首次转写时才加载（录音时预热策略可后续加）
     recognizer: Mutex<Option<LoadedSenseVoice>>,
-    model_dir: PathBuf,
+    model_path: PathBuf,
+    tokens_path: PathBuf,
     num_threads: i32,
 }
 
 impl SenseVoiceStt {
     /// `model_dir` = `{data_dir}/models/sense-voice-small-int8/`。
     pub fn new(model_dir: PathBuf, num_threads: i32) -> Self {
+        Self::from_files(
+            model_dir.join("model.int8.onnx"),
+            model_dir.join("tokens.txt"),
+            num_threads,
+        )
+    }
+
+    /// 导入模型使用：文件名由用户清单决定。
+    pub fn from_files(model_path: PathBuf, tokens_path: PathBuf, num_threads: i32) -> Self {
         Self {
             recognizer: Mutex::new(None),
-            model_dir,
+            model_path,
+            tokens_path,
             num_threads,
         }
     }
@@ -184,8 +195,8 @@ impl SenseVoiceStt {
         {
             return Ok(());
         }
-        let model = self.model_dir.join("model.int8.onnx");
-        let tokens = self.model_dir.join("tokens.txt");
+        let model = &self.model_path;
+        let tokens = &self.tokens_path;
         if !model.exists() || !tokens.exists() {
             // 模型未下载（03 §2.3 错误分类）
             return Err(ProviderError::InvalidRequest(

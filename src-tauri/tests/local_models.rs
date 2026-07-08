@@ -11,7 +11,7 @@ use typex_lib::local::download::{
     DownloadError, Progress, ProgressFn, delete_model, download_model_file, list_downloaded,
     sha256_bytes,
 };
-use typex_lib::local::manifest::{ModelEngine, ModelEntry, ModelFile, ModelPurpose, ModelSources};
+use typex_lib::local::manifest::{ModelEngine, ModelEntry, ModelFile, ModelPurpose, ModelSource};
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
     matchers::{method, path},
@@ -39,10 +39,18 @@ fn make_entry(hf_base: &str, ms_base: &str, sha256: &str, bytes: u64) -> ModelEn
             sha256: sha256.to_string(),
         }],
         license: "Apache-2.0".into(),
-        sources: ModelSources {
-            huggingface: hf_base.to_string(),
-            modelscope: ms_base.to_string(),
-        },
+        sources: vec![
+            ModelSource {
+                id: "huggingface".into(),
+                label: "HuggingFace".into(),
+                url_prefix: hf_base.to_string(),
+            },
+            ModelSource {
+                id: "modelscope".into(),
+                label: "ModelScope".into(),
+                url_prefix: ms_base.to_string(),
+            },
+        ],
         min_ram_gb: 2,
         requires_gpu: false,
     }

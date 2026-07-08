@@ -321,7 +321,7 @@ impl ProviderRegistry {
             .unwrap()
             .clone()
             .ok_or_else(|| TypexError::new(ErrorCode::NotConfigured, "本地模型目录未初始化"))?;
-        let entry = manifest::catalog()
+        let entry = manifest::catalog_with_imported(&dir)
             .into_iter()
             .find(|m| m.id == profile.model)
             .ok_or_else(|| {
@@ -333,10 +333,25 @@ impl ProviderRegistry {
         let model_dir = dir.join("models").join(&entry.id);
         let threads = (std::thread::available_parallelism().map_or(4, |n| n.get() / 2)).max(1);
         match entry.engine {
-            manifest::ModelEngine::Sherpa => Ok(Arc::new(stt_sense_voice::SenseVoiceStt::new(
-                model_dir,
-                threads as i32,
-            ))),
+            manifest::ModelEngine::Sherpa => {
+                let model = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺 ONNX 模型文件"))?;
+                let tokens = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name == "tokens.txt")
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺 tokens.txt"))?;
+                Ok(Arc::new(stt_sense_voice::SenseVoiceStt::from_files(
+                    model,
+                    tokens,
+                    threads as i32,
+                )))
+            }
             manifest::ModelEngine::Llama => {
                 let gguf = entry
                     .files
@@ -402,7 +417,7 @@ impl ProviderRegistry {
                     .ok_or_else(|| {
                         TypexError::new(ErrorCode::NotConfigured, "本地模型目录未初始化")
                     })?;
-                let entry = manifest::catalog()
+                let entry = manifest::catalog_with_imported(&dir)
                     .into_iter()
                     .find(|m| m.id == profile.model)
                     .ok_or_else(|| {

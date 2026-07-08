@@ -47,6 +47,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::download_local_model,
             commands::cancel_local_download,
             commands::delete_local_model,
+            commands::import_local_model,
         ])
         .events(collect_events![
             events::SessionSnapshotEvent,
@@ -70,6 +71,7 @@ pub fn run() {
             let _ = crate::app::windows::show_settings(app);
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,

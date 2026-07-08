@@ -2,8 +2,10 @@
 // 已下载模型管理子页（05 §5.1 / mockup 2.9 / CP-8.7）：
 // 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（硬件要求 + 本机检测 ✓/✗）+ 占用合计。
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
+import Input from "@/components/Input.vue";
 import Select from "@/components/Select.vue";
 import { useSettingsStore } from "@/stores/settings";
 import { formatBytes } from "@/shared/format";
@@ -31,6 +33,14 @@ interface DownloadProgress {
 const progress = ref<Record<string, DownloadProgress>>({});
 /** 删除警告中的模型 id（被槽位引用时先警告再 force） */
 const confirmDelete = ref<string | null>(null);
+const importing = ref(false);
+const importOpen = ref(false);
+const importError = ref("");
+const importName = ref("");
+const importPurpose = ref("llm");
+const importEngine = ref("llama");
+const importFiles = ref<string[]>([]);
+const importRequiresGpu = ref(false);
 let unlisten: (() => void) | null = null;
 
 const downloaded = computed(() => models.value.filter((m) => m.downloaded));
@@ -50,6 +60,15 @@ const downloadSource = computed<string>({
       s.general.model_download_source = v as ModelDownloadSource;
     }),
 });
+const purposeOptions = computed(() => [
+  { value: "llm", label: "LLM" },
+  { value: "stt", label: "STT" },
+]);
+const engineOptions = computed(() => [
+  { value: "llama", label: "llama.cpp / GGUF" },
+  { value: "sherpa", label: "sherpa-onnx / ONNX" },
+]);
+const importValid = computed(() => importName.value.trim() && importFiles.value.length > 0);
 
 const SLOT_LABEL_KEY: Record<SlotKind, string> = {
   stt: "settings.providers.slot_stt",
@@ -93,6 +112,19 @@ function hardwareLine(m: LocalModelInfo): string {
   return parts.join(" · ");
 }
 
+function sourceLine(m: LocalModelInfo): string {
+  const origin =
+    m.origin === "imported" ? t("settings.models.origin_imported") : t("settings.models.origin_builtin");
+  const sources = m.source_names.length ? m.source_names.join(" / ") : t("settings.models.source_local");
+  return `${origin} · ${m.license || "unknown"} · ${sources}`;
+}
+
+function defaultImportRamGb(): number {
+  if (importPurpose.value === "stt" && importEngine.value === "sherpa") return 2;
+  if (importPurpose.value === "stt") return 8;
+  return importRequiresGpu.value ? 16 : 8;
+}
+
 async function load() {
   const r = await commands.listLocalModels();
   if (r.status === "ok") models.value = r.data;
@@ -106,6 +138,46 @@ async function download(id: string) {
     [id]: { percent: 0, bytesDone: 0, bytesTotal: model?.bytes ?? 0 },
   };
   await commands.downloadLocalModel(id, downloadSource.value as ModelDownloadSource);
+}
+
+async function pickImportFiles() {
+  importError.value = "";
+  try {
+    const selected = await openDialog({
+      multiple: true,
+      directory: false,
+      filters: [{ name: "Model", extensions: ["gguf", "onnx", "txt"] }],
+    });
+    if (Array.isArray(selected)) importFiles.value = selected;
+    else if (typeof selected === "string") importFiles.value = [selected];
+  } catch (e) {
+    importError.value = String(e);
+  }
+}
+
+async function importModel() {
+  if (!importValid.value) return;
+  importing.value = true;
+  importError.value = "";
+  const r = await commands.importLocalModel({
+    display_name: importName.value.trim(),
+    purpose: importPurpose.value,
+    engine: importEngine.value,
+    files: importFiles.value,
+    license: "unknown",
+    min_ram_gb: defaultImportRamGb(),
+    requires_gpu: importRequiresGpu.value,
+  });
+  importing.value = false;
+  if (r.status === "ok") {
+    importOpen.value = false;
+    importName.value = "";
+    importFiles.value = [];
+    importRequiresGpu.value = false;
+    await load();
+  } else {
+    importError.value = r.error.message;
+  }
 }
 
 async function cancelDownload(id: string) {
@@ -155,6 +227,46 @@ onUnmounted(() => unlisten?.());
     <p class="back"><a @click="emit('back')">← {{ t("settings.nav_providers") }}</a></p>
     <h5 class="page-title">{{ t("settings.models.title") }}</h5>
     <p class="desc">{{ t("settings.models.desc") }}</p>
+    <div class="top-actions">
+      <Button size="sm" @click="importOpen = true">{{ t("settings.models.import") }}</Button>
+    </div>
+
+    <Teleport to="body">
+      <div v-if="importOpen" class="modal-backdrop" @click.self="importOpen = false">
+        <section class="import-modal" role="dialog" aria-modal="true" :aria-label="t('settings.models.import')">
+          <h6>{{ t("settings.models.import") }}</h6>
+          <div class="import-grid">
+            <label>
+              <span>{{ t("settings.models.import_name") }}</span>
+              <Input v-model="importName" />
+            </label>
+            <label>
+              <span>{{ t("settings.models.import_purpose") }}</span>
+              <Select v-model="importPurpose" :options="purposeOptions" />
+            </label>
+            <label>
+              <span>{{ t("settings.models.import_engine") }}</span>
+              <Select v-model="importEngine" :options="engineOptions" />
+            </label>
+            <label class="checkline">
+              <input v-model="importRequiresGpu" type="checkbox" />
+              <span>{{ t("settings.models.import_gpu") }}</span>
+            </label>
+          </div>
+          <div class="file-row">
+            <Button size="sm" @click="pickImportFiles">{{ t("settings.models.import_pick") }}</Button>
+            <small>{{ importFiles.length ? importFiles.map((p) => p.split('/').pop()).join(" · ") : t("settings.models.import_no_files") }}</small>
+          </div>
+          <p v-if="importError" class="warn">{{ importError }}</p>
+          <div class="import-actions">
+            <Button variant="primary" size="sm" :disabled="!importValid || importing" @click="importModel">
+              {{ t("settings.models.import_confirm") }}
+            </Button>
+            <Button size="sm" @click="importOpen = false">{{ t("actions.cancel") }}</Button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
 
     <!-- 已下载 -->
     <div v-for="m in downloaded" :key="m.id" class="prov">
@@ -164,6 +276,7 @@ onUnmounted(() => unlisten?.());
         <span class="tag">{{ m.purpose === "stt" ? "STT" : "LLM" }}</span><br />
         <small>
           {{ formatBytes(m.bytes) }}
+          · {{ sourceLine(m) }}
           <template v-if="usedBySlots(m.id).length">
             · {{ t("settings.models.in_use", { slots: usedBySlots(m.id).join(" · ") }) }}
           </template>
@@ -183,7 +296,7 @@ onUnmounted(() => unlisten?.());
       <div class="meta">
         <b>{{ m.display_name }}</b>
         <span class="tag">{{ m.purpose === "stt" ? "STT" : "LLM" }}</span><br />
-        <small>{{ formatBytes(m.bytes) }} · {{ hardwareLine(m) }}</small>
+        <small>{{ formatBytes(m.bytes) }} · {{ hardwareLine(m) }} · {{ sourceLine(m) }}</small>
         <span v-if="progress[m.id] !== undefined" class="progress-line">
           <span class="pbar"><i :style="{ width: `${progress[m.id].percent}%` }" /></span>
           <small class="progress-bytes">
@@ -194,7 +307,7 @@ onUnmounted(() => unlisten?.());
       <Button v-if="progress[m.id] !== undefined" size="sm" @click="cancelDownload(m.id)">
         {{ t("actions.cancel") }}
       </Button>
-      <Button v-else size="sm" :disabled="!m.hardware_ok" @click="download(m.id)">
+      <Button v-else size="sm" :disabled="!m.hardware_ok || !m.downloadable" @click="download(m.id)">
         {{ t("settings.models.download") }}
       </Button>
     </div>
@@ -227,6 +340,67 @@ onUnmounted(() => unlisten?.());
   font-size: 12px;
   color: var(--text-2);
   margin-bottom: 12px;
+}
+.top-actions {
+  margin-bottom: 10px;
+}
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.import-modal {
+  width: min(520px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.import-modal h6 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.import-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.checkline {
+  display: flex !important;
+  align-items: center;
+  gap: 6px !important;
+  align-self: end;
+  min-height: 32px;
+}
+.file-row,
+.import-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.file-row small {
+  color: var(--text-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.warn {
+  color: var(--error);
+  font-size: 12px;
+  margin-top: 8px;
 }
 .prov {
   border: 1px solid var(--border);

@@ -229,7 +229,18 @@
       "source_label": "下载源：",
       "source_auto": "自动（HuggingFace / ModelScope）",
       "source_huggingface": "HuggingFace",
-      "source_modelscope": "ModelScope"
+      "source_modelscope": "ModelScope",
+      "source_local": "本地导入",
+      "origin_builtin": "内置",
+      "origin_imported": "已导入",
+      "import": "导入模型",
+      "import_name": "名称",
+      "import_purpose": "用途",
+      "import_engine": "运行时",
+      "import_gpu": "需要 GPU 加速",
+      "import_pick": "选择文件",
+      "import_no_files": "未选择文件",
+      "import_confirm": "导入"
     },
     "hotkeys": {
       "desc": "听写与助手键位可改；翻译 = 两键同按（自动跟随）。",

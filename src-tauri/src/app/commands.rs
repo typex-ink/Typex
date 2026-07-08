@@ -564,6 +564,16 @@ pub struct LocalModelInfo {
     pub hardware_ok: bool,
     /// 所属推荐档位 key："light" | "standard" | "performance"。
     pub tier: String,
+    /// 模型来源：`builtin` | `imported`。
+    pub origin: String,
+    /// 许可证标识。
+    pub license: String,
+    /// 是否可由下载器下载（导入模型为 false）。
+    pub downloadable: bool,
+    /// 下载源显示名列表。
+    pub source_names: Vec<String>,
+    /// 额外说明；空字符串表示无。
+    pub notes: String,
 }
 
 /// 硬件探测结果（get_hardware_tier 载荷）。
@@ -577,6 +587,21 @@ pub struct HardwareTier {
     pub tier: String,
     /// 诊断页格式的摘要串，如 `RAM 24 GB · 10 核 · Metal ✓ · 推荐档位：性能`。
     pub summary: String,
+}
+
+/// 导入本地模型请求（托管复制到 Typex 模型目录）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct ImportLocalModelRequest {
+    pub display_name: String,
+    /// "stt" | "llm"
+    pub purpose: String,
+    /// "llama" | "sherpa"
+    pub engine: String,
+    /// 用户选择的本地文件路径。
+    pub files: Vec<String>,
+    pub license: String,
+    pub min_ram_gb: u32,
+    pub requires_gpu: bool,
 }
 
 #[cfg(feature = "local-models")]
@@ -598,33 +623,44 @@ pub fn list_local_models(
     {
         use crate::local::{download, hardware, manifest};
         let data_dir = local_models_data_dir(&app)?;
-        let catalog = manifest::catalog();
+        let imported = manifest::load_user_catalog(&data_dir);
+        let imported_ids: std::collections::HashSet<String> =
+            imported.iter().map(|entry| entry.id.clone()).collect();
+        let catalog = manifest::catalog_with_imported(&data_dir);
         let downloaded = download::list_downloaded(&data_dir, &catalog);
         let hw = hardware::detect();
         let active = downloads.0.lock().unwrap();
         Ok(catalog
             .into_iter()
-            .map(|e| LocalModelInfo {
-                downloaded: downloaded.contains(&e.id),
-                downloading: active.get(&e.id).is_some_and(|h| !h.inner().is_finished()),
-                purpose: match e.purpose {
-                    manifest::ModelPurpose::Stt => "stt".into(),
-                    manifest::ModelPurpose::Llm => "llm".into(),
-                },
-                engine: match e.engine {
-                    manifest::ModelEngine::Sherpa => "sherpa".into(),
-                    manifest::ModelEngine::Llama => "llama".into(),
-                },
-                bytes: e.files.iter().map(|f| f.bytes).sum(),
-                hardware_ok: hw.ram_gb >= e.min_ram_gb as u64
-                    && (!e.requires_gpu || hw.gpu_available),
-                tier: hardware::tier_of_model(&e.id)
-                    .map(|t| t.key().to_string())
-                    .unwrap_or_default(),
-                min_ram_gb: e.min_ram_gb,
-                requires_gpu: e.requires_gpu,
-                id: e.id,
-                display_name: e.display_name,
+            .map(|e| {
+                let imported = imported_ids.contains(&e.id);
+                LocalModelInfo {
+                    downloaded: downloaded.contains(&e.id),
+                    downloading: active.get(&e.id).is_some_and(|h| !h.inner().is_finished()),
+                    purpose: match e.purpose {
+                        manifest::ModelPurpose::Stt => "stt".into(),
+                        manifest::ModelPurpose::Llm => "llm".into(),
+                    },
+                    engine: match e.engine {
+                        manifest::ModelEngine::Sherpa => "sherpa".into(),
+                        manifest::ModelEngine::Llama => "llama".into(),
+                    },
+                    bytes: e.files.iter().map(|f| f.bytes).sum(),
+                    hardware_ok: hw.ram_gb >= e.min_ram_gb as u64
+                        && (!e.requires_gpu || hw.gpu_available),
+                    tier: hardware::tier_of_model(&e.id)
+                        .map(|t| t.key().to_string())
+                        .unwrap_or_default(),
+                    min_ram_gb: e.min_ram_gb,
+                    requires_gpu: e.requires_gpu,
+                    origin: if imported { "imported" } else { "builtin" }.into(),
+                    license: e.license,
+                    downloadable: !imported && !e.sources.is_empty(),
+                    source_names: e.sources.iter().map(|s| s.label.clone()).collect(),
+                    notes: String::new(),
+                    id: e.id,
+                    display_name: e.display_name,
+                }
             })
             .collect())
     }
@@ -675,12 +711,15 @@ pub fn download_local_model(
         use tauri_specta::Event as _;
         let data_dir = local_models_data_dir(&app)?;
         let source = source.unwrap_or_else(|| settings.get().general.model_download_source);
-        let entry = manifest::catalog()
-            .into_iter()
-            .find(|m| m.id == model_id)
-            .ok_or_else(|| {
-                TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
-            })?;
+        let (entry, imported) = manifest::find_model(&data_dir, &model_id).ok_or_else(|| {
+            TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
+        })?;
+        if imported || entry.sources.is_empty() {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                "导入模型没有远程下载源",
+            ));
+        }
         let mut active = downloads.0.lock().unwrap();
         if active
             .get(&model_id)
@@ -804,21 +843,82 @@ pub async fn delete_local_model(
                 format!("模型被档案引用：{}", referenced.join("、")),
             ));
         }
-        let entry = manifest::catalog()
-            .into_iter()
-            .find(|m| m.id == model_id)
-            .ok_or_else(|| {
-                TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
-            })?;
         let data_dir = local_models_data_dir(&app)?;
+        let (entry, imported) = manifest::find_model(&data_dir, &model_id).ok_or_else(|| {
+            TypexError::new(ErrorCode::InvalidRequest, format!("未知模型 {model_id}"))
+        })?;
         download::delete_model(&data_dir, &entry)
             .await
             .map_err(|e| TypexError::new(ErrorCode::Internal, format!("删除失败: {e}")))?;
+        if imported {
+            manifest::remove_user_model(&data_dir, &model_id).map_err(|e| {
+                TypexError::new(ErrorCode::Internal, format!("更新用户模型清单失败: {e}"))
+            })?;
+        }
         Ok(())
     }
     #[cfg(not(feature = "local-models"))]
     {
         let _ = (app, settings, model_id, force);
+        Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
+    }
+}
+
+/// 导入用户已下载的本地模型。默认托管复制/硬链接到 Typex 模型目录。
+#[tauri::command]
+#[specta::specta]
+pub fn import_local_model(
+    app: tauri::AppHandle,
+    request: ImportLocalModelRequest,
+) -> Result<LocalModelInfo, TypexError> {
+    #[cfg(feature = "local-models")]
+    {
+        use crate::local::{hardware, import, manifest};
+        let data_dir = local_models_data_dir(&app)?;
+        let entry = import::import_model(
+            &data_dir,
+            import::ImportLocalModelRequest {
+                display_name: request.display_name,
+                purpose: request.purpose,
+                engine: request.engine,
+                files: request.files,
+                license: request.license,
+                min_ram_gb: request.min_ram_gb,
+                requires_gpu: request.requires_gpu,
+            },
+        )
+        .map_err(|e| TypexError::new(ErrorCode::InvalidRequest, e.to_string()))?;
+        let hw = hardware::detect();
+        let bytes = entry.files.iter().map(|f| f.bytes).sum();
+        Ok(LocalModelInfo {
+            id: entry.id.clone(),
+            display_name: entry.display_name,
+            purpose: match entry.purpose {
+                manifest::ModelPurpose::Stt => "stt".into(),
+                manifest::ModelPurpose::Llm => "llm".into(),
+            },
+            engine: match entry.engine {
+                manifest::ModelEngine::Sherpa => "sherpa".into(),
+                manifest::ModelEngine::Llama => "llama".into(),
+            },
+            bytes,
+            downloaded: true,
+            downloading: false,
+            min_ram_gb: entry.min_ram_gb,
+            requires_gpu: entry.requires_gpu,
+            hardware_ok: hw.ram_gb >= entry.min_ram_gb as u64
+                && (!entry.requires_gpu || hw.gpu_available),
+            tier: String::new(),
+            origin: "imported".into(),
+            license: entry.license,
+            downloadable: false,
+            source_names: Vec::new(),
+            notes: String::new(),
+        })
+    }
+    #[cfg(not(feature = "local-models"))]
+    {
+        let _ = (app, request);
         Err(TypexError::new(ErrorCode::NotConfigured, "本地模型未启用"))
     }
 }

@@ -118,7 +118,7 @@ const localOptions = computed(() =>
     .filter((m) => m.purpose === slotPurpose)
     .map((m) => ({
       value: m.id,
-      label: `${m.display_name}（${
+      label: `${m.display_name}${m.origin === "imported" ? ` · ${t("settings.models.origin_imported")}` : ""}（${
         m.downloaded
           ? t("settings.profile.local_downloaded", { size: formatBytes(m.bytes) })
           : t("settings.profile.local_not_downloaded")

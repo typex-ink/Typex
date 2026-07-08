@@ -229,7 +229,18 @@
       "source_label": "Source:",
       "source_auto": "Auto (HuggingFace / ModelScope)",
       "source_huggingface": "HuggingFace",
-      "source_modelscope": "ModelScope"
+      "source_modelscope": "ModelScope",
+      "source_local": "Local import",
+      "origin_builtin": "Built-in",
+      "origin_imported": "Imported",
+      "import": "Import model",
+      "import_name": "Name",
+      "import_purpose": "Purpose",
+      "import_engine": "Runtime",
+      "import_gpu": "Requires GPU acceleration",
+      "import_pick": "Choose files",
+      "import_no_files": "No files selected",
+      "import_confirm": "Import"
     },
     "hotkeys": {
       "desc": "Dictation and assistant keys are customizable; translation = both keys held together (follows automatically).",

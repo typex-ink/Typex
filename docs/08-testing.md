@@ -57,6 +57,7 @@
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
 | `settings/migrate.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak` |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
+| 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型 |
 | 剪贴板恢复逻辑（`inject/paste.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；恢复失败不吞注入成功的结果 |
 | PromptKit 模板渲染 | 变量替换（target_language、词典注入）、`ANSWER:` 前缀解析 |
 | F-10 词典 | settings 迁移与规范化；STT prompt / 火山 corpus / 本地 hotwords 注入；空词典时 LLM `<dictionary>` 行省略 |

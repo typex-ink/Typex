@@ -139,14 +139,14 @@
 ### ADR-22 · 本地模型选型：Qwen 全家桶 + 硬件分档推荐（2026-07-05，项目所有者拍板，细化 ADR-20）
 
 - **背景**：ADR-20 拍板本地兜底时选型为 SenseVoice + Qwen3-1.7B。随后确认 Qwen 已有完整端侧全家桶（均 Apache 2.0）：**Qwen3-ASR**（2026-01，0.6B/1.7B，52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA，官方 ggml-org GGUF 可跑 llama.cpp；官方清单当前提供 Q8_0/bf16，Typex 选 Q8_0）与 **Qwen3.5 小模型系列**（2026-03，0.8B/2B/4B/9B，GGUF 齐全，4B≈上代 80B 水平）。同一家族 + 同一推理引擎（llama.cpp）覆盖 STT/整理/翻译，工程面收敛。
-- **决策一（选型）**：本地模型默认采用 **Qwen 家族**——STT = Qwen3-ASR（0.6B/1.7B GGUF，Q8_0），LLM = Qwen3.5（0.8B/2B/4B GGUF，Q4_K_M）。**SenseVoice-Small（sherpa-onnx）保留为轻量档 STT**：非自回归、CPU 实时数倍速，是弱机器上唯一能保证实时的选项（Qwen3-ASR-1.7B 纯 CPU 低于实时 RTFx≈0.49，0.6B 仅勉强实时）。
+- **决策一（选型）**：本地模型默认采用 **Qwen 家族**——STT = Qwen3-ASR（0.6B/1.7B GGUF，Q8_0），LLM = Qwen3.5（0.8B/2B/4B/9B GGUF，Q4_K_M）。**SenseVoice-Small（sherpa-onnx）保留为轻量档 STT**：非自回归、CPU 实时数倍速，是弱机器上唯一能保证实时的选项（Qwen3-ASR-1.7B 纯 CPU 低于实时 RTFx≈0.49，0.6B 仅勉强实时）。内置 LLM 清单额外加入 SmolLM3-3B、Granite 3.3 2B Instruct、Phi-4 Mini Instruct，覆盖轻量英文/代码/通用指令候选；这些模型不改变首次下载分档，只作为设置页可选模型。
 - **决策二（硬件分档）**：下载时**按设备性能自动推荐档位**（检测 RAM / CPU 核数 / GPU 加速可用性：Metal/CUDA/Vulkan），用户可手动改档：
   - **轻量**（RAM < 8 GB 或无 GPU 且弱 CPU）：SenseVoice-Small int8（230 MB）+ Qwen3.5-0.8B（约 0.6 GB），合计约 0.8 GB。
   - **标准**（8–16 GB RAM）：Qwen3-ASR-0.6B Q8_0（主模型 + mmproj 约 1.0 GB）+ Qwen3.5-2B Q4_K_M（约 1.3 GB），合计约 2.3 GB。
   - **性能**（≥ 16 GB 且有 GPU 加速）：Qwen3-ASR-1.7B Q8_0（主模型 + mmproj 约 2.5 GB）+ Qwen3.5-4B Q4_K_M（约 2.7 GB），合计约 5.3 GB。
   - 档位只是首次下载的默认组合；下载后各槽位仍可在模型库中自由更换单个模型。
 - **工程注意**：llama.cpp 音频(qwen3vl)支持仍标 experimental、有长音频 bug——用现有 VAD 切片规避（短分段转写本来就是 F-1 的路径）；1.7B STT 仅在 GPU 加速可用时提供。问答槽不做本地兜底的口径不变（ADR-20）；若用户设备属性能档，设置中允许**手动**把问答槽指向本地大档模型（默认仍为空 + 配置引导）。
-- **影响**：whisper.cpp 从「补充引擎」降为可选扩展（Qwen3-ASR 的 52 语言覆盖已够长尾）；模型库清单（[03 §8](03-model-providers.md)）按档位组织。
+- **影响**：whisper.cpp 从「补充引擎」降为可选扩展（Qwen3-ASR 的 52 语言覆盖已够长尾）；Whisper large-v3-turbo、NVIDIA Parakeet、Moonshine 等模型需新增运行时后再进入内置下载清单。模型库清单（[03 §8](03-model-providers.md)）按档位组织，并支持用户托管导入清单外模型。
 
 ### ADR-23 · 助手交互重构：回答弹窗只在有回答要展示时出现（2026-07-06，项目所有者拍板）
 
