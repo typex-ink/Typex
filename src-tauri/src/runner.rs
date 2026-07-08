@@ -95,6 +95,7 @@ pub fn run() {
             let config_dir = app.path().app_config_dir().expect("config dir");
             let settings = Arc::new(SettingsService::load(config_dir));
             let s = settings.get();
+            crate::app::windows::apply_native_theme(app.handle(), &s.general.theme);
 
             let audio = Arc::new(AudioService::new());
             let injector = Arc::new(InjectorChain::platform_default(s.dictation.paste_delay_ms));
@@ -384,6 +385,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     while rx.changed().await.is_ok() {
                         let s = rx.borrow_and_update().clone();
+                        crate::app::windows::apply_native_theme(&handle, &s.general.theme);
                         crate::app::tray::refresh(&handle);
                         use tauri_specta::Event as _;
                         let _ = events::SettingsChangedEvent(s).emit(&handle);

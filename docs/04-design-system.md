@@ -120,7 +120,7 @@
 
 ### 3.4 主题切换
 
-默认**跟随系统**（`prefers-color-scheme`），可手动固定亮/暗。所有颜色一律经 CSS 变量引用，组件内禁止硬编码色值（lint 规则保障）。HUD 与托盘同样双主题。
+默认**跟随系统**（`prefers-color-scheme`），可手动固定亮/暗。所有颜色一律经 CSS 变量引用，组件内禁止硬编码色值（lint 规则保障）。HUD 与托盘同样双主题。常规窗口的原生标题栏 / 系统控件外观必须同步 `general.theme`：`light` / `dark` 固定时调用 Tauri native theme，`system` 时交回系统外观。
 
 ## 4. 字体
 

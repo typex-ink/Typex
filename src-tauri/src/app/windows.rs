@@ -1,6 +1,7 @@
 //! 窗口创建/显隐/定位（06 §2）。HUD 使用 nonactivating NSPanel。
 
 use crate::selection::{SelectionBounds, SelectionReader};
+use crate::settings::{SettingsService, schema::ThemeMode};
 use crate::types::{SessionPhase, SessionSnapshot};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,6 +9,31 @@ use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 /// HUD 显隐代际：每次快照 +1；延迟隐藏只在代际未变时执行（防止杀掉新会话的 HUD）。
 static HUD_GEN: AtomicU64 = AtomicU64::new(0);
+
+fn native_theme(theme: &ThemeMode) -> Option<tauri::Theme> {
+    match theme {
+        ThemeMode::System => None,
+        ThemeMode::Light => Some(tauri::Theme::Light),
+        ThemeMode::Dark => Some(tauri::Theme::Dark),
+    }
+}
+
+fn current_native_theme<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Theme> {
+    app.try_state::<Arc<SettingsService>>()
+        .map(|settings| native_theme(&settings.get().general.theme))
+        .unwrap_or(None)
+}
+
+/// 同步系统原生窗口外观；macOS 的标题栏/红绿灯区域不会跟随 WebView CSS 自动切换。
+pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
+    let theme = native_theme(theme);
+    app.set_theme(theme);
+    for label in ["hud", "home", "settings", "onboarding", "assistant"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.set_theme(theme);
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 tauri_nspanel::tauri_panel! {
@@ -102,6 +128,7 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     .title("")
     .inner_size(720.0, 520.0)
     .resizable(false)
+    .theme(current_native_theme(app))
     .build()?;
     Ok(())
 }
@@ -122,6 +149,7 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     .inner_size(880.0, 560.0)
     .resizable(false)
     .center()
+    .theme(current_native_theme(app))
     .build()?;
     Ok(())
 }
@@ -166,6 +194,7 @@ pub fn show_assistant<R: Runtime>(app: &AppHandle<R>, has_selection: bool) -> ta
     .resizable(false)
     .always_on_top(true)
     .skip_taskbar(true)
+    .theme(current_native_theme(app))
     .visible(false)
     .build()?;
     position_assistant(app, &w, selection_bounds);
@@ -273,7 +302,8 @@ pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     .title("")
     .inner_size(640.0, 480.0)
     .resizable(false)
-    .center();
+    .center()
+    .theme(current_native_theme(app));
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)

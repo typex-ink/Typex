@@ -813,8 +813,6 @@ dependencies = [
 [[package]]
 name = "cpal"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbd307f43cc2a697e2d1f8bc7a1d824b5269e052209e28883e5bc04d095aaa3f"
 dependencies = [
  "alsa",
  "coreaudio-rs",

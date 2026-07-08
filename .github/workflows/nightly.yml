@@ -108,7 +108,7 @@ jobs:
 
           install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_PATH/Contents/MacOS/typex" 2>/dev/null || true
           install_name_tool -add_rpath "@executable_path/../Frameworks" "$FRAMEWORKS_DIR/libsherpa-onnx-c-api.dylib" 2>/dev/null || true
-          codesign --force --deep --sign - "$APP_PATH"
+          codesign --force --deep --sign - --entitlements src-tauri/Entitlements.plist "$APP_PATH"
 
           otool -L "$APP_PATH/Contents/MacOS/typex"
           test -f "$FRAMEWORKS_DIR/libonnxruntime.1.17.1.dylib"

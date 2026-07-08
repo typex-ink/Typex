@@ -435,8 +435,10 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
 /// 枚举输入设备（听写页麦克风下拉）。
 #[tauri::command]
 #[specta::specta]
-pub fn list_audio_devices() -> Vec<String> {
-    crate::audio::list_input_devices()
+pub async fn list_audio_devices() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(crate::audio::list_input_devices)
+        .await
+        .unwrap_or_default()
 }
 
 /// HUD 一键切换原样模式（02 F-9：HUD 与设置均可切换）；返回切换后 verbatim 状态。

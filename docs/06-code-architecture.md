@@ -259,12 +259,13 @@ pub enum SessionPhase {
 
 1. **macOS 权限静默失效**：未授权辅助功能时 `rdev::listen` 静默无事件、不报错——必须用 `macos-accessibility-client` 主动检测并引导；开发时给终端/IDE 授权。CGEventTap 还可能被系统以 `TapDisabledByTimeout/UserInput` 禁用，vendored rdev 后端必须收到该事件后立即 `CGEventTapEnable(..., true)`。
 2. **macOS 签名后麦克风弹窗 bug**（tauri#9928/#11951）：Info.plist 有 `NSMicrophoneUsageDescription` 也可能不弹授权——需原生侧主动 `AVCaptureDevice.requestAccess`（`tauri-plugin-macos-permissions` 已封装）；entitlement `com.apple.security.device.audio-input`。
-3. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
-4. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
-5. **X11 组合键 release 事件顺序 bug**（global-hotkey#39）→ 用 rdev 自维护按键状态，不依赖热键 API 的 release。
-6. **Windows UIPI**：目标窗口是管理员进程时 SendInput 被拦截 → 检测失败并提示（或建议以管理员运行）。
-7. **webkit2gtk**：NVIDIA 驱动下白屏/崩溃 → 启动时探测并自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`；仅支持 webkit2gtk-4.1 的发行版（Ubuntu 22.04+）。
-8. **剪贴板恢复不保真**（arboard 仅文本/图片）→ 设置页明示；与剪贴板管理器可能互相干扰记录中间内容。
+3. **cpal 0.16 macOS CoreAudio 枚举 release 崩溃**：CoreAudio 的 `AudioObjectGetPropertyData(Size)` 会写回 `ioDataSize`，上游 0.16.0 macOS 后端若用不可变局部变量承接，在 release/LTO 下可能被优化成 0 长度 buffer 并在 `HALDeviceList::GetData` SIGSEGV；本项目通过 `src-tauri/vendor/cpal` patch 保持该参数可变，升级 cpal 时必须复核。
+4. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
+5. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
+6. **X11 组合键 release 事件顺序 bug**（global-hotkey#39）→ 用 rdev 自维护按键状态，不依赖热键 API 的 release。
+7. **Windows UIPI**：目标窗口是管理员进程时 SendInput 被拦截 → 检测失败并提示（或建议以管理员运行）。
+8. **webkit2gtk**：NVIDIA 驱动下白屏/崩溃 → 启动时探测并自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`；仅支持 webkit2gtk-4.1 的发行版（Ubuntu 22.04+）。
+9. **剪贴板恢复不保真**（arboard 仅文本/图片）→ 设置页明示；与剪贴板管理器可能互相干扰记录中间内容。
 
 ### 7.3 快捷键（push-to-talk 细节）
 
