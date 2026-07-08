@@ -49,23 +49,93 @@ jobs:
         run: >
           pnpm tauri build
           --target universal-apple-darwin
-          --bundles dmg
+          --bundles app
           --no-sign
           --ci
           --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Bundle local runtime dylibs
+        run: |
+          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No Typex.app found under src-tauri/target"
+            find src-tauri/target -path '*/bundle/*' -type d | sort
+            exit 1
+          fi
+
+          FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
+          mkdir -p "$FRAMEWORKS_DIR"
+
+          copy_universal_dylib() {
+            name="$1"
+            dest="$FRAMEWORKS_DIR/$name"
+            universal_src=""
+            arm64_src=""
+            x86_64_src=""
+
+            while IFS= read -r src; do
+              archs="$(lipo -archs "$src" 2>/dev/null || true)"
+              if echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64; then
+                universal_src="$src"
+                break
+              fi
+              if echo "$archs" | grep -qw arm64 && [ -z "$arm64_src" ]; then
+                arm64_src="$src"
+              fi
+              if echo "$archs" | grep -qw x86_64 && [ -z "$x86_64_src" ]; then
+                x86_64_src="$src"
+              fi
+            done <<EOF
+          $(find src-tauri/target -name "$name" -type f ! -path '*.dSYM/*' | sort)
+          EOF
+
+            if [ -n "$universal_src" ]; then
+              cp "$universal_src" "$dest"
+            elif [ -n "$arm64_src" ] && [ -n "$x86_64_src" ]; then
+              lipo -create "$arm64_src" "$x86_64_src" -output "$dest"
+            else
+              echo "Missing runtime dylib: $name"
+              echo "arm64 source: ${arm64_src:-<none>}"
+              echo "x86_64 source: ${x86_64_src:-<none>}"
+              exit 1
+            fi
+            chmod 755 "$dest"
+            lipo -archs "$dest"
+          }
+
+          copy_universal_dylib libonnxruntime.1.17.1.dylib
+          copy_universal_dylib libsherpa-onnx-c-api.dylib
+
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_PATH/Contents/MacOS/typex" 2>/dev/null || true
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$FRAMEWORKS_DIR/libsherpa-onnx-c-api.dylib" 2>/dev/null || true
+          codesign --force --deep --sign - "$APP_PATH"
+
+          otool -L "$APP_PATH/Contents/MacOS/typex"
+          test -f "$FRAMEWORKS_DIR/libonnxruntime.1.17.1.dylib"
+          test -f "$FRAMEWORKS_DIR/libsherpa-onnx-c-api.dylib"
 
       - name: Prepare nightly assets
         run: |
           mkdir -p nightly-assets
 
-          DMG_PATH="$(find src-tauri/target -path '*/bundle/dmg/*.dmg' -type f | sort | head -n 1)"
-          if [ -z "$DMG_PATH" ]; then
-            echo "No macOS dmg found under src-tauri/target"
-            find src-tauri/target -path '*/bundle/*' -type f | sort
+          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No Typex.app found under src-tauri/target"
+            find src-tauri/target -path '*/bundle/*' -type d | sort
             exit 1
           fi
 
-          cp "$DMG_PATH" nightly-assets/Typex-nightly-macos-universal.dmg
+          rm -rf dmg-root
+          mkdir -p dmg-root
+          ditto "$APP_PATH" dmg-root/Typex.app
+          ln -s /Applications dmg-root/Applications
+          hdiutil create \
+            -volname Typex \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            nightly-assets/Typex-nightly-macos-universal.dmg
+
           shasum -a 256 nightly-assets/Typex-nightly-macos-universal.dmg > nightly-assets/SHA256SUMS.txt
 
           BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
@@ -88,7 +158,7 @@ jobs:
           - Branch: \`${GITHUB_REF_NAME}\`
           - Built at: \`${BUILD_TIME}\`
           - Platform: macOS universal DMG only
-          - Signing: unsigned nightly build
+          - Signing: ad-hoc signed, not Apple-notarized
 
           This release is updated automatically on every push to the main development branch.
           EOF
