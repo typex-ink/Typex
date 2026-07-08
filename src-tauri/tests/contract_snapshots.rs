@@ -2,6 +2,7 @@
 //!
 //! 厂商格式是外部契约——任何无意的请求变化（哪怕是「顺手重构」）都会在快照 diff 中显形。
 //! 波动字段（multipart boundary、request-id、host）先归一化再快照。
+//! HTTP 客户端默认 user-agent 不是 Provider 协议契约，且不同环境可能缺省不同。
 
 use futures_util::StreamExt;
 use typex_lib::providers::llm::{
@@ -17,8 +18,11 @@ fn normalize(req: &Request) -> serde_json::Value {
     let mut headers: Vec<(String, String)> = req
         .headers
         .iter()
-        .map(|(k, v)| {
+        .filter_map(|(k, v)| {
             let name = k.as_str().to_lowercase();
+            if name == "user-agent" {
+                return None;
+            }
             let mut val = v.to_str().unwrap_or("<binary>").to_string();
             // 归一化波动值
             if name == "host" {
@@ -33,7 +37,7 @@ fn normalize(req: &Request) -> serde_json::Value {
             if name == "content-type" && val.contains("boundary=") {
                 val = val.split("boundary=").next().unwrap_or("").to_string() + "boundary=<b>";
             }
-            (name, val)
+            Some((name, val))
         })
         .collect();
     headers.sort();

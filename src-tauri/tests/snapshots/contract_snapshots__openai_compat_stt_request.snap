@@ -10,7 +10,6 @@ expression: captured
     "content-length: <len>",
     "content-type: multipart/form-data; boundary=<b>",
     "host: <host>",
-    "user-agent: Go-http-client/1.1",
     "x-custom: 1"
   ],
   "method": "POST",

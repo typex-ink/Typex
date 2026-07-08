@@ -34,8 +34,7 @@ expression: captured
     "authorization: Bearer sk-test",
     "content-length: <len>",
     "content-type: application/json",
-    "host: <host>",
-    "user-agent: Go-http-client/1.1"
+    "host: <host>"
   ],
   "method": "POST",
   "path": "/v1/responses"
