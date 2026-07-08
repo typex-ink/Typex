@@ -1,10 +1,10 @@
-//! 共享 reqwest 客户端工厂 + 统一重试（07 §5.4：重试策略集中在此，orchestrator 不重复实现）。
+//! 共享 reqwest 客户端工厂 + 统一重试（06 §5.4：重试策略集中在此，orchestrator 不重复实现）。
 
 use super::ProviderError;
 use crate::settings::schema::ProxyMode;
 use std::time::Duration;
 
-/// 按代理设置构造客户端（07 §9：默认跟随系统代理）。
+/// 按代理设置构造客户端（06 §9：默认跟随系统代理）。
 pub fn build_client(proxy_mode: ProxyMode, proxy_url: &str, timeout_ms: u64) -> reqwest::Client {
     let mut b = reqwest::Client::builder()
         .timeout(Duration::from_millis(timeout_ms))

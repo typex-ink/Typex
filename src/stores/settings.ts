@@ -1,4 +1,4 @@
-// useSettings：Rust 是设置真身，Pinia 只是订阅缓存（07 §11 状态所有权）
+// useSettings：Rust 是设置真身，Pinia 只是订阅缓存（06 §11 状态所有权）
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { commands, events, type Settings } from "@/ipc/bindings";

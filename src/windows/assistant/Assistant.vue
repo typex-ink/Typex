@@ -11,7 +11,7 @@ import { currentMonitor, getCurrentWindow, type Monitor } from "@tauri-apps/api/
 
 const { t } = useI18n();
 
-// LLM 输出视为不可信内容：禁 raw HTML（07 §11）
+// LLM 输出视为不可信内容：禁 raw HTML（06 §11）
 const md = new MarkdownIt({ html: false, linkify: true });
 const WINDOW_W = 560;
 const WINDOW_MARGIN = 12;

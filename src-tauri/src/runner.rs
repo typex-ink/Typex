@@ -1,4 +1,4 @@
-//! 应用装配与启动（main.rs 委托到此；07 §5.1 手工 DI）。
+//! 应用装配与启动（main.rs 委托到此；06 §5.1 手工 DI）。
 
 use crate::app::{PausedState, commands, events};
 use crate::audio::AudioService;
@@ -91,7 +91,7 @@ pub fn run() {
                 log_dir
             });
 
-            // --- 服务装配（07 §5.1）---
+            // --- 服务装配（06 §5.1）---
             let config_dir = app.path().app_config_dir().expect("config dir");
             let settings = Arc::new(SettingsService::load(config_dir));
             let s = settings.get();
@@ -99,7 +99,7 @@ pub fn run() {
             let audio = Arc::new(AudioService::new());
             let injector = Arc::new(InjectorChain::platform_default(s.dictation.paste_delay_ms));
 
-            // ProviderRegistry（CP-1.6）
+            // ProviderRegistry
             // 开发便利：TYPEX_STT_API_KEY 环境变量 → 自动建/更新 env-stt 档案
             if let Ok(key) = std::env::var("TYPEX_STT_API_KEY") {
                 let base = std::env::var("TYPEX_STT_BASE_URL")
@@ -130,7 +130,7 @@ pub fn run() {
                 });
             }
             let registry = Arc::new(ProviderRegistry::new(settings.get()));
-            // v1.1 本地模型（ADR-20 零配置兜底）：注入模型存储根
+            // 本地模型（ADR-20 零配置兜底）：注入模型存储根
             #[cfg(feature = "local-models")]
             if let Ok(d) = app.path().app_data_dir() {
                 registry.set_models_data_dir(d);
@@ -196,7 +196,7 @@ pub fn run() {
             // 暂停状态（托盘切换）
             let (paused_tx, paused_rx) = tokio::sync::watch::channel(false);
             app.manage(PausedState(paused_tx));
-            // 本地模型下载任务表（v1.1；默认构建恒空）
+            // 本地模型下载任务表
             app.manage(crate::app::LocalDownloads::default());
             let assistant_window_ready =
                 Arc::new(crate::app::commands::AssistantWindowReady::default());
@@ -320,7 +320,7 @@ pub fn run() {
 
             let handle = app.handle().clone();
             let handle2 = app.handle().clone();
-            // 托盘视觉状态（CP-6.9：snapshot/电平 → 图标动画）
+            // 托盘视觉状态：snapshot/电平 → 图标动画
             let tray_visual = Arc::new(crate::app::tray_icon::TrayVisual::default());
             app.manage(tray_visual.clone());
             {
@@ -391,7 +391,7 @@ pub fn run() {
                 });
             }
 
-            // HUD → nonactivating NSPanel（07 §7.2 坑 3：抢焦点会毁掉注入）
+            // HUD → nonactivating NSPanel（06 §7.2 坑 3：抢焦点会毁掉注入）
             #[cfg(target_os = "macos")]
             crate::app::windows::setup_hud_panel(app.handle())?;
 

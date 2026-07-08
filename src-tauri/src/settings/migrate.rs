@@ -1,4 +1,4 @@
-//! settings.json schema 迁移（08 §3.1）。
+//! settings.json schema 迁移（07 §3.1）。
 
 use crate::settings::schema::CURRENT_SCHEMA_VERSION;
 use serde_json::Value;

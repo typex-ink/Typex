@@ -1,9 +1,9 @@
-//! 听写/翻译/助手 三条流水线的「处理阶段」策略（07 §4）。
+//! 听写/翻译/助手 三条流水线的「处理阶段」策略（06 §4）。
 //!
 //! 状态机只知道 `CallProcess`；本模块按 mode 选提示词与模型槽：
 //! - Dictation：F-9 整理（整理层关闭/未配置/失败 → Degraded 直通原文，绝不阻塞）
 //! - Translation：先按 F-9 开关预整理，再翻译（翻译失败 → Failed，HUD 提供注入原文）
-//! - Assistant：CP-3 在 assistant.rs 中先按 F-9 开关预整理语音指令
+//! - Assistant：在 assistant.rs 中先按 F-9 开关预整理语音指令
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
@@ -63,7 +63,7 @@ pub async fn process(
     match mode {
         SessionMode::Dictation => polish(transcript, settings, registry, prompt_context).await,
         SessionMode::Translation => translate(transcript, settings, registry, prompt_context).await,
-        // F-3 在 CP-3.x 接入助手面板流式路径；此处直通防御
+        // F-3 的助手面板流式路径由 assistant.rs 接管；此处直通防御
         SessionMode::Assistant => ProcessOutcome::Done(transcript),
     }
 }

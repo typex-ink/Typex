@@ -1,7 +1,7 @@
-//! VAD：静音裁剪 + 长录音切片（07 §7.4）。
+//! VAD：静音裁剪 + 长录音切片（06 §7.4）。
 //!
-//! v1 先用能量阈值 VAD（无额外依赖）；模块边界已按可替换设计——
-//! Silero（vad-rs/onnx）后续可直接替换 `is_speech_frame` 的实现（见 ROADMAP CP-1.9 注）。
+//! 当前使用能量阈值 VAD（无额外依赖）；模块边界已按可替换设计，
+//! Silero（vad-rs/onnx）等实现可直接替换 `is_speech_frame`。
 
 const FRAME_MS: usize = 30;
 const SAMPLE_RATE: usize = 16_000;

@@ -1,4 +1,4 @@
-//! 读取选中文本：trait SelectionReader + 平台降级链（07 §7.6）。
+//! 读取选中文本：trait SelectionReader + 平台降级链（06 §7.6）。
 //!
 //! macOS：AX API 主路径 → CGEvent Cmd+C + 剪贴板降级（读完恢复；
 //! 对比复制前后剪贴板 + 超时防误触）。
@@ -58,7 +58,7 @@ impl SelectionReader for MacSelectionReader {
     }
 }
 
-/// AX API 读取焦点元素的选中文本（07 §7.6-1）。
+/// AX API 读取焦点元素的选中文本（06 §7.6-1）。
 /// `Ok(Some(text))` = 元素支持选区属性（text 可为空 = 明确无选区）；`Ok(None)` = 元素不支持。
 #[cfg(target_os = "macos")]
 fn ax_selected_text() -> Result<Option<String>> {
@@ -295,7 +295,7 @@ fn ax_selected_text_bounds() -> Result<Option<SelectionBounds>> {
     }
 }
 
-/// 剪贴板降级：保存 → 模拟 Cmd/Ctrl+C → 读取 → 恢复（07 §7.6）。
+/// 剪贴板降级：保存 → 模拟 Cmd/Ctrl+C → 读取 → 恢复（06 §7.6）。
 pub struct ClipboardFallbackReader;
 
 impl SelectionReader for ClipboardFallbackReader {
@@ -332,7 +332,7 @@ impl SelectionReader for ClipboardFallbackReader {
                 })?;
         }
 
-        // 300ms 超时轮询（07 §7.6-4）
+        // 300ms 超时轮询（06 §7.6-4）
         let mut text = None;
         for _ in 0..10 {
             std::thread::sleep(std::time::Duration::from_millis(30));

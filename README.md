@@ -59,11 +59,11 @@ pnpm tauri dev
 
 Tauri 2 · Rust（rdev / cpal / enigo / arboard …）· Vue 3 + TypeScript + Tailwind CSS v4。
 
-设计书（唯一事实来源）位于独立文档仓库；实现进度见 [`ROADMAP.md`](ROADMAP.md)。
+长期维护文档集见 [`docs/`](docs/README.md)；实现进度使用 GitHub Issues / Projects / Milestones 管理。
 
 ## 离线能力
 
-无需任何 API 密钥，语音转写与整理/翻译可完全在本机推理（SenseVoice / Qwen3-ASR / Qwen3.5，Apache 2.0）。v0.1.1 起随默认构建交付：
+无需任何 API 密钥，语音转写与整理/翻译可完全在本机推理（SenseVoice / Qwen3-ASR / Qwen3.5，Apache 2.0）。默认构建包含本地推理能力：
 
 - 模型不随安装包分发，应用内按需下载（HuggingFace / ModelScope 双源、断点续传、SHA-256 校验）；按设备硬件推荐轻量 / 标准 / 性能三档。
 - 模型下载是本地 Provider 唯一的网络行为——零上报承诺不变。

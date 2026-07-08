@@ -1,6 +1,6 @@
-//! 剪贴板粘贴注入（全平台默认，07 §7.5）：
+//! 剪贴板粘贴注入（全平台默认，06 §7.5）：
 //! 保存剪贴板 → 写入文本 → 模拟 Cmd/Ctrl+V → 延迟 → 恢复剪贴板。
-//! 已知妥协：恢复仅支持文本（arboard 能力边界，07 §7.2-8）。
+//! 已知妥协：恢复仅支持文本（arboard 能力边界，06 §7.2-8）。
 
 use super::Injector;
 use crate::error::{ErrorCode, Result, TypexError};

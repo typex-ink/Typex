@@ -1,7 +1,7 @@
-# 07 · 代码架构与落地计划
+# 06 · 代码架构
 
-> Typex 产品设计书 · 第七章
-> 本章是完整的技术落地计划：用什么技术（§1–§2）、代码怎么组织（§3–§5）、各平台系统能力怎么实现（§6–§9）、契约与前端（§10–§11）、性能与质量门槛（§12–§14）、从哪开始写（§15）。开发中若与本章冲突，先改文档再改代码。
+> Typex 产品设计书 · 第六章
+> 本章是技术架构规格：用什么技术（§1–§2）、代码怎么组织（§3–§5）、各平台系统能力怎么实现（§6–§9）、契约与前端（§10–§11）、性能与质量门槛（§12–§14）、最小垂直切片（§15）。开发中若与本章冲突，先改文档再改代码。
 > 技术选型结论基于 2026-07 的生态调研（Handy、Whispering 等同类开源项目源码与 Tauri/crate 现状）。
 
 ---
@@ -17,7 +17,7 @@
 | Flutter Desktop | ❌ | 空闲内存约为 Tauri 3 倍；桌面端系统集成（全局热键、AX、文本注入）插件生态薄弱 |
 | 原生三写 | ❌ | 体验上限最高（参考 VoiceInk），但三平台三套代码对开源项目维护成本不可接受 |
 
-**前端：Vue 3 + TypeScript + Tailwind CSS v4**（已定，[ADR-6](09-decisions.md)）。
+**前端：Vue 3 + TypeScript + Tailwind CSS v4**（已定，[ADR-6](08-decisions.md)）。
 组合式 API + `<script setup>`；状态管理用 Pinia；构建走 Vite（Tauri 默认脚手架）。参考实现提示：同类项目 Whispering（Svelte）与 Handy（React）的**架构思路**均可借鉴，组件代码需按 Vue 重写。
 IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口漂移。波形绘制用 Canvas 2D（60 fps 足够，无需 WebGL）。
 
@@ -34,13 +34,13 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 文本注入 | `enigo`（模拟 Cmd/Ctrl+V）+ `arboard`（剪贴板存取恢复） | Wayland 另有外部工具后端，见 §8 |
 | 读取选中文本 | `get-selected-text`（AX → 剪贴板降级）；必要时直接用 `axuielement` / `uiautomation` | |
 | HTTP / SSE | `reqwest` + `eventsource-stream` | 全部 Provider 调用 |
-| WebSocket | `tokio-tungstenite` | 火山流式（P2） |
+| WebSocket | `tokio-tungstenite` | 火山流式扩展 |
 | 密钥存储 | `settings.json` credentials 字段 | 与其他配置项同路径；导出与日志必须脱敏 |
 | 本地数据 | `rusqlite`（历史）+ `tauri-plugin-store`（设置） | |
 | macOS 权限 | `tauri-plugin-macos-permissions` + `macos-accessibility-client` | 检测 + 引导跳转 |
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
-| 本地推理（v1.1，[ADR-20](09-decisions.md)/[ADR-22](09-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`（官方 crate，静态链接）；硬件探测：`sysinfo` | feature flag `local-models` 集中管理（v0.1.1 起默认启用，可 `--no-default-features` 裁剪；2026-07-06 项目所有者拍板），推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)）；whisper.cpp 降为可选扩展 |
+| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`（官方 crate，静态链接）；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)）；whisper.cpp 降为可选扩展 |
 
 ## 2. 进程与窗口模型
 
@@ -89,7 +89,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 
 ```
 typex/
-├── src-tauri/                    # Rust（单 crate，v1 不拆 workspace，见 §5.6）
+├── src-tauri/                    # Rust（单 crate，见 §5.6）
 │   ├── Cargo.toml
 │   ├── tauri.conf.json           # 窗口、updater、bundle 配置
 │   ├── capabilities/             # Tauri 2 权限清单（按窗口最小化授权）
@@ -129,14 +129,14 @@ typex/
 │       │   │   ├── mod.rs        # trait SttProvider
 │       │   │   ├── openai_compat.rs
 │       │   │   ├── volcengine.rs
-│       │   │   └── local.rs      # v1.1：Qwen3-ASR(llama.cpp) + SenseVoice(sherpa-onnx)（feature "local-models"）
+│       │   │   └── local.rs      # Qwen3-ASR(llama.cpp) + SenseVoice(sherpa-onnx)（feature "local-models"）
 │       │   ├── llm/
 │       │   │   ├── mod.rs        # trait LlmProvider + PromptKit（内置提示词模板）
 │       │   │   ├── chat_completions.rs
 │       │   │   ├── responses.rs
-│       │   │   └── local.rs      # v1.1：llama.cpp + Qwen3.5（仅整理/翻译槽，feature "local-models"）
+│       │   │   └── local.rs      # llama.cpp + Qwen3.5（仅整理/翻译槽，feature "local-models"）
 │       │   └── models/
-│       │       └── mod.rs        # v1.1：模型库清单 + 下载管理器 + 硬件分档探测（[03 §8]）
+│       │       └── mod.rs        # 模型库清单 + 下载管理器 + 硬件分档探测（[03 §8]）
 │       ├── settings/
 │       │   ├── mod.rs            # SettingsService：读写、校验、变更广播
 │       │   ├── schema.rs         # 全部配置结构体 + 默认值 + schema_version
@@ -198,7 +198,7 @@ pub enum SessionPhase {
 ```
 
 - 状态机本体是**纯函数式转移表**（`fn advance(state, event) -> (state, Vec<Effect>)`），不做 IO；`Effect`（StartRecording / CallStt / Inject / EmitUi / PlayChime…）由 orchestrator 的执行器逐个 dispatch 到 service。**这是全项目单测密度最高的地方**（重按忽略、Esc 取消、组合键让路、失败重试等规则全部在此验证）。
-- 任何时刻只有一个活动会话（v1 不并行）；每个会话有自增 `session_id`，所有异步回调带 id 校验，杜绝「上一条的转写结果注入到下一条」的竞态。
+- 任何时刻只有一个活动会话（当前不并行）；每个会话有自增 `session_id`，所有异步回调带 id 校验，杜绝「上一条的转写结果注入到下一条」的竞态。
 - 每次 phase 变更 → `SessionSnapshot` 经 `app/events.rs` 推送给前端（HUD/面板据此渲染，前端无自己的业务状态机；每个状态携带可显示的进度语义，见 [05 UX 规格 §3](05-ux-spec.md)）。
 
 ### 5.3 线程与异步模型
@@ -225,7 +225,7 @@ pub enum SessionPhase {
 
 ### 5.6 关于不拆 workspace 的说明
 
-v1 保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `cargo-modules`/review 把关），避免过早抽象。若后续出现「providers 想独立发布」或编译时间失控，再拆 `typex-core` / `typex-providers`——目录结构已按可拆分的形状组织。
+当前保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `cargo-modules`/review 把关），避免过早抽象。若后续出现「providers 想独立发布」或编译时间失控，再拆 `typex-core` / `typex-providers`——目录结构已按可拆分的形状组织。
 
 ## 6. 数据流与隐私边界
 
@@ -237,8 +237,8 @@ v1 保持单 crate：模块边界靠 §3 依赖规则约束（CI 中可用 `carg
                               注入目标应用
 ```
 
-- **除用户自己配置的端点外，无任何网络请求**（更新检查除外，可关）。无遥测（见 [D-11](09-decisions.md)）。
-- 音频不落盘；仅当转写失败等待重试时写入临时目录（加密与否 v1 从简：内存优先，超大切片才落盘），成功或放弃后立即删除。
+- **除用户自己配置的端点外，无任何网络请求**（更新检查除外，可关）。无遥测（见 [D-11](08-decisions.md)）。
+- 音频不落盘；仅当转写失败等待重试时写入临时目录（内存优先，超大切片才落盘），成功或放弃后立即删除。
 - 剪贴板注入前保存原内容、注入后恢复；文档中明示「恢复仅支持文本/图片格式」的已知妥协。
 
 ## 7. 关键系统能力实现方案
@@ -315,7 +315,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 ## 9. 配置、密钥与磁盘数据布局
 
-- **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多，此项为 v1 必备；代理凭据若有同样按敏感配置字段处理，导出与日志必须脱敏。
+- **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多；代理凭据若有同样按敏感配置字段处理，导出与日志必须脱敏。
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
 - 密钥：随 profile 的 `credentials` 字段存入 `settings.json`，与其他配置项同路径；诊断包导出清空 `credentials`，日志 redact 层拦截 Authorization/密钥文本。旧版 `keyring://` 引用在迁移时清除，运行时也视为未配置。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。
@@ -335,7 +335,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 所有 command/event 在 Rust 侧定义，`pnpm gen:ipc` 生成 `src/ipc/bindings.ts`；前端禁止手写 `invoke("...")` 字符串。
 
-### 10.1 Commands（前端 → Rust，v1 完整清单）
+### 10.1 Commands（前端 → Rust）
 
 | 分组 | Command | 说明 |
 |---|---|---|
@@ -407,7 +407,7 @@ src/
 
 ## 13. 测试策略
 
-> 概览如下；**完整的可执行规范（场景清单、mock 基座、覆盖率门槛、CI 流水线、AI 开发纪律）以 [08 测试规范](08-testing.md) 为准**。
+> 概览如下；**完整的可执行规范（场景清单、mock 基座、覆盖率门槛、CI 流水线、AI 开发纪律）以 [07 测试规范](07-testing.md) 为准**。
 
 | 层 | 工具 | 覆盖重点 |
 |---|---|---|
@@ -415,24 +415,24 @@ src/
 | Provider 集成测 | `wiremock`（本地 mock HTTP） | 两种 wire 格式的请求构造/SSE 解析/错误分类/重试；火山 flash 的 header 判定 |
 | 整理提示词回归 | `docs/fixtures/denoise-cases.md` 驱动的**手动/半自动**评测脚本（`scripts/eval-denoise.ts`，可选真实 API key 运行） | 改口/语气词/格式指令样例集，防提示词回归 |
 | 前端组件 | `vitest` + `@vue/test-utils`（IPC 层 mock bindings） | HotkeyRecorder、ProviderCard 表单、错误文案映射 |
-| 端到端 | v1 用**人工回归清单**（`docs/release-checklist.md`，按 02 章验收标准逐条 × 三平台） | 键盘监听/注入/权限这类系统能力自动化成本过高，不强上 E2E 框架 |
+| 端到端 | 用**人工回归清单**（`docs/09-release-checklist.md`，按 02 章验收标准逐条 × 三平台） | 键盘监听/注入/权限这类系统能力自动化成本过高，不强上 E2E 框架 |
 | CI 门槛 | clippy `-D warnings`、`cargo test`、`vue-tsc`、vitest、bindings 新鲜度校验、hud 体积断言 | PR 必须绿 |
 
 ## 14. 编码、CI 与协作规范
 
 - **Rust**：Edition 2024；`rustfmt` 默认配置；公共 API 必须有 doc comment；`unsafe` 仅允许出现在 `platform/` 并逐处注释理由。
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
-- **命名**：产品名 Typex（[ADR-14](09-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
+- **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **CI**：GitHub Actions 三平台矩阵（macOS universal、Windows x64、Linux x64 AppImage+deb+rpm）；`cargo clippy -D warnings`、`cargo test`、前端 `vue-tsc --noEmit` + `vitest`。
-- **发布**：tag → 自动构建 + updater 清单 + GitHub Release；签名/公证凭据经 GitHub Secrets（Apple Developer + SignPath，[ADR-11](09-decisions.md)）。
+- **发布**：tag → 自动构建 + updater 清单 + GitHub Release；签名/公证凭据经 GitHub Secrets（Apple Developer + SignPath，[ADR-11](08-decisions.md)）。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。
 
-## 15. M0 落地顺序（本章的最小可用切片）
+## 15. 最小垂直切片
 
-1. 仓库骨架 + CI（目录树按 §4 建空模块，先全部 `todo!()`）。
+1. 仓库骨架 + CI（目录树按 §4 建模块，先跑通最小构建）。
 2. `types/` + `error.rs` + `settings/schema.rs`（数据先行，IPC 生成链路跑通）。
-3. hotkey（仅 rdev 单键）→ audio（录到 WAV）→ providers/stt/openai_compat（写死配置）→ inject/paste：串成第一条能跑的听写管线（对应 [06 路线图 M0](06-roadmap.md) 验收）。
+3. hotkey（仅 rdev 单键）→ audio（录到 WAV）→ providers/stt/openai_compat（写死配置）→ inject/paste：串成第一条能跑的听写管线，作为最小可运行切片验收。
 4. orchestrator 状态机替换掉临时串联代码 → HUD 接 `session://snapshot`。
 
-之后各里程碑按 [06 路线图](06-roadmap.md) 推进，模块归属以本章为准。
+后续进度使用 GitHub Issues / Projects / Milestones 管理，模块归属以本章为准。

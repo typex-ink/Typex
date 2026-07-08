@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{
   active?: boolean;
   /** 该槽位全部可切换档案 */
   alternatives?: ProviderProfile[];
-  /** 副标题覆盖（本地档案显示引擎与模型状态，CP-8.7；缺省显示 kind） */
+  /** 副标题覆盖（本地档案显示引擎与模型状态；缺省显示 kind） */
   subtitle?: string;
 }>(), {
   active: false,

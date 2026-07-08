@@ -85,7 +85,7 @@ strip = true
 rdev = { path = "vendor/rdev" }
 
 [features]
-# 本地模型默认启用（项目所有者 2026-07-06 拍板：v0.1.1 起随默认构建交付）
+# 本地模型默认启用；可用 --no-default-features 裁剪推理引擎依赖。
 default = ["local-models"]
 # 本地模型（F-12 / ADR-20/22）：推理引擎与探测依赖集中在此 feature（可 --no-default-features 裁剪）
 local-models = [

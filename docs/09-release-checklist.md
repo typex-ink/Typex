@@ -1,8 +1,9 @@
-# 发布人工回归清单（08 §7）
+# 09 · 发布人工回归清单
 
-> 按 [02 功能规格](docs/02-features.md) 各功能验收标准展开的可勾选清单，**发布门槛**。
-> 平台范围（当前阶段）：**仅 macOS**——Windows / Ubuntu X11 / KDE Wayland 项随平台后端落地（CP-7.x）后追加。
-> 每次 release 复制本文件为 `docs/releases/<version>-checklist.md`，勾选后随发布归档。
+> Typex 产品设计书 · 第九章
+> 按 [02 功能规格](02-features.md) 各功能验收标准展开的可勾选清单，**发布前人工回归参考**。
+> 平台范围随平台后端能力维护；当前清单以 macOS 为主，Windows / Ubuntu X11 / KDE Wayland 项随对应后端补齐。
+> 本文件作为长期维护的检查清单使用；发版时人工参考执行，不要求逐版本复制归档。
 
 ## 1. 安装与首启
 
@@ -79,7 +80,7 @@
 
 ## 9. 资源与隐私
 
-- [ ] 空闲内存 ≤ 150 MB、空闲 CPU ≈ 0%（07 §12；Activity Monitor 观察 10 分钟）
+- [ ] 空闲内存 ≤ 150 MB、空闲 CPU ≈ 0%（06 §12；Activity Monitor 观察 10 分钟）
 - [ ] 录音中 CPU 占用合理（< 30% 单核）
 - [ ] 日志文件抽查：无转写内容、无 Bearer/sk- 形态密钥（redact 层生效）
 - [ ] 导出诊断包：settings 中 credentials 为空、日志已脱敏
@@ -90,5 +91,5 @@
 - [ ] `cargo test` / `pnpm test` / `clippy -D warnings` / `pnpm build` 全绿（CI 同步绿）
 - [ ] `pnpm eval:prompts` 全量通过率 ≥ 90%，报告归档
 - [ ] 版本号三处一致：`tauri.conf.json` / `Cargo.toml` / 关于页
-- [ ] tag 推送 → release 工作流出 dmg + updater 清单；签名/公证通过（CP-5.4 凭据就位后）
+- [ ] tag 推送 → release 工作流出 dmg + updater 清单；签名/公证凭据就位后，签名/公证通过
 - [ ] 从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）

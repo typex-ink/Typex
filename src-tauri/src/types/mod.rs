@@ -1,4 +1,4 @@
-//! 跨层共享类型（serde + specta derive，07 §4 types/）。
+//! 跨层共享类型（serde + specta derive，06 §4 types/）。
 pub mod profile;
 pub mod session;
 

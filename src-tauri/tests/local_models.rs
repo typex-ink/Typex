@@ -1,4 +1,4 @@
-//! 模型下载管理器集成测试（CP-8.2 / 03 §8）。
+//! 模型下载管理器集成测试（03 §8）。
 //!
 //! 仅在 feature = local-models 时编译。
 //! 使用 wiremock 模拟 HuggingFace / ModelScope 两源；临时目录作 data_dir 注入。

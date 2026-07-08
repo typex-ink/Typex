@@ -8,9 +8,9 @@ Typex：开源跨平台 AI 语音输入软件（Tauri 2 + Rust 后端，Vue 3 + 
 
 ## 事实来源与文档纪律
 
-- **设计书 [`docs/`](docs/)（01–09 章）是唯一事实来源**：行为语义以 02（功能规格）/05（UX 规格）为准，Provider 协议以 03 为准，UI 外观与 token 以 04 为准，模块归属与分层规则以 07 为准，测试规范以 08 为准。
+- **文档集 [`docs/`](docs/) 是唯一事实来源**：行为语义以 02（功能规格）/05（UX 规格）为准，Provider 协议以 03 为准，UI 外观与 token 以 04 为准，模块归属与分层规则以 06 为准，测试规范以 07 为准，决策历史以 08 为准。
 - **代码与设计书冲突时，先改设计书再改代码**；改动 IPC 契约、配置 schema、状态机行为的提交必须同步更新对应章节。
-- 实现进度记录在 `ROADMAP.md`：完成一个 checkpoint 就标 `[x]`（附日期）并单独提交一次。
+- 实现进度不写入文档集，使用 GitHub Issues / Projects / Milestones 管理。
 
 ## 常用命令
 
@@ -27,7 +27,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml
 
 合入前全部命令必须绿：fmt / clippy -D warnings / cargo test / pnpm build / pnpm test（与 CI 一致）。
 
-## 结构组成（07 章的落地形态）
+## 结构组成（06 章的落地形态）
 
 ```
 src-tauri/src/
@@ -64,12 +64,12 @@ src/
 - 新 command 记得同时加进 `runner.rs` 的 `collect_commands![]`，否则运行时 404。
 - 新增 `ErrorCode` 变体时必须同步 `src/i18n/zh-CN.json` 与 `en.json` 的 `error.*` 文案——有契约测试卡这一点（`src/__tests__/i18n-errorcodes.test.ts`）。
 
-## 测试规范（08 章，合入前置条件）
+## 测试规范（07 章，合入前置条件）
 
 - **测试与代码同 PR**：新增/修改行为必须携带对应测试（纯文案/注释/样式除外）。先写（或同时写）测试与类型签名，再写实现。
 - **测行为，不测实现**：断言公开接口的输入输出与副作用，不断言内部调了什么函数。
 - **确定性**：不碰真实网络/时间/键盘/麦克风——HTTP 用 wiremock，时间作参数注入，keyring 用 MemoryStore，音频用合成 PCM。flaky 测试按 bug 处理，不允许 retry 掩盖。
-- **分级要求**：`orchestrator/session.rs`、`providers/*`、hotkey 判定逻辑属关键模块——每条行为规则要有具名测试（08 §3.1 场景清单是需求的镜像，**改行为先更新场景表，表里没有的行为不存在**）。`platform/`、`app/`（纯转发）豁免单测，靠人工回归。
+- **分级要求**：`orchestrator/session.rs`、`providers/*`、hotkey 判定逻辑属关键模块——每条行为规则要有具名测试（07 §3.1 场景清单是需求的镜像，**改行为先更新场景表，表里没有的行为不存在**）。`platform/`、`app/`（纯转发）豁免单测，靠人工回归。
 - **禁止弱化测试转绿**：修改断言/删用例/加 ignore 必须在提交说明中单独解释理由。
 - 提示词（整理/翻译/判定）的行为变更需对照 `docs/fixtures/denoise-cases.md` 语料评测，不进 PR CI。
 
@@ -98,5 +98,5 @@ src/
 
 ## 提交约定
 
-- Conventional Commits（`feat(audio): …`，scope 用 07 章模块名：hotkey/audio/inject/selection/providers/settings/history/orchestrator/app/platform）；提交信息中文。
+- Conventional Commits（`feat(audio): …`，scope 用 06 章模块名：hotkey/audio/inject/selection/providers/settings/history/orchestrator/app/platform）；提交信息中文。
 - 产品名一律写作 **Typex**（仅首字母大写）；bundle id `ink.typex.app`。

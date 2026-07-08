@@ -1,4 +1,4 @@
-// i18n 契约（CP-6.6）：zh-CN 与 en 全量 key 集合一致 + resolveLocale 行为
+// i18n 契约：zh-CN 与 en 全量 key 集合一致 + resolveLocale 行为
 import { describe, expect, it, vi, afterEach } from "vitest";
 import zhCN from "../i18n/zh-CN.json";
 import en from "../i18n/en.json";

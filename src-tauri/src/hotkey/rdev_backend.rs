@@ -1,4 +1,4 @@
-//! rdev 独立线程监听（macOS/Windows/X11，07 §7.3）。
+//! rdev 独立线程监听（macOS/Windows/X11，06 §7.3）。
 //! listen-only：不拦截任何按键；判定在 HotkeyDetector 纯逻辑层。
 
 use super::{HotkeyConfig, HotkeyDetector, HotkeyEvent};

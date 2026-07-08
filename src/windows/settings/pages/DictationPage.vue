@@ -67,7 +67,7 @@ const microphone = useSetting(
   (s) => s.dictation.microphone,
   (s, v) => (s.dictation.microphone = v),
 );
-// 麦克风设备列表（cpal 枚举，CP-6.4）
+// 麦克风设备列表（cpal 枚举）
 const devices = ref<string[]>([]);
 const deviceOptions = computed(() => [
   { value: "", label: t("settings.dictation.mic_default") },

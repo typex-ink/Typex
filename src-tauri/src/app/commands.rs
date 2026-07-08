@@ -1,4 +1,4 @@
-//! 全部 #[tauri::command]（薄，仅转发；完整清单见 07 §10.1，按里程碑逐步补齐）。
+//! 全部 #[tauri::command]（薄，仅转发；完整清单见 06 §10.1）。
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
@@ -97,7 +97,7 @@ pub fn assistant_window_ready(ready: AssistantReadyState<'_>) {
     ready.mark_ready();
 }
 
-// ── Profile 管理（07 §10.1）──
+// ── Profile 管理（06 §10.1）──
 
 #[tauri::command]
 #[specta::specta]
@@ -210,7 +210,7 @@ pub fn set_profile_secret(
     Ok(())
 }
 
-// ── 历史（F-7；07 §10.1）──
+// ── 历史（F-7；06 §10.1）──
 
 #[tauri::command]
 #[specta::specta]
@@ -384,7 +384,7 @@ pub async fn test_profile(
     Ok(start.elapsed().as_millis() as u32)
 }
 
-/// 更新检查结果（CP-6.3 / ADR-11）。
+/// 更新检查结果（ADR-11）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct UpdateInfo {
     pub version: String,
@@ -432,7 +432,7 @@ pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
     app.restart();
 }
 
-/// 枚举输入设备（听写页麦克风下拉，CP-6.4）。
+/// 枚举输入设备（听写页麦克风下拉）。
 #[tauri::command]
 #[specta::specta]
 pub fn list_audio_devices() -> Vec<String> {
@@ -451,7 +451,7 @@ pub fn toggle_verbatim(settings: SettingsState<'_>) -> Result<bool, TypexError> 
     Ok(verbatim)
 }
 
-/// 导出诊断包（05 §5.2 / CP-6.11）：环境自检 + 脱敏 settings + 最近日志 → zip 到下载目录；
+/// 导出诊断包（05 §5.2）：环境自检 + 脱敏 settings + 最近日志 → zip 到下载目录；
 /// 返回生成的文件路径。密钥引用与凭据字段一律剔除。
 #[tauri::command]
 #[specta::specta]
@@ -536,7 +536,7 @@ pub fn export_diagnostics(
     Ok(dest.display().to_string())
 }
 
-// ── 本地模型（v1.1 / F-12 / ADR-20/22；CP-8.7/8.8）─────────────────────────────
+// ── 本地模型（F-12 / ADR-20/22）────────────────────────────────────────────
 //
 // IPC 契约（类型 + command 签名）无条件定义——collect_commands! 不能按 feature
 // 条件包含单项；实现在函数体内 #[cfg(feature = "local-models")] 分支，

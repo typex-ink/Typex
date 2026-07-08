@@ -1,4 +1,4 @@
-//! 全部 IPC event 定义与 emit 封装（07 §10.2）。
+//! 全部 IPC event 定义与 emit 封装（06 §10.2）。
 //! 命名规范：`域://kebab-case`；载荷全部为 types/ 中的 struct。
 
 use crate::types::SessionSnapshot;
@@ -57,7 +57,7 @@ pub struct UpdateAvailableEvent {
     pub notes: String,
 }
 
-/// `local://download-progress` — 本地模型下载进度（v1.1 / CP-8.7/8.8）。
+/// `local://download-progress` — 本地模型下载进度。
 /// 事件类型无条件定义（IPC 契约不随 feature 变化）；
 /// 默认构建下 download_local_model 返回错误，此事件不会发出。
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, Event)]

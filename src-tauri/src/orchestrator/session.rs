@@ -1,7 +1,7 @@
-//! 会话状态机（07 §5.2）：纯函数式转移表，不做 IO。
+//! 会话状态机（06 §5.2）：纯函数式转移表，不做 IO。
 //!
 //! `advance(state, event) -> (state, Vec<Effect>)` — Effect 由 orchestrator
-//! 执行器 dispatch 到各 service。全项目单测密度最高处（08 §3.1 场景清单）。
+//! 执行器 dispatch 到各 service。全项目单测密度最高处（07 §3.1 场景清单）。
 
 use crate::error::{ErrorCode, TypexError};
 use crate::types::{FailedStage, SessionMode, SessionPhase};
@@ -249,7 +249,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             (s, vec![])
         }
         (State::Recording { session_id, .. }, Event::Yielded) => {
-            // 组合键让路：静默取消，无任何注入/提示音（08 §3.1）
+            // 组合键让路：静默取消，无任何注入/提示音（07 §3.1）
             (
                 State::Idle,
                 vec![E::CancelRecording, E::ReleaseAudio { session_id }],
@@ -445,7 +445,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
             Event::Retry,
         ) => {
-            // 从失败的 stage 恢复，而非从头（08 §3.1）
+            // 从失败的 stage 恢复，而非从头（07 §3.1）
             match stage {
                 FailedStage::Transcribing => (
                     State::Transcribing { session_id, mode },
@@ -496,7 +496,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 next_session_id,
             },
         ) => {
-            // 失败态按触发键 = 放弃旧会话开新录音（08 §3.1）
+            // 失败态按触发键 = 放弃旧会话开新录音（07 §3.1）
             (
                 State::Recording {
                     session_id: next_session_id,
@@ -582,7 +582,7 @@ mod tests {
         }
     }
 
-    // ── 长按/短按（08 §3.1 场景 1）──
+    // ── 长按/短按（07 §3.1 场景 1）──
 
     #[test]
     fn hold_349ms_release_enters_toggle_mode() {
@@ -634,7 +634,7 @@ mod tests {
         assert!(!fx.contains(&Effect::CancelRecording));
     }
 
-    // ── 助手分流（08 §3.1 / ADR-23）──
+    // ── 助手分流（07 §3.1 / ADR-23）──
 
     #[test]
     fn assistant_handed_off_ends_session_and_releases_audio() {

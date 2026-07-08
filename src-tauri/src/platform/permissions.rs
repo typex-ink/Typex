@@ -1,4 +1,4 @@
-//! 各平台权限检测/引导（07 §4 platform/permissions.rs）。
+//! 各平台权限检测/引导（06 §4 platform/permissions.rs）。
 
 use serde::{Deserialize, Serialize};
 

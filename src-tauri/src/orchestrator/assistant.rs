@@ -28,7 +28,7 @@ pub enum AssistantEvent {
         instruction: String,
         /// 选区字数（无选区 = None）
         selection_chars: Option<u32>,
-        /// 读取选区失败降级为普通提问（05 §4 / CP-6.13 提示行）
+        /// 读取选区失败降级为普通提问（05 §4 提示行）
         degraded: bool,
     },
     Delta {

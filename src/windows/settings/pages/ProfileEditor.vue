@@ -102,7 +102,7 @@ const hasExistingVolcKeys = computed(
     hasStoredSecret(props.profile?.credentials?.["access_token"]),
 );
 
-// ── 本地档案编辑态（CP-8.7 / 05 §5.1）──
+// ── 本地档案编辑态（05 §5.1）──
 // 模型下拉来自模型库，按槽位 purpose 过滤：stt 槽列 stt 模型，其余槽列 llm。
 const localModels = ref<LocalModelInfo[]>([]);
 const loadPolicy = ref<string>(

@@ -37,7 +37,7 @@ pub enum ProviderCapability {
     Llm,
 }
 
-/// adapter 走向（03 §1）。`local` 是 v1.1 扩展位。
+/// adapter 走向（03 §1）。`local` 表示本地推理 adapter。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
@@ -49,7 +49,7 @@ pub enum ProviderKind {
     ChatCompletions,
     /// LLM：OpenAI Responses
     Responses,
-    /// 本地推理（v1.1 / ADR-20；无 base_url/凭据，model = 模型库 id）
+    /// 本地推理（ADR-20；无 base_url/凭据，model = 模型库 id）
     Local,
 }
 

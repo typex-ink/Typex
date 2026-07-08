@@ -1,8 +1,8 @@
-//! tracing 初始化（07 §5.5）。
+//! tracing 初始化（06 §5.5）。
 //!
 //! 双重防线：
 //! 1. 编码纪律——providers 与 orchestrator 的日志语句只记长度与耗时，不含内容与凭据；
-//! 2. redact 写入层（CP-6.11）——所有日志行写盘/上屏前过 `redact()`，
+//! 2. redact 写入层——所有日志行写盘/上屏前过 `redact()`，
 //!    自动打码 Bearer token 与 sk- 形态密钥，兜住手滑。
 
 use std::io::Write;

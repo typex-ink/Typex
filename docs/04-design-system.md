@@ -153,6 +153,6 @@
 
 ## 7. 组件规范（前端 `src/components/`）
 
-`Button`（primary/secondary/ghost/danger，高 32，radius 8）· `Input`/`SecretInput`（密钥用，带显隐与粘贴按钮，高 32）· `Select`（应用内自绘 listbox，禁止使用系统原生下拉；支持方向键/Enter/Esc、外部点击关闭）· `Toggle` · `HotkeyRecorder`（录制快捷键专用控件，见 06 §7）· `ProviderCard`（配置档案卡片：厂商 logo 位 + label + 模型名 + 测试按钮 + 延迟徽标）· `Waveform`（Canvas 封装，输入电平数组）· `StatusPill`（HUD 核心容器）· `Kbd`（快捷键展示）· `EmptyState` · `Callout`（info/warn/error）。
+`Button`（primary/secondary/ghost/danger，高 32，radius 8）· `Input`/`SecretInput`（密钥用，带显隐与粘贴按钮，高 32）· `Select`（应用内自绘 listbox，禁止使用系统原生下拉；支持方向键/Enter/Esc、外部点击关闭）· `Toggle` · `HotkeyRecorder`（录制快捷键专用控件，见 [05 §7](05-ux-spec.md)）· `ProviderCard`（配置档案卡片：厂商 logo 位 + label + 模型名 + 测试按钮 + 延迟徽标）· `Waveform`（Canvas 封装，输入电平数组）· `StatusPill`（HUD 核心容器）· `Kbd`（快捷键展示）· `EmptyState` · `Callout`（info/warn/error）。
 
-所有组件必须：双主题可用、键盘可达（Tab/Enter/Esc）、焦点环使用 `--focus-ring`、文案取自 i18n 资源（中英双语，[ADR-11](09-decisions.md)）。
+所有组件必须：双主题可用、键盘可达（Tab/Enter/Esc）、焦点环使用 `--focus-ring`、文案取自 i18n 资源（中英双语，[ADR-11](08-decisions.md)）。

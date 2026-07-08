@@ -1,4 +1,4 @@
-//! 窗口创建/显隐/定位（07 §2）。HUD NSPanel 处理在 CP-1.3。
+//! 窗口创建/显隐/定位（06 §2）。HUD 使用 nonactivating NSPanel。
 
 use crate::selection::{SelectionBounds, SelectionReader};
 use crate::types::{SessionPhase, SessionSnapshot};
@@ -11,7 +11,7 @@ static HUD_GEN: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_os = "macos")]
 tauri_nspanel::tauri_panel! {
-    // HUD：nonactivating NSPanel——显示时绝不抢焦点（07 §7.2 坑 3）
+    // HUD：nonactivating NSPanel——显示时绝不抢焦点（06 §7.2 坑 3）
     panel!(HudPanel {
         config: {
             can_become_key_window: false,

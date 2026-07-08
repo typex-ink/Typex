@@ -1,4 +1,4 @@
-//! Provider × wiremock 集成测试（08 §4.1）。
+//! Provider × wiremock 集成测试（07 §4.1）。
 
 use futures_util::StreamExt;
 use std::collections::HashMap;

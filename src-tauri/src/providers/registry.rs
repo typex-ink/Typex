@@ -1,4 +1,4 @@
-//! ProviderRegistry：由配置构造 provider 实例（03 §5 / 07 §5.1）。
+//! ProviderRegistry：由配置构造 provider 实例（03 §5 / 06 §5.1）。
 //!
 //! - 按 profile-id 惰性构建 + 缓存；settings 变更时失效重建
 //! - 密钥从 profile.credentials 读取；日志与诊断导出必须脱敏
@@ -22,7 +22,7 @@ pub struct ProviderRegistry {
     llm_cache: Mutex<HashMap<String, Arc<dyn LlmProvider>>>,
     /// 当前配置快照（settings watch 更新）
     settings: Mutex<Settings>,
-    /// 本地模型存储根（app_data_dir；v1.1 local-models）
+    /// 本地模型存储根（app_data_dir；local-models）
     #[cfg_attr(not(feature = "local-models"), allow(dead_code))]
     models_data_dir: Mutex<Option<std::path::PathBuf>>,
 }
@@ -101,12 +101,12 @@ impl ProviderRegistry {
         }
     }
 
-    /// 设定本地模型存储根（runner 启动时注入 app_data_dir；v1.1）。
+    /// 设定本地模型存储根（runner 启动时注入 app_data_dir）。
     pub fn set_models_data_dir(&self, dir: std::path::PathBuf) {
         *self.models_data_dir.lock().unwrap() = Some(dir);
     }
 
-    /// 配置变更：只清缓存中已消失/已变更的 profile（07 §5.1 惰性重建）。
+    /// 配置变更：只清缓存中已消失/已变更的 profile（06 §5.1 惰性重建）。
     pub fn on_settings_changed(&self, new: Settings) {
         let old = self.settings.lock().unwrap().clone();
         let changed: Vec<String> = old
@@ -311,7 +311,7 @@ impl ProviderRegistry {
         }
     }
 
-    /// 本地 STT（v1.1）：按 model id 选引擎（sherpa / sherpa_whisper / llama mtmd）。
+    /// 本地 STT：按 model id 选引擎（sherpa / sherpa_whisper / llama mtmd）。
     #[cfg(feature = "local-models")]
     fn build_local_stt(&self, profile: &ProviderProfile) -> Result<Arc<dyn SttProvider>> {
         use crate::local::{manifest, stt_qwen_asr, stt_sense_voice, stt_whisper};
@@ -462,7 +462,7 @@ impl ProviderRegistry {
                     .first()
                     .map(|f| dir.join("models").join(&entry.id).join(&f.name))
                     .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺模型文件"))?;
-                // 加载策略（05 §5.1：常驻 / 用完即卸；CP-8.7 编辑态下拉存 options.load_policy）
+                // 加载策略（05 §5.1：常驻 / 用完即卸；编辑态下拉存 options.load_policy）
                 let policy = match profile.options.get("load_policy").and_then(|v| v.as_str()) {
                     Some("unload_after_use") => llm_llama::LoadPolicy::UnloadAfterUse,
                     _ => llm_llama::LoadPolicy::Resident,

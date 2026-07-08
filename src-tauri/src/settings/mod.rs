@@ -1,4 +1,4 @@
-//! SettingsService：读写、校验、变更广播（07 §5.1 / §9）。
+//! SettingsService：读写、校验、变更广播（06 §5.1 / §9）。
 pub mod migrate;
 pub mod schema;
 

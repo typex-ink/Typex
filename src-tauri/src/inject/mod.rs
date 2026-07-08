@@ -1,4 +1,4 @@
-//! 文本注入：trait Injector + 后备链（07 §7.5）。
+//! 文本注入：trait Injector + 后备链（06 §7.5）。
 pub mod paste;
 pub mod type_direct;
 
@@ -21,7 +21,7 @@ impl InjectorChain {
         Self { backends }
     }
 
-    /// 平台默认链（07 §7.5）：paste 主路径 + type_direct 后备。
+    /// 平台默认链（06 §7.5）：paste 主路径 + type_direct 后备。
     pub fn platform_default(paste_delay_ms: u64) -> Self {
         Self::new(vec![
             Box::new(paste::PasteInjector::new(paste_delay_ms)),
@@ -33,7 +33,7 @@ impl InjectorChain {
         self.inject_ordered(text, None)
     }
 
-    /// 按设置选首选后端（CP-6.7）：首选排最前，其余保持默认序作后备。
+    /// 按设置选首选后端：首选排最前，其余保持默认序作后备。
     pub fn inject_with(&self, text: &str, method: InjectMethod) -> Result<()> {
         let preferred = match method {
             InjectMethod::Auto => None,
@@ -95,7 +95,7 @@ mod tests {
         }
     }
 
-    /// 具名 mock：验证 inject_with 的首选排序（CP-6.7）。
+    /// 具名 mock：验证 inject_with 的首选排序。
     struct NamedInjector {
         name: &'static str,
         fail: bool,

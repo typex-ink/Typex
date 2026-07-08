@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // HUD 状态胶囊 — 严格对照 04 设计系统与 05 §3
-// 极简纪律（07 §11）：无 Pinia、无路由、无 Markdown
+// 极简纪律（06 §11）：无 Pinia、无路由、无 Markdown
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import {
   onSnapshot,

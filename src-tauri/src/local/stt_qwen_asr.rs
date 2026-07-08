@@ -1,4 +1,4 @@
-//! 本地 STT Provider · Qwen3-ASR 标准/性能档（CP-8.4 / 03 §2.3 / ADR-22）。
+//! 本地 STT Provider · Qwen3-ASR 标准/性能档（03 §2.3 / ADR-22）。
 //!
 //! llama.cpp mtmd（多模态，experimental）跑 Qwen3-ASR GGUF：16k mono WAV →
 //! f32 采样 → mtmd 音频 bitmap → encode → 自回归解码转写。除主模型 GGUF 外

@@ -45,7 +45,7 @@ const llmModel = ref("");
 const configuring = ref(false);
 const configError = ref("");
 
-// 本地路径（05 §6 第 3 步 / CP-8.8）：档位检测 → 一键下载 → 三个功能指向 local 服务配置
+// 本地路径（05 §6 第 3 步）：档位检测 → 一键下载 → 三个功能指向 local 服务配置
 const hw = ref<HardwareTier | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
 const chosenTier = ref<string>("standard");
@@ -283,7 +283,7 @@ onUnmounted(() => {
     <div v-else-if="step === 3" class="body">
       <h5>{{ t("onboarding.models_title") }}</h5>
 
-      <!-- 本地模型推荐卡（05 §6 第 3 步 / CP-8.8；local-models 未启用时不显示） -->
+      <!-- 本地模型推荐卡（05 §6 第 3 步；local-models 未启用时不显示） -->
       <div v-if="localAvailable && localPhase === 'idle'" class="prov on">
         <div class="plogo">◉</div>
         <div class="pmeta2">

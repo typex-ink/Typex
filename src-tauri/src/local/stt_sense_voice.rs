@@ -1,4 +1,4 @@
-//! 本地 STT Provider · SenseVoice 轻量档（CP-8.3 / 03 §2.3 / ADR-22）。
+//! 本地 STT Provider · SenseVoice 轻量档（03 §2.3 / ADR-22）。
 //!
 //! sherpa-onnx 静态链接 + SenseVoice-Small int8：非自回归、CPU 实时数倍速，
 //! 弱机器上唯一保证实时的选项。实现同一 `SttProvider` trait（kind: local，

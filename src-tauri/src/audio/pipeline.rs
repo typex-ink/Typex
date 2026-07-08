@@ -1,5 +1,5 @@
-//! 重采样（rubato → 16 kHz mono）+ 电平计算 + WAV 编码（07 §7.4）。
-//! VAD 静音裁剪与长录音切片在 CP-1.9 加入。
+//! 重采样（rubato → 16 kHz mono）+ 电平计算 + WAV 编码（06 §7.4）。
+//! VAD 静音裁剪与长录音切片在本模块完成。
 
 use crate::error::{ErrorCode, Result, TypexError};
 use rubato::{
@@ -30,7 +30,7 @@ pub fn to_wav_16k_mono(samples: &[f32], src_rate: u32) -> Result<Vec<u8>> {
     encode_wav(&resampled, TARGET_RATE)
 }
 
-/// 录音后处理：重采样 → VAD 首尾静音裁剪 → WAV（07 §7.4）。
+/// 录音后处理：重采样 → VAD 首尾静音裁剪 → WAV（06 §7.4）。
 /// 返回 (wav, 有效时长 ms)；全静音时 wav 为空录音（0 采样）。
 pub fn finalize_recording(samples: &[f32], src_rate: u32) -> Result<(Vec<u8>, u64)> {
     let resampled = if src_rate == TARGET_RATE {

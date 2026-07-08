@@ -119,7 +119,7 @@ pub fn recommend_tier(ram_gb: u64, _cores: usize, gpu: bool) -> Tier {
     }
 }
 
-/// 生成诊断页显示字符串（05 §5.2 / CP-8.1 验收）。
+/// 生成诊断页显示字符串（05 §5.2 验收）。
 ///
 /// 格式示例：`RAM 24 GB · 10 核 · Metal ✓ · 推荐档位：性能`
 pub fn diagnostics_string() -> String {

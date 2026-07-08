@@ -1,4 +1,4 @@
-// HUD 专用轻量 IPC（07 §11 HUD 极简纪律：不引 bindings.ts 全量、不引 Pinia）
+// HUD 专用轻量 IPC（06 §11 HUD 极简纪律：不引 bindings.ts 全量、不引 Pinia）
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 

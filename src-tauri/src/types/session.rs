@@ -1,9 +1,9 @@
-//! 会话快照类型：Rust 状态机 → 前端 HUD 的唯一渲染依据（07 §5.2）。
+//! 会话快照类型：Rust 状态机 → 前端 HUD 的唯一渲染依据（06 §5.2）。
 
 use crate::error::ErrorCode;
 use serde::{Deserialize, Serialize};
 
-/// 会话模式：三大功能共享同一状态机（07 §5.2）。
+/// 会话模式：三大功能共享同一状态机（06 §5.2）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionMode {

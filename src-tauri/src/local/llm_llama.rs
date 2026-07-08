@@ -1,4 +1,4 @@
-//! 本地 LLM Provider · llama.cpp + Qwen3.5 GGUF（CP-8.5 / 03 §3.3 / ADR-20/22）。
+//! 本地 LLM Provider · llama.cpp + Qwen3.5 GGUF（03 §3.3 / ADR-20/22）。
 //!
 //! 实现同一 `LlmProvider` trait（流式 delta 与云端一致）：推理在专属线程逐
 //! token 生成，经 tokio mpsc channel 转成 BoxStream。上下文 4K（整理/翻译都是

@@ -1,4 +1,4 @@
-//! 全部配置结构体 + 默认值 + schema_version（07 §4 settings/schema.rs）。
+//! 全部配置结构体 + 默认值 + schema_version（06 §4 settings/schema.rs）。
 //! settings.json 形态见 03 §6；本文件是其唯一 Rust 定义。
 
 use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
@@ -250,7 +250,7 @@ impl Default for HistorySettings {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct DictionarySettings {
-    /// 手动维护的高频词/专有名词表（F-10 v1：不区分来源/分类）。
+    /// 手动维护的高频词/专有名词表（F-10：不区分来源/分类）。
     pub terms: Vec<String>,
 }
 

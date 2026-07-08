@@ -1,4 +1,4 @@
-//! 全局快捷键：trait HotkeyBackend + 纯逻辑判定器（07 §7.3）。
+//! 全局快捷键：trait HotkeyBackend + 纯逻辑判定器（06 §7.3）。
 //!
 //! rdev 线程只做「原始键事件 → Detector 判定 → mpsc 发送语义事件」；
 //! 长按/短按与会话语义由 orchestrator 状态机处理，本层只负责：

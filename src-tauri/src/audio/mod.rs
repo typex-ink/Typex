@@ -1,4 +1,4 @@
-//! AudioService：start/stop/cancel，输出 Recording（07 §4 audio/）。
+//! AudioService：start/stop/cancel，输出 Recording（06 §4 audio/）。
 pub mod chime;
 pub mod pipeline;
 pub mod recorder;
@@ -65,7 +65,7 @@ impl Default for AudioService {
     }
 }
 
-/// 枚举输入设备名列表（设置页麦克风下拉，CP-6.4）。
+/// 枚举输入设备名列表（设置页麦克风下拉）。
 pub fn list_input_devices() -> Vec<String> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();

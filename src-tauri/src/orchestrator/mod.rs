@@ -1,4 +1,4 @@
-//! Orchestrator：唯一的业务流程所有者（07 §3）。
+//! Orchestrator：唯一的业务流程所有者（06 §3）。
 //! 状态机（session.rs 纯函数）+ 执行器（本文件）：Effect dispatch 到各 service。
 pub mod assistant;
 pub mod pipeline;
@@ -34,7 +34,7 @@ pub struct Orchestrator {
     pub assistant: Option<Arc<assistant::AssistantService>>,
     /// 助手键按下时读到的选中文本（录音开始时读取，处理阶段消费）
     pub pending_selection: Arc<std::sync::Mutex<Option<String>>>,
-    /// 选区读取是否失败（读取报错 ≠ 无选区；弹窗降级提示用，CP-6.13）
+    /// 选区读取是否失败（读取报错 ≠ 无选区；弹窗降级提示用）
     pub selection_read_failed: Arc<std::sync::atomic::AtomicBool>,
     /// 选中文本读取器
     pub selection: Arc<dyn crate::selection::SelectionReader>,
@@ -42,7 +42,7 @@ pub struct Orchestrator {
     pub history: Option<Arc<crate::history::HistoryService>>,
 }
 
-/// HUD/前端发来的会话控制命令（07 §10.1 会话组）。
+/// HUD/前端发来的会话控制命令（06 §10.1 会话组）。
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionCommand {
@@ -182,7 +182,7 @@ impl Orchestrator {
                 exec.recording_started = Some(Instant::now());
                 // 采样注入目标应用（02 F-7：录音开始时的前台应用即注入目标）
                 exec.target_app = crate::platform::focus::frontmost_app_name();
-                // 助手模式的选区读取推迟到触发键松开（CallStt 时并发执行，07 §7.6-5）：
+                // 助手模式的选区读取推迟到触发键松开（CallStt 时并发执行，06 §7.6-5）：
                 // 剪贴板降级的模拟 Cmd+C 在按住期间会触发组合键让路、误取消本会话
                 if exec.state.mode() == Some(SessionMode::Assistant) {
                     *self.pending_selection.lock().unwrap() = None;
@@ -232,7 +232,7 @@ impl Orchestrator {
                     });
                     return;
                 }
-                // 助手模式：触发键已松开，此刻读选区（07 §7.6-5——按住期间读会被
+                // 助手模式：触发键已松开，此刻读选区（06 §7.6-5——按住期间读会被
                 // 剪贴板降级的模拟 Cmd+C 触发组合键让路）；与 STT 并发，不增加延迟。
                 // 重试路径（!was_recording）沿用首次读到的选区。
                 let assistant_read = (was_recording

@@ -1,4 +1,4 @@
-// 契约测试（08 §5.2）：Rust 全部 ErrorCode 在 zh-CN 与 en 中都有文案。
+// 契约测试（07 §5.2）：Rust 全部 ErrorCode 在 zh-CN 与 en 中都有文案。
 // 这是编译期抓不到的缝隙——Rust 加错误码忘配文案时此测试红。
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
