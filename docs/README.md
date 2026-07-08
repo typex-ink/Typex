@@ -13,7 +13,7 @@
 | [05 UX 规格](05-ux-spec.md) | 窗口、流程、HUD、快捷键、错误文案 |
 | [06 代码架构](06-code-architecture.md) | 技术选型、模块边界、IPC、平台实现、性能预算 |
 | [07 测试规范](07-testing.md) | 测试分层、场景清单、CI 门槛、人工回归口径 |
-| [08 决策清单](08-decisions.md) | 待决策项与 ADR 历史记录 |
+| [08 决策记录](08-decisions.md) | 已定决策与 ADR 历史记录 |
 | [09 发布人工回归清单](09-release-checklist.md) | 发版前人工参考执行的回归清单 |
 | [fixtures/](fixtures/) | 提示词与行为评测语料 |
 
@@ -24,7 +24,7 @@
 - UI 外观与 design tokens 以 [04](04-design-system.md) 为准，界面结构与交互以 [05](05-ux-spec.md) 为准。
 - 模块归属、IPC、平台实现与性能预算以 [06](06-code-architecture.md) 为准。
 - 测试要求以 [07](07-testing.md) 为准。
-- [08](08-decisions.md) 记录决策原因与历史。ADR 不覆盖当前规格；若旧 ADR 与当前章节冲突，以当前规格为准，并补充新的 ADR 说明变更原因。
+- [08](08-decisions.md) 只记录已定决策的原因与历史。ADR 不覆盖当前规格；若旧 ADR 与当前章节冲突，以当前规格为准，并补充新的 ADR 说明变更原因。
 - [09](09-release-checklist.md) 是人工回归参考，不是产品规格；发版时按当前功能状态维护并执行。
 
 ## 维护规则

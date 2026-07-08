@@ -237,7 +237,7 @@ pub enum SessionPhase {
                               注入目标应用
 ```
 
-- **除用户自己配置的端点外，无任何网络请求**（更新检查除外，可关）。无遥测（见 [D-11](08-decisions.md)）。
+- **除用户自己配置的端点外，无任何网络请求**（更新检查除外，可关）。无遥测（见 [ADR-5](08-decisions.md)）。
 - 音频不落盘；仅当转写失败等待重试时写入临时目录（内存优先，超大切片才落盘），成功或放弃后立即删除。
 - 剪贴板注入前保存原内容、注入后恢复；文档中明示「恢复仅支持文本/图片格式」的已知妥协。
 
@@ -413,7 +413,7 @@ src/
 |---|---|---|
 | 状态机单测 | `cargo test`（纯函数，无 IO） | §5.2 全部转移规则：长短按、组合键让路、重按忽略、失败重试、session_id 竞态 |
 | Provider 集成测 | `wiremock`（本地 mock HTTP） | 两种 wire 格式的请求构造/SSE 解析/错误分类/重试；火山 flash 的 header 判定 |
-| 整理提示词回归 | `docs/fixtures/denoise-cases.md` 驱动的**手动/半自动**评测脚本（`scripts/eval-denoise.ts`，可选真实 API key 运行） | 改口/语气词/格式指令样例集，防提示词回归 |
+| 整理提示词回归 | `docs/fixtures/denoise-cases.md` 驱动的手动/半自动评测 | 改口/语气词/格式指令样例集，防提示词回归；自动评测器必须复用运行时提示词，不维护单独提示词副本 |
 | 前端组件 | `vitest` + `@vue/test-utils`（IPC 层 mock bindings） | HotkeyRecorder、ProviderCard 表单、错误文案映射 |
 | 端到端 | 用**人工回归清单**（`docs/09-release-checklist.md`，按 02 章验收标准逐条 × 三平台） | 键盘监听/注入/权限这类系统能力自动化成本过高，不强上 E2E 框架 |
 | CI 门槛 | clippy `-D warnings`、`cargo test`、`vue-tsc`、vitest、bindings 新鲜度校验、hud 体积断言 | PR 必须绿 |

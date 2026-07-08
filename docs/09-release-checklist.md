@@ -28,7 +28,7 @@
 ## 3. F-2 翻译验收标准
 
 - [ ] 右 ⌘ + 右 ⌥ 组合触发翻译；录音中追加第二键无缝升级为翻译
-- [ ] 说中文出英文、说英文出中文（双向开）各 5 句抽测，无一句注入原文未翻译（全量 20+20 见 `pnpm eval:prompts translate`）
+- [ ] 说中文出英文、说英文出中文（双向开）各 5 句抽测，无一句注入原文未翻译；提示词改动时对照 `docs/fixtures/translate-cases.md` 扩大抽测
 - [ ] 关闭「双向翻译」后说英文 → 仍按 中→EN 方向输出（不再自动判向）
 - [ ] 松开到译文上屏 P50 < 2.5 s
 - [ ] 口述列表结构（「第一…第二…」）译文保留结构
@@ -89,7 +89,7 @@
 ## 10. 发布工程
 
 - [ ] `cargo test` / `pnpm test` / `clippy -D warnings` / `pnpm build` 全绿（CI 同步绿）
-- [ ] `pnpm eval:prompts` 全量通过率 ≥ 90%，报告归档
+- [ ] 如本次改动提示词：对照 `docs/fixtures/` 语料完成本地评测并记录结果
 - [ ] 版本号三处一致：`tauri.conf.json` / `Cargo.toml` / 关于页
 - [ ] tag 推送 → release 工作流出 dmg + updater 清单；签名/公证凭据就位后，签名/公证通过
 - [ ] 从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）
