@@ -97,7 +97,8 @@
       "proxy_manual": "手动",
       "proxy_direct": "直连",
       "update_channel": "更新通道",
-      "channel_stable": "稳定版"
+      "channel_stable": "稳定版",
+      "channel_nightly": "开发版（Nightly）"
     },
     "dictation": {
       "polish": "文本整理",
@@ -289,6 +290,7 @@
       "check_failed": "检查更新失败——请检查网络",
       "up_to_date": "已是最新版本",
       "install_failed": "下载安装失败——请稍后再试",
+      "open_link_failed": "打开链接失败——请稍后再试",
       "licenses": "开源许可"
     }
   },

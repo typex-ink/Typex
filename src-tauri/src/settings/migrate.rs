@@ -86,7 +86,7 @@ mod tests {
         });
 
         let migrated = migrate(value);
-        assert_eq!(migrated["schema_version"], 3);
+        assert_eq!(migrated["schema_version"], 4);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
         assert!(migrated["profiles"][0].get("slots").is_none());

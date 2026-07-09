@@ -174,16 +174,19 @@ pub fn run() {
             }
 
             // 自动更新（ADR-11：检查自动、安装需确认）——启动 10s 后后台检查一次
-            if s.general.check_updates && !cfg!(debug_assertions) {
+            if !cfg!(debug_assertions) {
                 let handle = app.handle().clone();
+                let settings_for_update = settings.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                    use tauri_plugin_updater::UpdaterExt;
                     use tauri_specta::Event;
-                    let Ok(updater) = handle.updater() else {
+                    let s = settings_for_update.get();
+                    if !s.general.check_updates {
                         return;
-                    };
-                    if let Ok(Some(u)) = updater.check().await {
+                    }
+                    if let Ok(Some(u)) =
+                        crate::app::update::check(&handle, s.general.update_channel).await
+                    {
                         tracing::info!("发现新版本: {}", u.version);
                         let _ = crate::app::events::UpdateAvailableEvent {
                             version: u.version.clone(),

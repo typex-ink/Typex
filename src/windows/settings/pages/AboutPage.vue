@@ -2,12 +2,15 @@
 // 关于页：图标 + logotype + 版本 + 检查更新（ADR-11）
 import { onMounted, onUnmounted, ref } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
 import { commands, events } from "@/ipc/bindings";
 
 const { t } = useI18n();
+const LICENSE_URL = "https://github.com/typex-ink/Typex/blob/master/LICENSE";
+const WEBSITE_URL = "https://typex.ink/";
 const checking = ref(false);
 const installing = ref(false);
 const status = ref("");
@@ -40,6 +43,15 @@ async function install() {
   }
 }
 
+async function openExternal(url: string) {
+  status.value = "";
+  try {
+    await openUrl(url);
+  } catch {
+    status.value = t("settings.about.open_link_failed");
+  }
+}
+
 const unlisteners: (() => void)[] = [];
 onMounted(async () => {
   appVersion.value = await getVersion().catch(() => "");
@@ -58,7 +70,8 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
     <AppIcon :size="88" />
     <div class="logotype">Typex</div>
     <p class="meta">
-      <template v-if="appVersion">v{{ appVersion }} · </template>GPL-3.0 · typex.ink<br />
+      <template v-if="appVersion">v{{ appVersion }} · </template>GPL-3.0 ·
+      <button class="meta-link" type="button" @click="openExternal(WEBSITE_URL)">typex.ink</button><br />
       {{ t("settings.about.privacy") }}
     </p>
     <div v-if="available" class="update-card">
@@ -72,7 +85,9 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
       <Button size="sm" :disabled="checking" @click="check">
         {{ checking ? t("settings.about.checking") : t("settings.about.check") }}
       </Button>
-      <Button variant="ghost" size="sm">{{ t("settings.about.licenses") }}</Button>
+      <Button variant="ghost" size="sm" @click="openExternal(LICENSE_URL)">
+        {{ t("settings.about.licenses") }}
+      </Button>
     </div>
     <p v-if="status" class="status">{{ status }}</p>
   </div>
@@ -100,6 +115,23 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
   font-size: 12px;
   color: var(--text-2);
   line-height: 1.6;
+}
+.meta-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.meta-link:hover {
+  color: var(--text-1);
+}
+.meta-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .actions {
   display: flex;

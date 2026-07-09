@@ -28,6 +28,10 @@ const proxyMode = useSetting(
   (s) => s.general.proxy_mode,
   (s, v) => (s.general.proxy_mode = v),
 );
+const updateChannel = useSetting(
+  (s) => s.general.update_channel,
+  (s, v) => (s.general.update_channel = v),
+);
 </script>
 
 <template>
@@ -70,7 +74,13 @@ const proxyMode = useSetting(
       />
     </FormRow>
     <FormRow :label="t('settings.general.update_channel')">
-      <Select model-value="stable" :options="[{ value: 'stable', label: t('settings.general.channel_stable') }]" />
+      <Select
+        v-model="updateChannel"
+        :options="[
+          { value: 'stable', label: t('settings.general.channel_stable') },
+          { value: 'nightly', label: t('settings.general.channel_nightly') },
+        ]"
+      />
     </FormRow>
   </div>
 </template>

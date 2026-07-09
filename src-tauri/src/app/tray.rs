@@ -191,13 +191,11 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 "update" => {
                     // 手动检查（ADR-11：安装需确认）：有新版本发事件 + 打开设置-关于页确认
                     let handle = app.clone();
+                    let settings = app.state::<Arc<SettingsService>>().inner().clone();
                     tauri::async_runtime::spawn(async move {
-                        use tauri_plugin_updater::UpdaterExt;
                         use tauri_specta::Event;
-                        let Ok(updater) = handle.updater() else {
-                            return;
-                        };
-                        match updater.check().await {
+                        let channel = settings.get().general.update_channel;
+                        match crate::app::update::check(&handle, channel).await {
                             Ok(Some(u)) => {
                                 let _ = crate::app::events::UpdateAvailableEvent {
                                     version: u.version.clone(),

@@ -75,7 +75,7 @@
 ## 8. 更新与迁移
 
 - [ ] 从上一版本覆盖安装：settings.json 保留、密钥仍可用、历史库完好
-- [ ] 「检查更新」：最新版报「已是最新」；旧版本装机检查出新版本 → 确认卡片 → 下载安装 → 自动重启为新版
+- [ ] 「检查更新」：stable 通道只检查正式 release，nightly 通道检查最新 nightly build；最新版报「已是最新」；旧版本装机检查出新版本 → 确认卡片 → 下载安装 → 自动重启为新版
 - [ ] 启动 10s 后自动检查不阻塞主流程（关闭「自动检查」后不发请求）
 
 ## 9. 资源与隐私
@@ -91,5 +91,5 @@
 - [ ] `cargo test` / `pnpm test` / `clippy -D warnings` / `pnpm build` 全绿（CI 同步绿）
 - [ ] 如本次改动提示词：对照 `docs/fixtures/` 语料完成本地评测并记录结果
 - [ ] 版本号符合 [10 版本策略](10-versioning.md)：`package.json` / `tauri.conf.json` / `Cargo.toml` / 关于页 / tag 一致，正式版不带 `-dev`
-- [ ] tag 推送 → release 工作流产出当前已启用平台的资产 + 聚合 SHA256/manifest；现阶段至少包含 macOS universal dmg，updater 清单等 CP-5.4 密钥与公钥就位后启用
+- [ ] tag 推送 → release 工作流产出当前已启用平台的资产 + 聚合 SHA256/manifest；现阶段至少包含 macOS universal dmg、Tauri updater `.app.tar.gz`、签名与 `latest.json`
 - [ ] 签名/公证启用后：从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）

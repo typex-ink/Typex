@@ -97,48 +97,43 @@ jobs:
         run: pnpm gen:ipc
 
       - name: Build macOS app
-        run: >
-          pnpm tauri build
-          --target universal-apple-darwin
-          --bundles app
-          --no-sign
-          --ci
-          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          BUILD_CONFIG="$(node <<'NODE'
+          const config = { bundle: { createUpdaterArtifacts: false } };
+          if (process.env.TAURI_UPDATER_PUBKEY) {
+            config.plugins = { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.trim() } };
+          }
+          process.stdout.write(JSON.stringify(config));
+          NODE
+          )"
+          pnpm tauri build \
+            --target universal-apple-darwin \
+            --bundles app \
+            --no-sign \
+            --ci \
+            --config "$BUILD_CONFIG"
 
       - name: Bundle local runtime dylibs
         run: scripts/bundle-macos-runtime-dylibs.sh
 
       - name: Prepare macOS release assets
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          ASSET_DIR="release-assets/${PLATFORM_ID}"
-          mkdir -p "$ASSET_DIR"
-
-          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "No Typex.app found under src-tauri/target"
-            find src-tauri/target -path '*/bundle/*' -type d | sort
-            exit 1
-          fi
-
-          rm -rf dmg-root
-          mkdir -p dmg-root
-          ditto "$APP_PATH" dmg-root/Typex.app
-          ln -s /Applications dmg-root/Applications
-          DMG_NAME="typex-${PLATFORM_ID}-${VERSION}.dmg"
-          hdiutil create \
-            -volname Typex \
-            -srcfolder dmg-root \
-            -ov \
-            -format UDZO \
-            "$ASSET_DIR/$DMG_NAME"
-
-          cat > "$ASSET_DIR/${PLATFORM_ID}.json" <<EOF
-          {
-            "platform": "${PLATFORM_ID}",
-            "assets": ["${DMG_NAME}"]
-          }
-          EOF
+          export BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          export ASSET_DIR="release-assets/${PLATFORM_ID}"
+          export DMG_NAME="typex-${PLATFORM_ID}-${VERSION}.dmg"
+          export RELEASE_TAG="${GITHUB_REF_NAME}"
+          export UPDATER_VERSION="${VERSION}"
+          export UPDATER_ARCHIVE_NAME="typex-${PLATFORM_ID}-${VERSION}.app.tar.gz"
+          export UPDATE_NOTES="Typex ${GITHUB_REF_NAME}
+          Commit: ${GITHUB_SHA}"
+          scripts/prepare-macos-assets.sh
 
       - name: Upload macOS release assets
         uses: actions/upload-artifact@v4
@@ -182,7 +177,9 @@ jobs:
           const fs = require("fs");
           const dir = "release-assets";
           const files = fs.readdirSync(dir).filter((file) => fs.statSync(`${dir}/${file}`).isFile());
-          const platformFiles = files.filter((file) => file.endsWith(".json") && file !== "release.json").sort();
+          const platformFiles = files
+            .filter((file) => file.endsWith(".json") && file !== "release.json" && file !== "latest.json")
+            .sort();
           const platformAssets = platformFiles.map((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")));
           const assetFiles = files
             .filter((file) => !platformFiles.includes(file) && file !== "release.json")
@@ -200,7 +197,7 @@ jobs:
           fs.writeFileSync(`${dir}/release.json`, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
 
-          find release-assets -maxdepth 1 -type f -name '*.json' ! -name 'release.json' -delete
+          find release-assets -maxdepth 1 -type f -name '*.json' ! -name 'release.json' ! -name 'latest.json' -delete
 
           PLATFORMS="$(node -e "const fs = require('fs'); const m = JSON.parse(fs.readFileSync('release-assets/release.json', 'utf8')); console.log(m.platforms.join(', '));")"
           cat > release-notes.md <<EOF

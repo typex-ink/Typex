@@ -51,47 +51,42 @@ jobs:
         run: pnpm gen:ipc
 
       - name: Build macOS app
-        run: >
-          pnpm tauri build
-          --target universal-apple-darwin
-          --bundles app
-          --no-sign
-          --ci
-          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          BUILD_CONFIG="$(node <<'NODE'
+          const config = { bundle: { createUpdaterArtifacts: false } };
+          if (process.env.TAURI_UPDATER_PUBKEY) {
+            config.plugins = { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY.trim() } };
+          }
+          process.stdout.write(JSON.stringify(config));
+          NODE
+          )"
+          pnpm tauri build \
+            --target universal-apple-darwin \
+            --bundles app \
+            --no-sign \
+            --ci \
+            --config "$BUILD_CONFIG"
 
       - name: Bundle local runtime dylibs
         run: scripts/bundle-macos-runtime-dylibs.sh
 
       - name: Prepare macOS nightly assets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
-          ASSET_DIR="nightly-assets/${PLATFORM_ID}"
-          mkdir -p "$ASSET_DIR"
-
-          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "No Typex.app found under src-tauri/target"
-            find src-tauri/target -path '*/bundle/*' -type d | sort
-            exit 1
-          fi
-
-          rm -rf dmg-root
-          mkdir -p dmg-root
-          ditto "$APP_PATH" dmg-root/Typex.app
-          ln -s /Applications dmg-root/Applications
-          DMG_NAME="typex-${PLATFORM_ID}-nightly.dmg"
-          hdiutil create \
-            -volname Typex \
-            -srcfolder dmg-root \
-            -ov \
-            -format UDZO \
-            "$ASSET_DIR/$DMG_NAME"
-
-          cat > "$ASSET_DIR/${PLATFORM_ID}.json" <<EOF
-          {
-            "platform": "${PLATFORM_ID}",
-            "assets": ["${DMG_NAME}"]
-          }
-          EOF
+          export BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          VERSION="$(node -p "require('./package.json').version")"
+          export ASSET_DIR="nightly-assets/${PLATFORM_ID}"
+          export DMG_NAME="typex-${PLATFORM_ID}-nightly.dmg"
+          export RELEASE_TAG="nightly"
+          export UPDATER_VERSION="${VERSION}"
+          export UPDATER_ARCHIVE_NAME="typex-${PLATFORM_ID}-nightly.app.tar.gz"
+          export UPDATE_NOTES="Nightly ${GITHUB_SHA}"
+          scripts/prepare-macos-assets.sh
 
       - name: Upload macOS nightly assets
         uses: actions/upload-artifact@v4
@@ -134,7 +129,9 @@ jobs:
           const fs = require("fs");
           const dir = "nightly-assets";
           const files = fs.readdirSync(dir).filter((file) => fs.statSync(`${dir}/${file}`).isFile());
-          const platformFiles = files.filter((file) => file.endsWith(".json") && file !== "nightly.json").sort();
+          const platformFiles = files
+            .filter((file) => file.endsWith(".json") && file !== "nightly.json" && file !== "latest.json")
+            .sort();
           const platformAssets = platformFiles.map((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")));
           const assetFiles = files
             .filter((file) => !platformFiles.includes(file) && file !== "nightly.json")
@@ -152,7 +149,7 @@ jobs:
           fs.writeFileSync(`${dir}/nightly.json`, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
 
-          find nightly-assets -maxdepth 1 -type f -name '*.json' ! -name 'nightly.json' -delete
+          find nightly-assets -maxdepth 1 -type f -name '*.json' ! -name 'nightly.json' ! -name 'latest.json' -delete
 
           PLATFORMS="$(node -e "const fs = require('fs'); const m = JSON.parse(fs.readFileSync('nightly-assets/nightly.json', 'utf8')); console.log(m.platforms.join(', '));")"
           cat > nightly-notes.md <<EOF
@@ -176,10 +173,13 @@ jobs:
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly \
               --title "Nightly Build" \
+              --prerelease \
+              --latest=false \
               --notes-file nightly-notes.md
           else
             gh release create nightly \
               --title "Nightly Build" \
+              --prerelease \
               --latest=false \
               --verify-tag \
               --notes-file nightly-notes.md
@@ -187,7 +187,7 @@ jobs:
 
           RELEASE_ID="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" --jq '.id')"
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
-            -F prerelease=false \
+            -F prerelease=true \
             -f make_latest=false
 
           gh release upload nightly nightly-assets/* --clobber

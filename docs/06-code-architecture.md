@@ -349,7 +349,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
 | 历史 | `query_history { search, offset }` / `get_stats` / `delete_history_item` / `clear_history` | `get_stats` 返回主页统计（总时长/字数/节省时间/语速，本地聚合） |
-| 系统 | `get_permission_status` / `open_permission_settings { kind }` / `get_diagnostics` / `set_paused(bool)` / `copy_last_result` / `check_update` |  |
+| 系统 | `get_permission_status` / `open_permission_settings { kind }` / `get_diagnostics` / `set_paused(bool)` / `copy_last_result` / `check_update` | `check_update` 按 `settings.general.update_channel` 选择 stable/nightly 更新源 |
 
 ### 10.2 Events（Rust → 前端）
 
@@ -427,7 +427,7 @@ src/
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **CI**：GitHub Actions 三平台矩阵（macOS universal、Windows x64、Linux x64 AppImage+deb+rpm）；`cargo clippy -D warnings`、`cargo test`、前端 `vue-tsc --noEmit` + `vitest`。
-- **发布**：tag → 各平台 build job 产出平台资产 artifact → publish job 聚合 SHA256/manifest 并上传 GitHub Release 草稿；当前启用 macOS universal（补齐本地模型 runtime dylib 后手工打 DMG），Windows/Linux 适配时新增平台 job 接入同一聚合发布口。updater 清单、签名与公证在 CP-5.4 密钥和公钥就位后启用（[ADR-11](08-decisions.md)）。
+- **发布**：tag → 各平台 build job 产出平台资产 artifact → publish job 聚合 SHA256/manifest 并上传 GitHub Release 草稿；当前启用 macOS universal（补齐本地模型 runtime dylib 后手工打 DMG，并生成 Tauri updater `.app.tar.gz`、签名和 `latest.json`），Windows/Linux 适配时新增平台 job 接入同一聚合发布口。更新通道分 stable/nightly：stable 只检查正式 release；nightly 追最新 nightly build。macOS 公证仍待 CP-5.4 启用（[ADR-11](08-decisions.md)）。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。
 

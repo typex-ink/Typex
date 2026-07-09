@@ -330,12 +330,14 @@ F-3 不引入新的 Provider 类型：
 
 ```jsonc
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
   "general": {
-    "model_download_source": "auto" // auto | huggingface | modelscope；仅影响本地模型下载
+    "model_download_source": "auto", // auto | huggingface | modelscope；仅影响本地模型下载
+    "check_updates": true,
+    "update_channel": "stable" // stable = 正式版 release；nightly = 最新 nightly build
   },
   "slots": {
     "stt":       { "active_profile": "groq-fast" },

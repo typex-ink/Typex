@@ -5,7 +5,7 @@ use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 pub const DICTIONARY_MAX_TERMS: usize = 100;
 pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
@@ -89,6 +89,14 @@ pub enum ProxyMode {
     Direct,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateChannel {
+    #[default]
+    Stable,
+    Nightly,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -104,6 +112,7 @@ pub struct GeneralSettings {
     /// 本地模型下载源（模型管理页底部设置）。
     pub model_download_source: ModelDownloadSource,
     pub check_updates: bool,
+    pub update_channel: UpdateChannel,
 }
 
 impl Default for GeneralSettings {
@@ -118,6 +127,7 @@ impl Default for GeneralSettings {
             proxy_url: String::new(),
             model_download_source: ModelDownloadSource::Auto,
             check_updates: true,
+            update_channel: UpdateChannel::Stable,
         }
     }
 }
@@ -344,9 +354,10 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 3, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 4, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 3);
+        assert_eq!(s.schema_version, 4);
+        assert_eq!(s.general.update_channel, UpdateChannel::Stable);
     }
 
     #[test]

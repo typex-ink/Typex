@@ -29,7 +29,7 @@ vi.mock("@/ipc/bindings", () => ({
 
 function makeSettings(): Settings {
   return {
-    schema_version: 3,
+    schema_version: 4,
     general: {
       theme: "system",
       language: "zh_cn",
@@ -40,6 +40,7 @@ function makeSettings(): Settings {
       proxy_url: "",
       model_download_source: "auto",
       check_updates: true,
+      update_channel: "stable",
     },
     dictation: {
       polish_enabled: true,

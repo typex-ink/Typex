@@ -394,36 +394,31 @@ pub struct UpdateInfo {
 /// 检查更新：有新版本返回 Some（不下载）；安装需用户确认后调 install_update。
 #[tauri::command]
 #[specta::specta]
-pub async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, TypexError> {
-    use tauri_plugin_updater::UpdaterExt;
-    let updater = app
-        .updater()
-        .map_err(|e| TypexError::new(ErrorCode::NotConfigured, format!("updater 未配置: {e}")))?;
-    match updater.check().await {
+pub async fn check_update(
+    app: tauri::AppHandle,
+    settings: SettingsState<'_>,
+) -> Result<Option<UpdateInfo>, TypexError> {
+    let channel = settings.get().general.update_channel;
+    match crate::app::update::check(&app, channel).await {
         Ok(Some(u)) => Ok(Some(UpdateInfo {
             version: u.version.clone(),
             notes: u.body.clone().unwrap_or_default(),
         })),
         Ok(None) => Ok(None),
-        Err(e) => Err(TypexError::new(
-            ErrorCode::NetworkError,
-            format!("检查更新失败: {e}"),
-        )),
+        Err(e) => Err(e),
     }
 }
 
 /// 下载并安装更新（用户已确认，ADR-11：安装需确认）；成功后重启应用。
 #[tauri::command]
 #[specta::specta]
-pub async fn install_update(app: tauri::AppHandle) -> Result<(), TypexError> {
-    use tauri_plugin_updater::UpdaterExt;
-    let updater = app
-        .updater()
-        .map_err(|e| TypexError::new(ErrorCode::NotConfigured, format!("updater 未配置: {e}")))?;
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| TypexError::new(ErrorCode::NetworkError, format!("检查更新失败: {e}")))?
+pub async fn install_update(
+    app: tauri::AppHandle,
+    settings: SettingsState<'_>,
+) -> Result<(), TypexError> {
+    let channel = settings.get().general.update_channel;
+    let update = crate::app::update::check(&app, channel)
+        .await?
         .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "当前已是最新版本"))?;
     update
         .download_and_install(|_, _| {}, || {})

@@ -58,7 +58,7 @@ Typex 使用 SemVer：`MAJOR.MINOR.PATCH`。
 2. 执行发布前检查：`cargo fmt`、`cargo clippy`、`cargo test`、`pnpm build`、`pnpm test`，并按 [09 发布人工回归清单](09-release-checklist.md) 走查关键路径。
 3. 确认 tag、三处版本字段和关于页显示一致。
 4. 创建并推送正式版 tag：`vX.Y.Z`。
-5. GitHub Actions 的 Release workflow 构建草稿 release；平台 build job 产出平台资产，publish job 聚合上传。当前启用 macOS universal DMG，后续 Windows/Linux 适配时接入同一聚合发布流程；更新器产物等 CP-5.4 密钥与公钥就位后启用。
+5. GitHub Actions 的 Release workflow 构建草稿 release；平台 build job 产出平台资产，publish job 聚合上传。当前启用 macOS universal DMG 与 Tauri updater 资产，后续 Windows/Linux 适配时接入同一聚合发布流程。
 6. 发版完成后，把主干版本号推进到下一目标版本的 `-dev`。
 
 ## 6. CI 约束

@@ -97,7 +97,8 @@
       "proxy_manual": "Manual",
       "proxy_direct": "Direct",
       "update_channel": "Update channel",
-      "channel_stable": "Stable"
+      "channel_stable": "Stable",
+      "channel_nightly": "Nightly"
     },
     "dictation": {
       "polish": "Text cleanup",
@@ -289,6 +290,7 @@
       "check_failed": "Update check failed — check your network",
       "up_to_date": "You're up to date",
       "install_failed": "Download failed — try again later",
+      "open_link_failed": "Failed to open link — try again later",
       "licenses": "Open-source licenses"
     }
   },
