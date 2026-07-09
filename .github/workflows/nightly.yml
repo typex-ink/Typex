@@ -152,15 +152,11 @@ jobs:
           EOF
 
           cat > nightly-notes.md <<EOF
-          Typex nightly build.
+          This release is updated automatically on every push to the main development branch.
 
           - Commit: \`${GITHUB_SHA}\`
           - Branch: \`${GITHUB_REF_NAME}\`
           - Built at: \`${BUILD_TIME}\`
-          - Platform: macOS universal DMG only
-          - Signing: ad-hoc signed, not Apple-notarized
-
-          This release is updated automatically on every push to the main development branch.
           EOF
 
       - name: Publish nightly release
@@ -174,11 +170,11 @@ jobs:
 
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly \
-              --title "Typex Nightly" \
+              --title "Nightly Build" \
               --notes-file nightly-notes.md
           else
             gh release create nightly \
-              --title "Typex Nightly" \
+              --title "Nightly Build" \
               --latest=false \
               --verify-tag \
               --notes-file nightly-notes.md
