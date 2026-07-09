@@ -7,19 +7,69 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-14 # Apple Silicon + universal
-            args: "--target universal-apple-darwin"
-          - platform: windows-latest
-            args: ""
-          - platform: ubuntu-22.04
-            args: ""
-    runs-on: ${{ matrix.platform }}
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Validate tag and version fields
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH, got: $TAG"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          TAURI_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          CARGO_VERSION="$(awk -F ' = ' '/^version = / { gsub(/"/, "", $2); print $2; exit }' src-tauri/Cargo.toml)"
+
+          if [[ "$VERSION" == *-dev ]]; then
+            echo "Formal release version must not include -dev: $VERSION"
+            exit 1
+          fi
+
+          for item in \
+            "package.json:$PACKAGE_VERSION" \
+            "src-tauri/tauri.conf.json:$TAURI_VERSION" \
+            "src-tauri/Cargo.toml:$CARGO_VERSION"
+          do
+            file="${item%%:*}"
+            value="${item#*:}"
+            if [[ "$value" != "$VERSION" ]]; then
+              echo "$file version ($value) does not match tag version ($VERSION)"
+              exit 1
+            fi
+          done
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # Add build-windows/build-linux jobs next to this one as platform support lands.
+  # Each platform job should upload a release-assets-<platform> artifact; publish
+  # consumes those artifacts without caring which platform produced them.
+  build-macos:
+    name: Build macOS universal
+    needs: validate
+    runs-on: macos-14
+    env:
+      PLATFORM_ID: macos-universal
     steps:
       - uses: actions/checkout@v7
 
@@ -34,33 +84,149 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf libasound2-dev
-
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
-      - name: Build & Release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signing credentials (CP-5.4, effective after the repository owner configures Secrets):
-          # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
-          # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
-          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
+      - name: Generate IPC bindings
+        run: pnpm gen:ipc
+
+      - name: Build macOS app
+        run: >
+          pnpm tauri build
+          --target universal-apple-darwin
+          --bundles app
+          --no-sign
+          --ci
+          --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Bundle local runtime dylibs
+        run: scripts/bundle-macos-runtime-dylibs.sh
+
+      - name: Prepare macOS release assets
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          ASSET_DIR="release-assets/${PLATFORM_ID}"
+          mkdir -p "$ASSET_DIR"
+
+          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No Typex.app found under src-tauri/target"
+            find src-tauri/target -path '*/bundle/*' -type d | sort
+            exit 1
+          fi
+
+          rm -rf dmg-root
+          mkdir -p dmg-root
+          ditto "$APP_PATH" dmg-root/Typex.app
+          ln -s /Applications dmg-root/Applications
+          DMG_NAME="typex-${PLATFORM_ID}-${VERSION}.dmg"
+          hdiutil create \
+            -volname Typex \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            "$ASSET_DIR/$DMG_NAME"
+
+          cat > "$ASSET_DIR/${PLATFORM_ID}.json" <<EOF
+          {
+            "platform": "${PLATFORM_ID}",
+            "assets": ["${DMG_NAME}"]
+          }
+          EOF
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Typex ${{ github.ref_name }}"
-          releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          name: release-assets-${{ env.PLATFORM_ID }}
+          path: release-assets/${{ env.PLATFORM_ID }}/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish draft release
+    needs:
+      - validate
+      - build-macos
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download platform release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: release-assets
+          merge-multiple: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Prepare aggregate release metadata
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          export BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          cd release-assets
+          : > SHA256SUMS.txt
+          while IFS= read -r -d '' file; do
+            sha256sum "$file" >> SHA256SUMS.txt
+          done < <(find . -maxdepth 1 -type f ! -name '*.json' ! -name 'SHA256SUMS.txt' -print0 | sort -z)
+          cd ..
+
+          node <<'NODE'
+          const fs = require("fs");
+          const dir = "release-assets";
+          const files = fs.readdirSync(dir).filter((file) => fs.statSync(`${dir}/${file}`).isFile());
+          const platformFiles = files.filter((file) => file.endsWith(".json") && file !== "release.json").sort();
+          const platformAssets = platformFiles.map((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")));
+          const assetFiles = files
+            .filter((file) => !platformFiles.includes(file) && file !== "release.json")
+            .sort();
+          const metadata = {
+            tag: process.env.GITHUB_REF_NAME,
+            version: process.env.VERSION,
+            commit: process.env.GITHUB_SHA,
+            workflow_run: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            built_at: process.env.BUILD_TIME,
+            platforms: platformAssets.map((item) => item.platform),
+            assets: [...assetFiles, "release.json"],
+            platform_assets: platformAssets,
+          };
+          fs.writeFileSync(`${dir}/release.json`, `${JSON.stringify(metadata, null, 2)}\n`);
+          NODE
+
+          find release-assets -maxdepth 1 -type f -name '*.json' ! -name 'release.json' -delete
+
+          PLATFORMS="$(node -e "const fs = require('fs'); const m = JSON.parse(fs.readFileSync('release-assets/release.json', 'utf8')); console.log(m.platforms.join(', '));")"
+          cat > release-notes.md <<EOF
+          Typex ${GITHUB_REF_NAME}
+
+          - Commit: \`${GITHUB_SHA}\`
+          - Built at: \`${BUILD_TIME}\`
+          - Platforms: ${PLATFORMS}
+          EOF
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "Typex $GITHUB_REF_NAME" \
+              --notes-file release-notes.md \
+              --draft=true \
+              --prerelease=false
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Typex $GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --notes-file release-notes.md
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber

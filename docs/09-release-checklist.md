@@ -90,6 +90,6 @@
 
 - [ ] `cargo test` / `pnpm test` / `clippy -D warnings` / `pnpm build` 全绿（CI 同步绿）
 - [ ] 如本次改动提示词：对照 `docs/fixtures/` 语料完成本地评测并记录结果
-- [ ] 版本号三处一致：`tauri.conf.json` / `Cargo.toml` / 关于页
-- [ ] tag 推送 → release 工作流出 dmg + updater 清单；签名/公证凭据就位后，签名/公证通过
-- [ ] 从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）
+- [ ] 版本号符合 [10 版本策略](10-versioning.md)：`package.json` / `tauri.conf.json` / `Cargo.toml` / 关于页 / tag 一致，正式版不带 `-dev`
+- [ ] tag 推送 → release 工作流产出当前已启用平台的资产 + 聚合 SHA256/manifest；现阶段至少包含 macOS universal dmg，updater 清单等 CP-5.4 密钥与公钥就位后启用
+- [ ] 签名/公证启用后：从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）

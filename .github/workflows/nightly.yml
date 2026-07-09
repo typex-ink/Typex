@@ -16,9 +16,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  macos:
-    name: macOS universal
+  # Add build-windows/build-linux jobs next to this one as platform support lands.
+  # Each platform job should upload a nightly-assets-<platform> artifact; publish
+  # consumes those artifacts without caring which platform produced them.
+  build-macos:
+    name: Build macOS universal
     runs-on: macos-14
+    env:
+      PLATFORM_ID: macos-universal
     steps:
       - uses: actions/checkout@v7
 
@@ -55,68 +60,12 @@ jobs:
           --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Bundle local runtime dylibs
+        run: scripts/bundle-macos-runtime-dylibs.sh
+
+      - name: Prepare macOS nightly assets
         run: |
-          APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "No Typex.app found under src-tauri/target"
-            find src-tauri/target -path '*/bundle/*' -type d | sort
-            exit 1
-          fi
-
-          FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
-          mkdir -p "$FRAMEWORKS_DIR"
-
-          copy_universal_dylib() {
-            name="$1"
-            dest="$FRAMEWORKS_DIR/$name"
-            universal_src=""
-            arm64_src=""
-            x86_64_src=""
-
-            while IFS= read -r src; do
-              archs="$(lipo -archs "$src" 2>/dev/null || true)"
-              if echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64; then
-                universal_src="$src"
-                break
-              fi
-              if echo "$archs" | grep -qw arm64 && [ -z "$arm64_src" ]; then
-                arm64_src="$src"
-              fi
-              if echo "$archs" | grep -qw x86_64 && [ -z "$x86_64_src" ]; then
-                x86_64_src="$src"
-              fi
-            done <<EOF
-          $(find src-tauri/target -name "$name" -type f ! -path '*.dSYM/*' | sort)
-          EOF
-
-            if [ -n "$universal_src" ]; then
-              cp "$universal_src" "$dest"
-            elif [ -n "$arm64_src" ] && [ -n "$x86_64_src" ]; then
-              lipo -create "$arm64_src" "$x86_64_src" -output "$dest"
-            else
-              echo "Missing runtime dylib: $name"
-              echo "arm64 source: ${arm64_src:-<none>}"
-              echo "x86_64 source: ${x86_64_src:-<none>}"
-              exit 1
-            fi
-            chmod 755 "$dest"
-            lipo -archs "$dest"
-          }
-
-          copy_universal_dylib libonnxruntime.1.17.1.dylib
-          copy_universal_dylib libsherpa-onnx-c-api.dylib
-
-          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_PATH/Contents/MacOS/typex" 2>/dev/null || true
-          install_name_tool -add_rpath "@executable_path/../Frameworks" "$FRAMEWORKS_DIR/libsherpa-onnx-c-api.dylib" 2>/dev/null || true
-          codesign --force --deep --sign - --entitlements src-tauri/Entitlements.plist "$APP_PATH"
-
-          otool -L "$APP_PATH/Contents/MacOS/typex"
-          test -f "$FRAMEWORKS_DIR/libonnxruntime.1.17.1.dylib"
-          test -f "$FRAMEWORKS_DIR/libsherpa-onnx-c-api.dylib"
-
-      - name: Prepare nightly assets
-        run: |
-          mkdir -p nightly-assets
+          ASSET_DIR="nightly-assets/${PLATFORM_ID}"
+          mkdir -p "$ASSET_DIR"
 
           APP_PATH="$(find src-tauri/target -path '*/bundle/macos/Typex.app' -type d | sort | head -n 1)"
           if [ -z "$APP_PATH" ]; then
@@ -129,34 +78,90 @@ jobs:
           mkdir -p dmg-root
           ditto "$APP_PATH" dmg-root/Typex.app
           ln -s /Applications dmg-root/Applications
+          DMG_NAME="typex-${PLATFORM_ID}-nightly.dmg"
           hdiutil create \
             -volname Typex \
             -srcfolder dmg-root \
             -ov \
             -format UDZO \
-            nightly-assets/typex-macos-nightly.dmg
+            "$ASSET_DIR/$DMG_NAME"
 
-          shasum -a 256 nightly-assets/typex-macos-nightly.dmg > nightly-assets/SHA256SUMS.txt
-
-          BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          cat > nightly-assets/nightly.json <<EOF
+          cat > "$ASSET_DIR/${PLATFORM_ID}.json" <<EOF
           {
-            "tag": "nightly",
-            "commit": "${GITHUB_SHA}",
-            "branch": "${GITHUB_REF_NAME}",
-            "workflow_run": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
-            "built_at": "${BUILD_TIME}",
-            "platforms": ["macos-universal"],
-            "assets": ["typex-macos-nightly.dmg", "SHA256SUMS.txt", "nightly.json"]
+            "platform": "${PLATFORM_ID}",
+            "assets": ["${DMG_NAME}"]
           }
           EOF
 
+      - name: Upload macOS nightly assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-assets-${{ env.PLATFORM_ID }}
+          path: nightly-assets/${{ env.PLATFORM_ID }}/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish nightly release
+    needs:
+      - build-macos
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download platform nightly assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-assets-*
+          path: nightly-assets
+          merge-multiple: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Prepare aggregate nightly metadata
+        run: |
+          export BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          cd nightly-assets
+          : > SHA256SUMS.txt
+          while IFS= read -r -d '' file; do
+            sha256sum "$file" >> SHA256SUMS.txt
+          done < <(find . -maxdepth 1 -type f ! -name '*.json' ! -name 'SHA256SUMS.txt' -print0 | sort -z)
+          cd ..
+
+          node <<'NODE'
+          const fs = require("fs");
+          const dir = "nightly-assets";
+          const files = fs.readdirSync(dir).filter((file) => fs.statSync(`${dir}/${file}`).isFile());
+          const platformFiles = files.filter((file) => file.endsWith(".json") && file !== "nightly.json").sort();
+          const platformAssets = platformFiles.map((file) => JSON.parse(fs.readFileSync(`${dir}/${file}`, "utf8")));
+          const assetFiles = files
+            .filter((file) => !platformFiles.includes(file) && file !== "nightly.json")
+            .sort();
+          const metadata = {
+            tag: "nightly",
+            commit: process.env.GITHUB_SHA,
+            branch: process.env.GITHUB_REF_NAME,
+            workflow_run: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            built_at: process.env.BUILD_TIME,
+            platforms: platformAssets.map((item) => item.platform),
+            assets: [...assetFiles, "nightly.json"],
+            platform_assets: platformAssets,
+          };
+          fs.writeFileSync(`${dir}/nightly.json`, `${JSON.stringify(metadata, null, 2)}\n`);
+          NODE
+
+          find nightly-assets -maxdepth 1 -type f -name '*.json' ! -name 'nightly.json' -delete
+
+          PLATFORMS="$(node -e "const fs = require('fs'); const m = JSON.parse(fs.readFileSync('nightly-assets/nightly.json', 'utf8')); console.log(m.platforms.join(', '));")"
           cat > nightly-notes.md <<EOF
           This release is updated automatically on every push to the main development branch.
 
           - Commit: \`${GITHUB_SHA}\`
           - Branch: \`${GITHUB_REF_NAME}\`
           - Built at: \`${BUILD_TIME}\`
+          - Platforms: ${PLATFORMS}
           EOF
 
       - name: Publish nightly release

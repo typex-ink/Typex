@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 关于页：图标 + logotype + 版本 + 检查更新（ADR-11）
 import { onMounted, onUnmounted, ref } from "vue";
+import { getVersion } from "@tauri-apps/api/app";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
@@ -10,6 +11,7 @@ const { t } = useI18n();
 const checking = ref(false);
 const installing = ref(false);
 const status = ref("");
+const appVersion = ref("");
 const available = ref<{ version: string; notes: string } | null>(null);
 
 async function check() {
@@ -40,6 +42,7 @@ async function install() {
 
 const unlisteners: (() => void)[] = [];
 onMounted(async () => {
+  appVersion.value = await getVersion().catch(() => "");
   // 启动自动检查/托盘检查发现的新版本（ADR-11：安装需确认）
   unlisteners.push(
     await events.updateAvailableEvent.listen((e) => {
@@ -55,7 +58,7 @@ onUnmounted(() => unlisteners.forEach((u) => u()));
     <AppIcon :size="88" />
     <div class="logotype">Typex</div>
     <p class="meta">
-      v0.1.1 · GPL-3.0 · typex.ink<br />
+      <template v-if="appVersion">v{{ appVersion }} · </template>GPL-3.0 · typex.ink<br />
       {{ t("settings.about.privacy") }}
     </p>
     <div v-if="available" class="update-card">

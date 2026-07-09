@@ -427,7 +427,7 @@ src/
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **CI**：GitHub Actions 三平台矩阵（macOS universal、Windows x64、Linux x64 AppImage+deb+rpm）；`cargo clippy -D warnings`、`cargo test`、前端 `vue-tsc --noEmit` + `vitest`。
-- **发布**：tag → 自动构建 + updater 清单 + GitHub Release；签名/公证凭据经 GitHub Secrets（Apple Developer + SignPath，[ADR-11](08-decisions.md)）。
+- **发布**：tag → 各平台 build job 产出平台资产 artifact → publish job 聚合 SHA256/manifest 并上传 GitHub Release 草稿；当前启用 macOS universal（补齐本地模型 runtime dylib 后手工打 DMG），Windows/Linux 适配时新增平台 job 接入同一聚合发布口。updater 清单、签名与公证在 CP-5.4 密钥和公钥就位后启用（[ADR-11](08-decisions.md)）。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。
 
