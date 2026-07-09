@@ -18,10 +18,64 @@ fn native_theme(theme: &ThemeMode) -> Option<tauri::Theme> {
     }
 }
 
-fn current_native_theme<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Theme> {
+fn current_theme_mode<R: Runtime>(app: &AppHandle<R>) -> ThemeMode {
     app.try_state::<Arc<SettingsService>>()
-        .map(|settings| native_theme(&settings.get().general.theme))
-        .unwrap_or(None)
+        .map(|settings| settings.get().general.theme)
+        .unwrap_or_default()
+}
+
+fn current_native_theme<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Theme> {
+    native_theme(&current_theme_mode(app))
+}
+
+fn themed_app_url(path: &str, theme: &ThemeMode) -> WebviewUrl {
+    let theme = match theme {
+        ThemeMode::System => "system",
+        ThemeMode::Light => "light",
+        ThemeMode::Dark => "dark",
+    };
+    WebviewUrl::App(format!("{path}?theme={theme}").into())
+}
+
+fn chrome_window_background(theme: &ThemeMode) -> tauri::utils::config::Color {
+    match effective_theme(theme) {
+        // Keep startup background aligned with 04 §3 `--surface-2`.
+        tauri::Theme::Dark => tauri::utils::config::Color(0x23, 0x23, 0x27, 0xff),
+        tauri::Theme::Light => tauri::utils::config::Color(0xef, 0xef, 0xee, 0xff),
+        _ => tauri::utils::config::Color(0xef, 0xef, 0xee, 0xff),
+    }
+}
+
+fn effective_theme(theme: &ThemeMode) -> tauri::Theme {
+    native_theme(theme)
+        .or_else(current_system_theme)
+        .unwrap_or(tauri::Theme::Light)
+}
+
+#[cfg(target_os = "macos")]
+fn current_system_theme() -> Option<tauri::Theme> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{
+        NSAppearanceNameAccessibilityHighContrastDarkAqua, NSAppearanceNameDarkAqua, NSApplication,
+    };
+
+    let mtm = MainThreadMarker::new()?;
+    let app = NSApplication::sharedApplication(mtm);
+    let name = app.effectiveAppearance().name();
+    let dark = unsafe {
+        name.isEqualToString(NSAppearanceNameDarkAqua)
+            || name.isEqualToString(NSAppearanceNameAccessibilityHighContrastDarkAqua)
+    };
+    Some(if dark {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn current_system_theme() -> Option<tauri::Theme> {
+    None
 }
 
 /// 同步系统原生窗口外观；macOS 的标题栏/红绿灯区域不会跟随 WebView CSS 自动切换。
@@ -31,7 +85,65 @@ pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
     for label in ["hud", "home", "settings", "onboarding", "assistant"] {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.set_theme(theme);
+            #[cfg(target_os = "macos")]
+            apply_macos_window_chrome(label, &window, theme);
         }
+    }
+}
+
+/// 系统外观变化时刷新原生 chrome 背景；仅 `general.theme = system` 会收到该事件。
+#[cfg(target_os = "macos")]
+pub fn refresh_native_chrome<R: Runtime>(app: &AppHandle<R>) {
+    let mode = current_theme_mode(app);
+    for label in ["home", "settings"] {
+        if let Some(window) = app.get_webview_window(label) {
+            apply_macos_window_chrome(label, &window, native_theme(&mode));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_macos_window_chrome<R: Runtime>(
+    label: &str,
+    window: &tauri::WebviewWindow<R>,
+    fixed_theme: Option<tauri::Theme>,
+) {
+    if !matches!(label, "home" | "settings") {
+        return;
+    }
+    let _ = window.set_title_bar_style(tauri::TitleBarStyle::Transparent);
+    let effective_theme = fixed_theme
+        .or_else(|| window.theme().ok())
+        .unwrap_or(tauri::Theme::Light);
+    let (r, g, b) = match effective_theme {
+        // Keep AppKit titlebar background pinned to 04 §3 `--surface-2`.
+        tauri::Theme::Dark => (0x23, 0x23, 0x27),
+        tauri::Theme::Light => (0xef, 0xef, 0xee),
+        _ => (0xef, 0xef, 0xee),
+    };
+    set_macos_window_background(window, r, g, b);
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_window_background<R: Runtime>(window: &tauri::WebviewWindow<R>, r: u8, g: u8, b: u8) {
+    use objc2_app_kit::{NSColor, NSWindow};
+
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+    if ns_window.is_null() {
+        return;
+    }
+
+    unsafe {
+        let ns_window = &*ns_window.cast::<NSWindow>();
+        let color = NSColor::colorWithDeviceRed_green_blue_alpha(
+            f64::from(r) / 255.0,
+            f64::from(g) / 255.0,
+            f64::from(b) / 255.0,
+            1.0,
+        );
+        ns_window.setBackgroundColor(Some(&color));
     }
 }
 
@@ -120,16 +232,24 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(
+    let theme = current_theme_mode(app);
+    let builder = WebviewWindowBuilder::new(
         app,
         "settings",
-        WebviewUrl::App("src/windows/settings/index.html".into()),
+        themed_app_url("src/windows/settings/index.html", &theme),
     )
     .title("")
     .inner_size(720.0, 520.0)
     .resizable(false)
-    .theme(current_native_theme(app))
-    .build()?;
+    .theme(native_theme(&theme))
+    .background_color(chrome_window_background(&theme));
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Transparent)
+        .hidden_title(true);
+    let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    apply_macos_window_chrome("settings", &window, native_theme(&theme));
     Ok(())
 }
 
@@ -140,17 +260,25 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         w.set_focus()?;
         return Ok(());
     }
-    WebviewWindowBuilder::new(
+    let theme = current_theme_mode(app);
+    let builder = WebviewWindowBuilder::new(
         app,
         "home",
-        WebviewUrl::App("src/windows/home/index.html".into()),
+        themed_app_url("src/windows/home/index.html", &theme),
     )
     .title("")
     .inner_size(880.0, 560.0)
     .resizable(false)
     .center()
-    .theme(current_native_theme(app))
-    .build()?;
+    .theme(native_theme(&theme))
+    .background_color(chrome_window_background(&theme));
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Transparent)
+        .hidden_title(true);
+    let window = builder.build()?;
+    #[cfg(target_os = "macos")]
+    apply_macos_window_chrome("home", &window, native_theme(&theme));
     Ok(())
 }
 

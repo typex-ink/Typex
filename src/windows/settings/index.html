@@ -4,6 +4,50 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Typex</title>
+  <script>
+    (() => {
+      const theme = new URLSearchParams(window.location.search).get("theme");
+      const root = document.documentElement;
+      root.classList.add("solid-window", "chrome-window");
+      if (theme === "dark" || theme === "light") {
+        root.setAttribute("data-theme", theme);
+      }
+    })();
+  </script>
+  <style>
+    html,
+    body,
+    #app {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #efefee;
+      color-scheme: light;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      html:not([data-theme="light"]),
+      html:not([data-theme="light"]) body,
+      html:not([data-theme="light"]) #app {
+        background: #232327;
+        color-scheme: dark;
+      }
+    }
+
+    html[data-theme="dark"],
+    html[data-theme="dark"] body,
+    html[data-theme="dark"] #app {
+      background: #232327;
+      color-scheme: dark;
+    }
+
+    html[data-theme="light"],
+    html[data-theme="light"] body,
+    html[data-theme="light"] #app {
+      background: #efefee;
+      color-scheme: light;
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>

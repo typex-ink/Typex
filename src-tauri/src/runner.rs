@@ -437,6 +437,14 @@ pub fn run() {
                 {
                     let _ = crate::app::windows::show_home(app);
                 }
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::WindowEvent {
+                    event: tauri::WindowEvent::ThemeChanged(_),
+                    ..
+                } = event
+                {
+                    crate::app::windows::refresh_native_chrome(app);
+                }
                 #[cfg(not(target_os = "macos"))]
                 let _ = (app, event, launched_at);
             }

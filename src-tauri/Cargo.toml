@@ -65,7 +65,7 @@ encoding_rs = { version = "0.8", optional = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication", "NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSColor", "NSAppearance", "objc2-core-foundation"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 
 [dev-dependencies]
