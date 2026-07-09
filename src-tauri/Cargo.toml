@@ -1,6 +1,6 @@
 [package]
 name = "typex"
-version = "0.1.2"
+version = "0.1.0-dev"
 description = "Typex — Speak. It types. 开源跨平台 AI 语音输入"
 license = "GPL-3.0-only"
 repository = "https://github.com/typex-ink/typex"

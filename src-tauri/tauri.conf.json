@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Typex",
-  "version": "0.1.2",
+  "version": "0.1.0-dev",
   "identifier": "ink.typex.app",
   "build": {
     "beforeDevCommand": "pnpm dev",
