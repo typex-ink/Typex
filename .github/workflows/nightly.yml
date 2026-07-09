@@ -134,9 +134,9 @@ jobs:
             -srcfolder dmg-root \
             -ov \
             -format UDZO \
-            nightly-assets/Typex-nightly-macos-universal.dmg
+            nightly-assets/typex-macos-nightly.dmg
 
-          shasum -a 256 nightly-assets/Typex-nightly-macos-universal.dmg > nightly-assets/SHA256SUMS.txt
+          shasum -a 256 nightly-assets/typex-macos-nightly.dmg > nightly-assets/SHA256SUMS.txt
 
           BUILD_TIME="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           cat > nightly-assets/nightly.json <<EOF
@@ -147,7 +147,7 @@ jobs:
             "workflow_run": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
             "built_at": "${BUILD_TIME}",
             "platforms": ["macos-universal"],
-            "assets": ["Typex-nightly-macos-universal.dmg", "SHA256SUMS.txt", "nightly.json"]
+            "assets": ["typex-macos-nightly.dmg", "SHA256SUMS.txt", "nightly.json"]
           }
           EOF
 
