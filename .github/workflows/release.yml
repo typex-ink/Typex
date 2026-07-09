@@ -40,7 +40,7 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Linux 系统依赖
+      - name: Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
@@ -54,10 +54,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 签名凭据（CP-5.4，项目所有者配置 Secrets 后生效）：
+          # Signing credentials (CP-5.4, effective after the repository owner configures Secrets):
           # APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY
           # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
-          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD（updater）
+          # TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater)
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Typex ${{ github.ref_name }}"

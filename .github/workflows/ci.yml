@@ -80,7 +80,7 @@ jobs:
       - name: vue-tsc + vite build
         run: pnpm build
 
-      - name: hud chunk 体积断言（07 §11：< 150 KB gzip）
+      - name: HUD chunk size assertion under 150 KB gzip (docs 07 section 11)
         run: |
           HUD_JS=$(ls dist/assets/hud-*.js | head -1)
           SIZE=$(gzip -c "$HUD_JS" | wc -c)
