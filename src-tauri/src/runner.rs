@@ -2,7 +2,11 @@
 
 use crate::app::{PausedState, commands, events};
 use crate::audio::AudioService;
-use crate::hotkey::{HotkeyConfig, rdev_backend};
+use crate::hotkey::HotkeyConfig;
+#[cfg(not(target_os = "windows"))]
+use crate::hotkey::rdev_backend;
+#[cfg(target_os = "windows")]
+use crate::hotkey::{ManagedWindowsHotkey, WindowsHookFailureLatch, windows_backend};
 use crate::inject::InjectorChain;
 use crate::orchestrator::Orchestrator;
 use crate::providers::ProviderRegistry;
@@ -11,6 +15,21 @@ use futures_util::FutureExt;
 use std::sync::Arc;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events};
+
+fn publish_hotkey_config_if_changed(
+    tx: &tokio::sync::watch::Sender<HotkeyConfig>,
+    hotkeys: &crate::settings::schema::HotkeySettings,
+) -> bool {
+    let next = HotkeyConfig::from_settings(hotkeys);
+    tx.send_if_modified(|current| {
+        if *current == next {
+            false
+        } else {
+            *current = next;
+            true
+        }
+    })
+}
 
 /// tauri-specta builder：commands + events 单一注册点（gen:ipc 也用它导出 TS）。
 pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
@@ -62,24 +81,56 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         ])
 }
 
-pub fn run() {
-    let builder = specta_builder();
+#[cfg(target_os = "windows")]
+async fn monitor_windows_hook_health<F>(
+    mut health_rx: tokio::sync::watch::Receiver<windows_backend::WindowsHookHealth>,
+    paused_rx: tokio::sync::watch::Receiver<bool>,
+    commander: crate::orchestrator::SessionCommander,
+    mut on_unavailable: F,
+) where
+    F: FnMut(),
+{
+    let mut latch = WindowsHookFailureLatch::default();
+    loop {
+        let health = health_rx.borrow_and_update().clone();
+        let action = latch.observe(&health, *paused_rx.borrow());
+        if action.cancel_session {
+            let _ = commander
+                .0
+                .send(crate::orchestrator::SessionCommand::Cancel);
+        }
+        if action.refresh_status {
+            on_unavailable();
+        }
 
-    tauri::Builder::default()
+        if health_rx.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
+pub fn run() {
+    let specta = specta_builder();
+
+    let app_builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 二次启动唤起设置窗口（02 F-6）
             let _ = crate::app::windows::show_settings(app);
         }))
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(not(test))]
+    let app_builder = app_builder.plugin(tauri_plugin_dialog::init());
+
+    app_builder
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler(specta.invoke_handler())
         .setup(move |app| {
-            builder.mount_events(app);
+            specta.mount_events(app);
             #[cfg(target_os = "macos")]
             app.handle().plugin(tauri_nspanel::init())?;
 
@@ -213,12 +264,33 @@ pub fn run() {
                 let mut settings_rx = settings.subscribe();
                 tauri::async_runtime::spawn(async move {
                     while settings_rx.changed().await.is_ok() {
-                        let cfg = HotkeyConfig::from_settings(&settings_rx.borrow().hotkeys);
-                        let _ = cfg_tx.send(cfg);
+                        let _ = publish_hotkey_config_if_changed(
+                            &cfg_tx,
+                            &settings_rx.borrow().hotkeys,
+                        );
                     }
                 });
             }
+            #[cfg(not(target_os = "windows"))]
             let hotkey_rx = rdev_backend::spawn(hotkey_cfg, cfg_rx, paused_rx);
+            #[cfg(target_os = "windows")]
+            let (hotkey_rx, hook_health_rx) =
+                match windows_backend::spawn(hotkey_cfg, cfg_rx, paused_rx) {
+                    Ok((receiver, handle)) => {
+                        let runtime = ManagedWindowsHotkey::running(handle);
+                        let health_rx = runtime.subscribe_health();
+                        app.manage(runtime);
+                        (receiver, health_rx)
+                    }
+                    Err(error) => {
+                        tracing::error!(classification = %error, "Windows 全局热键后端启动失败");
+                        let (_sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+                        let runtime = ManagedWindowsHotkey::failed(error);
+                        let health_rx = runtime.subscribe_health();
+                        app.manage(runtime);
+                        (receiver, health_rx)
+                    }
+                };
 
             // orchestrator 主循环：快照/电平经 IPC event 推给前端
             let last_result = Arc::new(std::sync::Mutex::new(None::<String>));
@@ -364,7 +436,19 @@ pub fn run() {
                 history: history.clone(),
             });
             let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-            app.manage(crate::orchestrator::SessionCommander(cmd_tx));
+            let commander = crate::orchestrator::SessionCommander(cmd_tx);
+            app.manage(commander.clone());
+            #[cfg(target_os = "windows")]
+            {
+                let paused_rx = app.state::<PausedState>().0.subscribe();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(monitor_windows_hook_health(
+                    hook_health_rx,
+                    paused_rx,
+                    commander,
+                    move || crate::app::tray::refresh(&handle),
+                ));
+            }
             app.manage(crate::app::LastResult(last_result.clone()));
             app.manage(assistant);
             app.manage(selection);
@@ -426,6 +510,12 @@ pub fn run() {
             // 启动激活也会触发一次 Reopen——宽限期内忽略，保持「启动后无窗口」（05 §2）
             let launched_at = std::time::Instant::now();
             move |app, event| {
+                #[cfg(target_os = "windows")]
+                if let tauri::RunEvent::Exit = &event
+                    && let Some(runtime) = app.try_state::<crate::hotkey::ManagedWindowsHotkey>()
+                {
+                    let _ = runtime.shutdown();
+                }
                 // 点击 Dock 图标（无可见窗口时）→ 打开主页（05 §8：Dock/托盘按需打开）
                 #[cfg(target_os = "macos")]
                 if let tauri::RunEvent::Reopen {
@@ -449,6 +539,141 @@ pub fn run() {
                 let _ = (app, event, launched_at);
             }
         });
+}
+
+#[cfg(test)]
+mod hotkey_config_bridge_tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_settings_update_does_not_publish_hotkey_config() {
+        let mut settings = crate::settings::schema::Settings::default();
+        let initial = HotkeyConfig::from_settings(&settings.hotkeys);
+        let (tx, mut rx) = tokio::sync::watch::channel(initial);
+
+        settings.general.autostart = !settings.general.autostart;
+        assert!(!publish_hotkey_config_if_changed(&tx, &settings.hotkeys));
+        assert!(!rx.has_changed().unwrap());
+
+        settings.hotkeys.dictation = vec!["F13".into()];
+        assert!(publish_hotkey_config_if_changed(&tx, &settings.hotkeys));
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(rx.borrow_and_update().dictation, ["F13"]);
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_hook_health_tests {
+    use super::*;
+    use crate::hotkey::windows_backend::{WindowsHookError, WindowsHookHealth};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, timeout};
+
+    fn refresh_counter() -> (Arc<AtomicUsize>, impl FnMut()) {
+        let count = Arc::new(AtomicUsize::new(0));
+        let callback_count = count.clone();
+        (count, move || {
+            callback_count.fetch_add(1, Ordering::Relaxed);
+        })
+    }
+
+    #[tokio::test]
+    async fn runtime_failure_emits_one_cancel_for_recording_or_toggle_sessions() {
+        let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
+        let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (refreshes, on_unavailable) = refresh_counter();
+        let task = tokio::spawn(monitor_windows_hook_health(
+            health_rx,
+            paused_rx,
+            crate::orchestrator::SessionCommander(command_tx),
+            on_unavailable,
+        ));
+
+        health_tx.send_replace(WindowsHookHealth::Failed(WindowsHookError::MessageLoop {
+            code: 5,
+        }));
+        assert!(matches!(
+            timeout(Duration::from_secs(1), command_rx.recv()).await,
+            Ok(Some(crate::orchestrator::SessionCommand::Cancel))
+        ));
+
+        health_tx.send_replace(WindowsHookHealth::Stopped);
+        drop(health_tx);
+        task.await.expect("health monitor task");
+        assert!(command_rx.try_recv().is_err());
+        assert_eq!(refreshes.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn startup_failure_uses_the_same_cancel_and_visibility_path() {
+        let (health_tx, health_rx) =
+            tokio::sync::watch::channel(WindowsHookHealth::Failed(WindowsHookError::Install {
+                code: 5,
+            }));
+        let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (refreshes, on_unavailable) = refresh_counter();
+        drop(health_tx);
+
+        monitor_windows_hook_health(
+            health_rx,
+            paused_rx,
+            crate::orchestrator::SessionCommander(command_tx),
+            on_unavailable,
+        )
+        .await;
+
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(crate::orchestrator::SessionCommand::Cancel)
+        ));
+        assert_eq!(refreshes.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn failure_while_paused_refreshes_status_without_an_extra_cancel() {
+        let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
+        let (_paused_tx, paused_rx) = tokio::sync::watch::channel(true);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (refreshes, on_unavailable) = refresh_counter();
+        let task = tokio::spawn(monitor_windows_hook_health(
+            health_rx,
+            paused_rx,
+            crate::orchestrator::SessionCommander(command_tx),
+            on_unavailable,
+        ));
+
+        health_tx.send_replace(WindowsHookHealth::Failed(
+            WindowsHookError::CallbackPanicked,
+        ));
+        drop(health_tx);
+        task.await.expect("health monitor task");
+
+        assert!(command_rx.try_recv().is_err());
+        assert_eq!(refreshes.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn healthy_and_expected_shutdown_states_are_silent() {
+        let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
+        let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (refreshes, on_unavailable) = refresh_counter();
+        let task = tokio::spawn(monitor_windows_hook_health(
+            health_rx,
+            paused_rx,
+            crate::orchestrator::SessionCommander(command_tx),
+            on_unavailable,
+        ));
+
+        health_tx.send_replace(WindowsHookHealth::Shutdown);
+        drop(health_tx);
+        task.await.expect("health monitor task");
+
+        assert!(command_rx.try_recv().is_err());
+        assert_eq!(refreshes.load(Ordering::Relaxed), 0);
+    }
 }
 
 /// IPC bindings 导出（`pnpm gen:ipc` 触发；CI 校验新鲜度）。

@@ -1,13 +1,48 @@
 //! 文本注入：trait Injector + 后备链（06 §7.5）。
 pub mod paste;
 pub mod type_direct;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 use crate::error::Result;
+use crate::platform::focus::FocusTarget;
 use crate::settings::schema::InjectMethod;
+
+pub fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        windows::replace_clipboard_text(text)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut clipboard = arboard::Clipboard::new().map_err(|error| {
+            crate::error::TypexError::new(
+                crate::error::ErrorCode::Internal,
+                format!("剪贴板不可用: {error}"),
+            )
+        })?;
+        clipboard.set_text(text).map_err(|error| {
+            crate::error::TypexError::new(
+                crate::error::ErrorCode::Internal,
+                format!("写剪贴板失败: {error}"),
+            )
+        })
+    }
+}
 
 pub trait Injector: Send + Sync {
     /// 把文本注入当前焦点位置。
     fn inject(&self, text: &str) -> Result<()>;
+    /// Session-aware injection can revalidate an opaque native target immediately before IO.
+    fn inject_targeted(&self, text: &str, target: Option<&FocusTarget>) -> Result<()> {
+        if target.is_some_and(|target| !target.is_current()) {
+            return Err(crate::error::TypexError::new(
+                crate::error::ErrorCode::NoFocus,
+                "foreground target changed before injection",
+            ));
+        }
+        self.inject(text)
+    }
     fn name(&self) -> &'static str;
 }
 
@@ -30,7 +65,7 @@ impl InjectorChain {
     }
 
     pub fn inject(&self, text: &str) -> Result<()> {
-        self.inject_ordered(text, None)
+        self.inject_ordered(text, None, None)
     }
 
     /// 按设置选首选后端：首选排最前，其余保持默认序作后备。
@@ -40,10 +75,29 @@ impl InjectorChain {
             InjectMethod::Paste => Some("paste"),
             InjectMethod::TypeDirect => Some("type_direct"),
         };
-        self.inject_ordered(text, preferred)
+        self.inject_ordered(text, preferred, None)
     }
 
-    fn inject_ordered(&self, text: &str, preferred: Option<&str>) -> Result<()> {
+    pub fn inject_with_target(
+        &self,
+        text: &str,
+        method: InjectMethod,
+        target: Option<&FocusTarget>,
+    ) -> Result<()> {
+        let preferred = match method {
+            InjectMethod::Auto => None,
+            InjectMethod::Paste => Some("paste"),
+            InjectMethod::TypeDirect => Some("type_direct"),
+        };
+        self.inject_ordered(text, preferred, target)
+    }
+
+    fn inject_ordered(
+        &self,
+        text: &str,
+        preferred: Option<&str>,
+        target: Option<&FocusTarget>,
+    ) -> Result<()> {
         let mut last_err = None;
         let ordered = self
             .backends
@@ -51,9 +105,21 @@ impl InjectorChain {
             .filter(|b| Some(b.name()) == preferred)
             .chain(self.backends.iter().filter(|b| Some(b.name()) != preferred));
         for backend in ordered {
-            match backend.inject(text) {
+            match backend.inject_targeted(text, target) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
+                    if matches!(
+                        e.code,
+                        crate::error::ErrorCode::NoFocus
+                            | crate::error::ErrorCode::InjectionBlocked
+                    ) {
+                        tracing::warn!(
+                            "注入后端 {} 失败: {}，终止后备链",
+                            backend.name(),
+                            e.message
+                        );
+                        return Err(e);
+                    }
                     tracing::warn!(
                         "注入后端 {} 失败: {}，尝试下一个",
                         backend.name(),
@@ -116,6 +182,24 @@ mod tests {
         }
     }
 
+    struct PolicyBlockedInjector {
+        calls: Arc<AtomicU32>,
+    }
+
+    impl Injector for PolicyBlockedInjector {
+        fn inject(&self, _text: &str) -> Result<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(TypexError::new(
+                ErrorCode::InjectionBlocked,
+                "mock policy block",
+            ))
+        }
+
+        fn name(&self) -> &'static str {
+            "policy_blocked"
+        }
+    }
+
     #[test]
     fn chain_stops_at_first_success() {
         let c1 = Arc::new(AtomicU32::new(0));
@@ -152,6 +236,26 @@ mod tests {
         chain.inject("hi").unwrap();
         assert_eq!(c1.load(Ordering::SeqCst), 1);
         assert_eq!(c2.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn chain_does_not_retry_indeterminate_or_policy_blocked_input() {
+        let blocked = Arc::new(AtomicU32::new(0));
+        let fallback = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![
+            Box::new(PolicyBlockedInjector {
+                calls: blocked.clone(),
+            }),
+            Box::new(MockInjector {
+                fail: false,
+                calls: fallback.clone(),
+            }),
+        ]);
+
+        let error = chain.inject("hi").unwrap_err();
+        assert_eq!(error.code, ErrorCode::InjectionBlocked);
+        assert_eq!(blocked.load(Ordering::SeqCst), 1);
+        assert_eq!(fallback.load(Ordering::SeqCst), 0);
     }
 
     #[test]

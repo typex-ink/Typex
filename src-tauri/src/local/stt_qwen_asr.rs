@@ -7,23 +7,24 @@
 //! llama.cpp 长音频有已知 bug（03 §2.3 / ADR-22 工程注意）：`capabilities()`
 //! 报保守的 max_bytes，上层 `transcribe_auto_chunk` 会在 VAD 静音处切片规避。
 
-use crate::local::llm_llama::llama_backend;
+use crate::local::llm_llama::{
+    InferenceModelCache, ModeLoaded, ModelLoadMode, RuntimeAttemptError, context_params_for_mode,
+    execute_runtime_with_cpu_fallback, llama_backend, load_cpu_model, load_model_with_cpu_fallback,
+    validate_gguf_header,
+};
 use crate::providers::ProviderError;
 use crate::providers::stt::{
     AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript, transcript_from_provider_text,
 };
-use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_batch::LlamaBatch;
-use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{LlamaChatMessage, LlamaModel};
 use llama_cpp_2::mtmd::{
     MtmdBitmap, MtmdContext, MtmdContextParams, MtmdInputText, mtmd_default_marker,
 };
 use llama_cpp_2::sampling::LlamaSampler;
 use std::ffi::CString;
-use std::num::NonZeroU32;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// 单次请求最大音频字节数（16k mono s16le ≈ 32KB/s，10MB ≈ 5 分钟）。
 /// 保守值：强制上层 VAD 切片，规避 llama.cpp 长音频 bug（ADR-22）。
@@ -41,7 +42,7 @@ struct LoadedAsr {
 
 pub struct QwenAsrStt {
     /// 惰性初始化：模型加载秒级，首次转写时才加载。
-    state: Mutex<Option<Arc<LoadedAsr>>>,
+    state: Arc<InferenceModelCache<LoadedAsr>>,
     model_path: PathBuf,
     mmproj_path: PathBuf,
     n_threads: i32,
@@ -52,7 +53,7 @@ impl QwenAsrStt {
     /// （均在 `{data_dir}/models/{model_id}/` 下，构造函数注入）。
     pub fn new(model_path: PathBuf, mmproj_path: PathBuf, n_threads: i32) -> Self {
         Self {
-            state: Mutex::new(None),
+            state: Arc::new(InferenceModelCache::new()),
             model_path,
             mmproj_path,
             n_threads,
@@ -61,47 +62,93 @@ impl QwenAsrStt {
 
     /// 释放常驻内存（运行时策略切换用）。进行中的转写持有自己的 Arc，不受影响。
     pub fn unload(&self) {
-        *self.state.lock().unwrap() = None;
+        self.state.unload();
     }
+}
 
-    fn ensure_loaded(&self) -> Result<Arc<LoadedAsr>, ProviderError> {
-        let mut guard = self.state.lock().unwrap();
-        if let Some(loaded) = guard.as_ref() {
-            return Ok(Arc::clone(loaded));
-        }
-        if !self.model_path.exists() || !self.mmproj_path.exists() {
-            // 模型未下载（03 §2.3 错误分类）
-            return Err(ProviderError::InvalidRequest(
-                "模型未下载：请在设置-模型服务中下载 Qwen3-ASR".into(),
-            ));
-        }
-        let invalid = |e: &dyn std::fmt::Display| {
-            ProviderError::InvalidRequest(format!("Qwen3-ASR 模型加载失败: {e}"))
-        };
-        let model = LlamaModel::load_from_file(
-            llama_backend(),
-            &self.model_path,
-            &LlamaModelParams::default(),
-        )
-        .map_err(|e| invalid(&e))?;
-        let mmproj = self
-            .mmproj_path
-            .to_str()
-            .ok_or_else(|| ProviderError::InvalidRequest("mmproj 路径非 UTF-8".into()))?;
-        let params = MtmdContextParams {
-            n_threads: self.n_threads,
-            ..MtmdContextParams::default()
-        };
-        let mtmd = MtmdContext::init_from_file(mmproj, &model, &params).map_err(|e| invalid(&e))?;
-        if !mtmd.support_audio() {
-            return Err(ProviderError::InvalidRequest(
-                "Qwen3-ASR 模型不含音频编码器（mmproj 文件不匹配）".into(),
-            ));
-        }
-        let loaded = Arc::new(LoadedAsr { model, mtmd });
-        *guard = Some(Arc::clone(&loaded));
-        Ok(loaded)
+fn validate_asr_files(model_path: &Path, mmproj_path: &Path) -> Result<(), ProviderError> {
+    if !model_path.exists() || !mmproj_path.exists() {
+        return Err(ProviderError::InvalidRequest(
+            "模型未下载：请在设置-模型服务中下载 Qwen3-ASR".into(),
+        ));
     }
+    validate_gguf_header(mmproj_path, "Qwen3-ASR mmproj 加载失败")
+}
+
+fn mtmd_params_for_mode(n_threads: i32, mode: ModelLoadMode) -> MtmdContextParams {
+    MtmdContextParams {
+        use_gpu: mode.uses_gpu(),
+        n_threads,
+        ..MtmdContextParams::default()
+    }
+}
+
+fn initialize_mtmd(
+    model: &LlamaModel,
+    mmproj_path: &Path,
+    n_threads: i32,
+    mode: ModelLoadMode,
+) -> std::result::Result<MtmdContext, RuntimeAttemptError<ProviderError>> {
+    let mmproj = mmproj_path.to_str().ok_or_else(|| {
+        RuntimeAttemptError::input(ProviderError::InvalidRequest(
+            "Qwen3-ASR mmproj 路径编码无效".into(),
+        ))
+    })?;
+    let params = mtmd_params_for_mode(n_threads, mode);
+    let mtmd = MtmdContext::init_from_file(mmproj, model, &params).map_err(|_| {
+        RuntimeAttemptError::runtime(
+            ProviderError::InvalidRequest("Qwen3-ASR 音频上下文初始化失败".into()),
+            false,
+        )
+    })?;
+    if !mtmd.support_audio() {
+        return Err(RuntimeAttemptError::input(ProviderError::InvalidRequest(
+            "Qwen3-ASR 模型不含音频编码器（mmproj 文件不匹配）".into(),
+        )));
+    }
+    Ok(mtmd)
+}
+
+fn load_asr_with_cpu_fallback(
+    model_path: &Path,
+    mmproj_path: &Path,
+    n_threads: i32,
+) -> Result<ModeLoaded<LoadedAsr>, ProviderError> {
+    validate_asr_files(model_path, mmproj_path)?;
+    let initial_model = load_model_with_cpu_fallback(model_path, "Qwen3-ASR 模型加载失败")?;
+    let execution = execute_runtime_with_cpu_fallback(
+        initial_model,
+        ModeLoaded::mode,
+        |loaded| initialize_mtmd(loaded.value(), mmproj_path, n_threads, loaded.mode()),
+        |_| {
+            tracing::warn!(
+                component = "local_asr",
+                from = "gpu",
+                to = "cpu",
+                "local ASR runtime initialization failed; retrying once"
+            );
+            load_cpu_model(model_path, "Qwen3-ASR CPU 模型加载失败")
+                .map(|model| ModeLoaded::new(model, ModelLoadMode::CpuOnly))
+        },
+    );
+    let mtmd = execution.result?;
+    let (model, mode) = execution
+        .final_model
+        .ok_or_else(|| ProviderError::InvalidRequest("Qwen3-ASR 模型初始化状态不一致".into()))?
+        .into_parts();
+    Ok(ModeLoaded::new(LoadedAsr { model, mtmd }, mode))
+}
+
+fn load_asr_cpu(
+    model_path: &Path,
+    mmproj_path: &Path,
+    n_threads: i32,
+) -> Result<LoadedAsr, ProviderError> {
+    validate_asr_files(model_path, mmproj_path)?;
+    let model = load_cpu_model(model_path, "Qwen3-ASR CPU 模型加载失败")?;
+    let mtmd = initialize_mtmd(&model, mmproj_path, n_threads, ModelLoadMode::CpuOnly)
+        .map_err(RuntimeAttemptError::into_error)?;
+    Ok(LoadedAsr { model, mtmd })
 }
 
 /// WAV（16k mono s16le）→ f32 采样。
@@ -118,10 +165,16 @@ fn wav_to_samples(wav: &[u8]) -> Result<Vec<f32>, ProviderError> {
 /// 阻塞转写：音频 chunk 评估进 KV cache 后贪心解码。
 fn transcribe_blocking(
     loaded: &LoadedAsr,
+    mode: ModelLoadMode,
     samples: &[f32],
-    dictionary_prompt: Option<String>,
-) -> Result<String, ProviderError> {
-    let invalid = |e: &dyn std::fmt::Display| ProviderError::InvalidRequest(format!("{e}"));
+    dictionary_prompt: Option<&str>,
+) -> std::result::Result<String, RuntimeAttemptError<ProviderError>> {
+    let input_error = |message: &'static str| {
+        RuntimeAttemptError::input(ProviderError::InvalidRequest(message.into()))
+    };
+    let runtime_error = |message: &'static str| {
+        RuntimeAttemptError::runtime(ProviderError::InvalidRequest(message.into()), false)
+    };
     let model = &loaded.model;
     let mtmd = &loaded.mtmd;
 
@@ -138,17 +191,18 @@ fn transcribe_blocking(
     };
     let prompt = if let Ok(template) = model.chat_template(None) {
         let chat = vec![
-            LlamaChatMessage::new("user".into(), user_content.clone()).map_err(|e| invalid(&e))?,
+            LlamaChatMessage::new("user".into(), user_content.clone())
+                .map_err(|_| input_error("Qwen3-ASR prompt 消息格式无效"))?,
         ];
         model
             .apply_chat_template(&template, &chat, true)
-            .map_err(|e| invalid(&e))?
+            .map_err(|_| input_error("Qwen3-ASR prompt 模板渲染失败"))?
     } else {
         format!("<|im_start|>user\n{user_content}<|im_end|>\n<|im_start|>assistant\n")
     };
 
     let bitmap = MtmdBitmap::from_audio_data(samples)
-        .map_err(|e| ProviderError::InvalidRequest(format!("音频 embedding 构造失败: {e}")))?;
+        .map_err(|_| input_error("Qwen3-ASR 音频 embedding 构造失败"))?;
     let chunks = mtmd
         .tokenize(
             MtmdInputText {
@@ -158,20 +212,16 @@ fn transcribe_blocking(
             },
             &[&bitmap],
         )
-        .map_err(|e| invalid(&e))?;
+        .map_err(|_| input_error("Qwen3-ASR 多模态输入 tokenize 失败"))?;
 
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(N_CTX))
-        .with_n_batch(N_CTX)
-        .with_n_threads(0) // 0 = llama.cpp 自动
-        ;
+    let ctx_params = context_params_for_mode(mode, N_CTX, N_CTX).with_n_threads(0); // 0 = llama.cpp 自动
     let mut ctx = model
         .new_context(llama_backend(), ctx_params)
-        .map_err(|e| invalid(&e))?;
+        .map_err(|_| runtime_error("Qwen3-ASR 运行时上下文初始化失败"))?;
 
     let first_pos = chunks
         .eval_chunks(mtmd, &ctx, 0, 0, N_CTX as i32, true)
-        .map_err(|e| invalid(&e))?;
+        .map_err(|_| runtime_error("Qwen3-ASR 音频 decode 失败"))?;
 
     // 贪心解码到 EOG（转写任务无需采样随机性）
     let mut sampler = LlamaSampler::greedy();
@@ -187,13 +237,14 @@ fn transcribe_blocking(
         }
         let piece = model
             .token_to_piece(token, &mut decoder, false, None)
-            .map_err(|e| invalid(&e))?;
+            .map_err(|_| input_error("Qwen3-ASR token 解码失败"))?;
         out.push_str(&piece);
         batch.clear();
         batch
             .add(token, n_past, &[0], true)
-            .map_err(|e| invalid(&e))?;
-        ctx.decode(&mut batch).map_err(|e| invalid(&e))?;
+            .map_err(|_| input_error("Qwen3-ASR token batch 构造失败"))?;
+        ctx.decode(&mut batch)
+            .map_err(|_| runtime_error("Qwen3-ASR token decode 失败"))?;
         idx = batch.n_tokens() - 1;
     }
     Ok(out)
@@ -207,14 +258,44 @@ impl SttProvider for QwenAsrStt {
         opts: SttOptions,
     ) -> Result<Transcript, ProviderError> {
         let samples = wav_to_samples(&audio.wav_16k_mono)?;
-        let loaded = self.ensure_loaded()?;
+        let state = Arc::clone(&self.state);
+        let model_path = self.model_path.clone();
+        let mmproj_path = self.mmproj_path.clone();
+        let n_threads = self.n_threads;
         let dictionary_prompt = opts.prompt;
         // 推理是秒级 CPU/GPU 阻塞调用：挪到 blocking 线程池，别占 async 线程
         let text = tokio::task::spawn_blocking(move || {
-            transcribe_blocking(&loaded, &samples, dictionary_prompt)
+            let lease = state.acquire();
+            let initial_model = lease.get_or_try_init(|| {
+                load_asr_with_cpu_fallback(&model_path, &mmproj_path, n_threads)
+            })?;
+            execute_runtime_with_cpu_fallback(
+                initial_model,
+                |loaded| loaded.mode(),
+                |loaded| {
+                    transcribe_blocking(
+                        loaded.value(),
+                        loaded.mode(),
+                        &samples,
+                        dictionary_prompt.as_deref(),
+                    )
+                },
+                |failed| {
+                    tracing::warn!(
+                        component = "local_asr",
+                        from = "gpu",
+                        to = "cpu",
+                        "local ASR decode failed; retrying the full transcription once"
+                    );
+                    lease.replace_gpu_with_cpu(failed, || {
+                        load_asr_cpu(&model_path, &mmproj_path, n_threads)
+                    })
+                },
+            )
+            .result
         })
         .await
-        .map_err(|e| ProviderError::InvalidRequest(format!("转写线程异常: {e}")))??;
+        .map_err(|_| ProviderError::InvalidRequest("Qwen3-ASR 转写线程异常".into()))??;
         Ok(transcript_from_provider_text(text, None))
     }
 
@@ -237,6 +318,7 @@ fn _marker_cstring() -> CString {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn missing_model_is_invalid_request_not_panic() {
@@ -245,9 +327,20 @@ mod tests {
             PathBuf::from("/nonexistent/mmproj.gguf"),
             4,
         );
-        let err = stt.ensure_loaded().unwrap_err();
+        let lease = stt.state.acquire();
+        let err = lease
+            .get_or_try_init(|| {
+                load_asr_with_cpu_fallback(&stt.model_path, &stt.mmproj_path, stt.n_threads)
+            })
+            .unwrap_err();
         assert!(matches!(err, ProviderError::InvalidRequest(_)));
         assert!(err.to_string().contains("模型未下载"));
+    }
+
+    #[test]
+    fn cpu_mtmd_params_disable_gpu() {
+        assert!(mtmd_params_for_mode(4, ModelLoadMode::GpuOffload).use_gpu);
+        assert!(!mtmd_params_for_mode(4, ModelLoadMode::CpuOnly).use_gpu);
     }
 
     #[test]
@@ -262,5 +355,70 @@ mod tests {
     fn wav_parse_error_classified() {
         let err = wav_to_samples(b"not a wav").unwrap_err();
         assert!(matches!(err, ProviderError::InvalidRequest(_)));
+    }
+
+    #[test]
+    fn invalid_mmproj_is_rejected_without_exposing_its_path() {
+        let mut model = tempfile::NamedTempFile::new().unwrap();
+        model.write_all(b"GGUF").unwrap();
+        let mut mmproj = tempfile::NamedTempFile::new().unwrap();
+        mmproj.write_all(b"not a gguf").unwrap();
+
+        let error = validate_asr_files(model.path(), mmproj.path()).unwrap_err();
+
+        assert!(error.to_string().contains("不是有效的 GGUF"));
+        assert!(
+            !error
+                .to_string()
+                .contains(&mmproj.path().display().to_string())
+        );
+    }
+
+    #[test]
+    fn non_streaming_runtime_failure_replays_entire_attempt_once_on_cpu() {
+        let mut attempts = Vec::new();
+        let execution = execute_runtime_with_cpu_fallback(
+            ModeLoaded::new("gpu ASR", ModelLoadMode::GpuOffload),
+            ModeLoaded::mode,
+            |model| {
+                attempts.push(model.mode());
+                match model.mode() {
+                    ModelLoadMode::GpuOffload => {
+                        Err(RuntimeAttemptError::runtime("GPU eval failed", false))
+                    }
+                    ModelLoadMode::CpuOnly => Ok("transcript"),
+                }
+            },
+            |_| Ok(ModeLoaded::new("cpu ASR", ModelLoadMode::CpuOnly)),
+        );
+
+        assert_eq!(execution.result, Ok("transcript"));
+        assert_eq!(
+            execution.final_model.as_ref().unwrap().mode(),
+            ModelLoadMode::CpuOnly
+        );
+        assert_eq!(
+            attempts,
+            vec![ModelLoadMode::GpuOffload, ModelLoadMode::CpuOnly]
+        );
+    }
+
+    #[test]
+    fn non_streaming_input_error_does_not_reload_cpu_model() {
+        let mut fallback_called = false;
+        let execution = execute_runtime_with_cpu_fallback(
+            ModeLoaded::new("gpu ASR", ModelLoadMode::GpuOffload),
+            ModeLoaded::mode,
+            |_| -> std::result::Result<(), RuntimeAttemptError<&str>> {
+                Err(RuntimeAttemptError::input("invalid audio"))
+            },
+            |_| {
+                fallback_called = true;
+                Ok(ModeLoaded::new("cpu ASR", ModelLoadMode::CpuOnly))
+            },
+        );
+
+        assert_eq!(execution.result.unwrap_err(), "invalid audio");
+        assert!(!fallback_called);
     }
 }

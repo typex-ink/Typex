@@ -4,7 +4,7 @@ use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
 use crate::settings::schema::{Settings, SlotConfig};
-use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
+use crate::types::{AudioInputDevice, ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
@@ -252,6 +252,7 @@ pub fn clear_history(
 pub struct DiagnosticsReport {
     pub platform: String,
     pub permissions: Vec<crate::platform::permissions::PermissionStatus>,
+    pub platform_capabilities: Vec<crate::platform::PlatformCapabilityStatus>,
     pub inject_backend: String,
     pub log_dir: String,
     /// 硬件信息摘要（仅 feature = local-models 时填充；默认构建为 None）。
@@ -263,10 +264,69 @@ pub struct DiagnosticsReport {
 #[specta::specta]
 pub fn get_diagnostics(app: tauri::AppHandle) -> DiagnosticsReport {
     use tauri::Manager;
+    let mut platform_capabilities = crate::platform::capability_diagnostics();
+    #[cfg(target_os = "windows")]
+    {
+        use crate::hotkey::windows_backend::WindowsHookHealth;
+        let hook = app
+            .try_state::<crate::hotkey::ManagedWindowsHotkey>()
+            .map(|runtime| runtime.health());
+        let status = match hook {
+            Some(WindowsHookHealth::Healthy) => {
+                crate::platform::PlatformCapabilityStatus::available(
+                    "keyboard_hook",
+                    "WH_KEYBOARD_LL healthy",
+                )
+            }
+            Some(WindowsHookHealth::Starting) => {
+                crate::platform::PlatformCapabilityStatus::unavailable(
+                    "keyboard_hook",
+                    "WH_KEYBOARD_LL starting",
+                )
+            }
+            Some(WindowsHookHealth::Stopped) => {
+                crate::platform::PlatformCapabilityStatus::unavailable(
+                    "keyboard_hook",
+                    "WH_KEYBOARD_LL stopped",
+                )
+            }
+            Some(WindowsHookHealth::Shutdown) => {
+                crate::platform::PlatformCapabilityStatus::unavailable(
+                    "keyboard_hook",
+                    "WH_KEYBOARD_LL shutting down",
+                )
+            }
+            Some(WindowsHookHealth::Failed(error)) => {
+                crate::platform::PlatformCapabilityStatus::unavailable(
+                    "keyboard_hook",
+                    error.to_string(),
+                )
+            }
+            None => crate::platform::PlatformCapabilityStatus::unavailable(
+                "keyboard_hook",
+                "WH_KEYBOARD_LL unavailable",
+            ),
+        };
+        if let Some(existing) = platform_capabilities
+            .iter_mut()
+            .find(|capability| capability.key == "keyboard_hook")
+        {
+            *existing = status;
+        } else {
+            platform_capabilities.push(status);
+        }
+    }
     DiagnosticsReport {
         platform: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
         permissions: crate::platform::permissions::check_all(),
-        inject_backend: "剪贴板粘贴（CGEvent Cmd+V）".into(),
+        platform_capabilities,
+        inject_backend: if cfg!(target_os = "windows") {
+            "剪贴板粘贴（SendInput Ctrl+V）+ Unicode SendInput".into()
+        } else if cfg!(target_os = "macos") {
+            "剪贴板粘贴（CGEvent Cmd+V）".into()
+        } else {
+            "剪贴板粘贴".into()
+        },
         log_dir: app
             .path()
             .app_log_dir()
@@ -284,7 +344,7 @@ pub fn get_diagnostics(app: tauri::AppHandle) -> DiagnosticsReport {
 pub fn open_log_dir(app: tauri::AppHandle) {
     use tauri::Manager;
     if let Ok(dir) = app.path().app_log_dir() {
-        let _ = std::process::Command::new("open").arg(dir).spawn();
+        let _ = crate::platform::shell::open_path(&dir);
     }
 }
 
@@ -430,10 +490,10 @@ pub async fn install_update(
 /// 枚举输入设备（听写页麦克风下拉）。
 #[tauri::command]
 #[specta::specta]
-pub async fn list_audio_devices() -> Vec<String> {
+pub async fn list_audio_devices() -> Result<Vec<AudioInputDevice>, TypexError> {
     tauri::async_runtime::spawn_blocking(crate::audio::list_input_devices)
         .await
-        .unwrap_or_default()
+        .map_err(|_| TypexError::new(ErrorCode::Internal, "音频设备枚举任务异常退出"))?
 }
 
 /// HUD 一键切换原样模式（02 F-9：HUD 与设置均可切换）；返回切换后 verbatim 状态。
@@ -578,8 +638,10 @@ pub struct LocalModelInfo {
 pub struct HardwareTier {
     pub ram_gb: u32,
     pub cores: u32,
-    /// GPU 加速可用（macOS = Metal）。
+    /// GPU 加速可用（macOS = Metal，Windows = Vulkan）。
     pub gpu: bool,
+    /// 当前平台的 GPU backend 标签（`Metal` / `Vulkan` / `GPU`）。
+    pub gpu_backend: String,
     /// 推荐档位 key："light" | "standard" | "performance"。
     pub tier: String,
     /// 诊断页格式的摘要串，如 `RAM 24 GB · 10 核 · Metal ✓ · 推荐档位：性能`。
@@ -682,6 +744,7 @@ pub fn get_hardware_tier() -> Option<HardwareTier> {
             ram_gb: hw.ram_gb as u32,
             cores: hw.cpu_cores as u32,
             gpu: hw.gpu_available,
+            gpu_backend: hardware::gpu_backend_label().into(),
             tier: tier.key().into(),
             summary: hardware::diagnostics_string(),
         })

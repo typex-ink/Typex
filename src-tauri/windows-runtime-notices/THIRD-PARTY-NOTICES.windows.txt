@@ -1,0 +1,39 @@
+Typex Windows native runtime notices
+====================================
+
+The Windows installer deploys the following native runtime components next
+to Typex.exe so a current-user installation does not require system-wide
+developer tools or runtime installers.
+
+Microsoft Visual C++ Runtime
+----------------------------
+
+msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll, and vcomp140.dll are Microsoft
+Distributable Code copied from the x64 Microsoft VC tools redistributable
+directory on the build machine. Their redistribution is governed by the
+Microsoft Visual Studio license terms and the corresponding Distributable
+Code list:
+
+https://visualstudio.microsoft.com/license-terms/
+
+Vulkan Loader
+-------------
+
+vulkan-1.dll is the Khronos Vulkan Loader distributed through the pinned
+Silk.NET.Vulkan.Loader.Native NuGet package. It is licensed under Apache-2.0.
+See licenses/vulkan-loader-LICENSE.txt.
+
+ONNX Runtime
+------------
+
+onnxruntime.dll and onnxruntime_providers_shared.dll are from Microsoft ONNX
+Runtime 1.17.1. See licenses/onnxruntime-LICENSE.txt and
+licenses/onnxruntime-ThirdPartyNotices.txt.
+
+sherpa-rs and sherpa-onnx
+-------------------------
+
+sherpa-onnx-c-api.dll and sherpa-onnx-cxx-api.dll are built from
+sherpa-rs-sys 0.6.8. sherpa-rs is MIT licensed; see
+licenses/sherpa-rs-LICENSE.txt. sherpa-onnx is Apache-2.0 licensed; see
+licenses/Apache-2.0.txt.

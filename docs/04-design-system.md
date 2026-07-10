@@ -59,7 +59,7 @@
 
 ### 2.4 托盘 / 菜单栏图标（状态系统）
 
-托盘图标 = 去掉竖笔的**五柱波形 glyph**（小尺寸下比完整 T 清晰）。macOS 用 template image（系统自动适配深浅/高亮），Windows/Linux 提供深浅两套。
+托盘图标 = 去掉竖笔的**五柱波形 glyph**（小尺寸下比完整 T 清晰）。macOS 用 template image（系统自动适配深浅/高亮）；Windows/Linux 提供深浅两套，Windows 启动时及系统主题变化后重新选择高对比资源，不依赖 macOS template 语义。
 
 | 状态 | 表现 |
 |---|---|

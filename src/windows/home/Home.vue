@@ -7,9 +7,11 @@ import Button from "@/components/Button.vue";
 import Input from "@/components/Input.vue";
 import { commands, events, type HistoryItem, type HistoryStats } from "@/ipc/bindings";
 import { useSettingsStore } from "@/stores/settings";
+import { usePlatform } from "@/composables/usePlatform";
 
 const { t, te } = useI18n();
 const store = useSettingsStore();
+const { defaultHotkeys, keyLabel } = usePlatform();
 const DICTIONARY_MAX_TERMS = 100;
 const DICTIONARY_MAX_TERM_CHARS = 50;
 
@@ -188,12 +190,12 @@ function toggleTheme() {
 }
 
 const dictKey = computed(() => {
-  const k = store.settings?.hotkeys.dictation[0] ?? "MetaRight";
-  return te(`keys.${k}`) ? t(`keys.${k}`) : k;
+  const keys = store.settings?.hotkeys.dictation ?? defaultHotkeys.value.dictation;
+  return keys.map((key) => keyLabel(key, t, te)).join(" + ");
 });
 const assistKey = computed(() => {
-  const k = store.settings?.hotkeys.assistant[0] ?? "AltGr";
-  return te(`keys.${k}`) ? t(`keys.${k}`) : k;
+  const keys = store.settings?.hotkeys.assistant ?? defaultHotkeys.value.assistant;
+  return keys.map((key) => keyLabel(key, t, te)).join(" + ");
 });
 
 onMounted(async () => {

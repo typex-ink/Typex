@@ -2,20 +2,20 @@
 
 > Typex 产品设计书 · 第九章
 > 按 [02 功能规格](02-features.md) 各功能验收标准展开的可勾选清单，**发布前人工回归参考**。
-> 当前可用平台是 macOS；Windows / Ubuntu X11 / KDE Wayland 项随对应平台后端适配推进补齐。
+> 当前必过平台是 macOS 12+ 与 Windows x64（Windows 10 22H2+ / Windows 11）；Ubuntu X11 / KDE Wayland 项随对应平台后端适配推进补齐。
 > 本文件作为长期维护的检查清单使用；发版时人工参考执行，不要求逐版本复制归档。
 
 ## 1. 安装与首启
 
-- [ ] 全新机器（或删除 `~/Library/Application Support/ink.typex.app`）安装 → 首启弹出 onboarding
-- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 权限三项（麦克风/辅助功能/输入监听）授权后状态实时变绿 → 模型直填（STT + LLM）保存成功 → 练习框能收到听写文字 → 完成
+- [ ] 全新机器或清理平台配置目录后安装 → 首启弹出 onboarding；macOS 与 Windows 分别使用平台标准目录
+- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 平台权限（macOS：麦克风/辅助功能/输入监听；Windows：麦克风）状态正确 → 模型直填（STT + LLM）保存成功 → 练习框能收到听写文字 → 完成
 - [ ] Onboarding「跳过」路径：不配模型直接走完，主界面正常、听写时报「未配置」而非崩溃
 - [ ] 完成页「登录时自动启动」勾选生效（系统设置-登录项可见 Typex）
 - [ ] 二次启动（已在运行时再次打开）唤起设置窗口而非双实例
 
 ## 2. F-1 听写验收标准
 
-- [ ] 微信 / Slack / VS Code / 浏览器地址栏 / 终端 各注入一次中文与英文（含标点、emoji、换行）
+- [ ] 受控输入 harness 与平台代表应用各注入一次中文与英文（含标点、emoji、换行）；Windows 代表矩阵为记事本 / Edge / VS Code / Windows Terminal
 - [ ] 5 秒中文短句：松开到上屏 P50 < 2 s（整理开）；原样模式 < 1.5 s（Groq/豆包级 Provider）
 - [ ] 口语样句（含语气词/重复/改口）→ 上屏为整理后干净文本
 - [ ] 断网说一句 → HUD 明确报错 + 重试按钮；恢复网络点重试 → 成功上屏（音频不丢）
@@ -27,7 +27,7 @@
 
 ## 3. F-2 翻译验收标准
 
-- [ ] 右 ⌘ + 右 ⌥ 组合触发翻译；录音中追加第二键无缝升级为翻译
+- [ ] macOS 右 ⌘ + 右 ⌥、Windows 右 Ctrl + 右 Alt 组合触发翻译；录音中追加第二键无缝升级为翻译
 - [ ] 说中文出英文、说英文出中文（双向开）各 5 句抽测，无一句注入原文未翻译；提示词改动时对照 `docs/fixtures/translate-cases.md` 扩大抽测
 - [ ] 关闭「双向翻译」后说英文 → 仍按 中→EN 方向输出（不再自动判向）
 - [ ] 松开到译文上屏 P50 < 2.5 s
@@ -37,7 +37,7 @@
 
 ## 4. F-3 助手验收标准
 
-- [ ] Chrome / VS Code / 备忘录选中文本 → 口述「翻译成英文」→ 原地替换，全程无弹窗，HUD ✓ 结束
+- [ ] 受控 AX/UIA harness 与平台代表应用选中文本 → 口述「翻译成英文」→ 原地替换，全程无弹窗，HUD ✓ 结束
 - [ ] 选中报错日志问「这是什么原因」→ 弹窗展示回答，选区未被替换
 - [ ] 无选区按住助手键提问 → 屏幕上 1/3 居中弹窗流式回答
 - [ ] 弹窗出现后点击其他应用 → 自动关闭；Esc / ✕ 同样关闭
@@ -49,12 +49,14 @@
 
 | 应用 | 中文 | 英文 | 备注 |
 |---|---|---|---|
-| 微信 | [ ] | [ ] | |
-| Slack | [ ] | [ ] | |
-| VS Code | [ ] | [ ] | |
-| 浏览器地址栏 | [ ] | [ ] | |
-| 终端（Terminal.app / iTerm2） | [ ] | [ ] | 「逐字输入」后备路径也测一次 |
+| 受控文本输入 harness | [ ] | [ ] | Unicode、换行、错目标、只读；真实 UIPI 另见 §11 人工项 |
+| 原生文本控件（macOS TextEdit / Windows 记事本） | [ ] | [ ] | |
+| VS Code | [ ] | [ ] | Electron / Monaco |
+| 浏览器地址栏（Safari / Edge） | [ ] | [ ] | Chromium 与原生浏览器覆盖 |
+| 终端（Terminal.app / Windows Terminal） | [ ] | [ ] | 「逐字输入」后备路径也测一次 |
 | 无输入焦点（桌面） | [ ] | — | 结果进剪贴板 + HUD 提示 |
+
+微信 / Slack / Word / Chrome / Firefox 为非阻塞兼容抽测，不要求每台回归机预装或登录。若发现崩溃、数据/剪贴板损坏、隐私泄露、错窗口注入，或问题可在受控 harness 复现，则升级为发布阻塞项。
 
 ## 6. 错误注入
 
@@ -62,12 +64,13 @@
 - [ ] 错密钥：报「密钥无效」且**不**自动重试；测试连接按钮同样分类
 - [ ] 慢网（系统级限速或代理延迟）：超时分类正确、HUD 显示耗时
 - [ ] 无麦克风权限：录音启动报权限错误 + 引导入口；诊断页 ✗ 显示
-- [ ] 撤销辅助功能权限：热键静默失效（rdev 限制）——诊断页能看出 ✗
+- [ ] macOS 撤销辅助功能/输入监听权限：诊断页能看出 ✗；Windows 低级钩子安装失败时诊断页显示明确降级
+- [ ] Windows 向管理员权限目标注入：不自动提权，结果进入剪贴板并显示 `InjectionBlocked` 提示
 
 ## 7. 界面与主题
 
 - [ ] 深/浅主题全窗口走查（HUD/设置 9 页/主页/onboarding/回答弹窗），无硬编码色残留
-- [ ] `系统` 主题跟随 macOS 外观切换即时生效
+- [ ] `系统` 主题跟随 macOS / Windows 外观切换即时生效
 - [ ] 界面语言切换（中/英/系统）全 UI 即时生效
 - [ ] 系统「减弱动态效果」开启后：HUD 无 spring/晃动动画，功能不受影响
 - [ ] 托盘图标状态：空闲静态 / 录音电平动画 / 处理呼吸 / 暂停 40%+斜杠 / 错误红点
@@ -80,7 +83,7 @@
 
 ## 9. 资源与隐私
 
-- [ ] 空闲内存 ≤ 150 MB、空闲 CPU ≈ 0%（06 §12；Activity Monitor 观察 10 分钟）
+- [ ] 空闲内存 ≤ 150 MB、空闲 CPU ≈ 0%（06 §12；Activity Monitor / Task Manager 观察 10 分钟）
 - [ ] 录音中 CPU 占用合理（< 30% 单核）
 - [ ] 日志文件抽查：无转写内容、无 Bearer/sk- 形态密钥（redact 层生效）
 - [ ] 导出诊断包：settings 中 credentials 为空、日志已脱敏
@@ -91,5 +94,26 @@
 - [ ] `cargo test` / `pnpm test` / `clippy -D warnings` / `pnpm build` 全绿（CI 同步绿）
 - [ ] 如本次改动提示词：对照 `docs/fixtures/` 语料完成本地评测并记录结果
 - [ ] 版本号符合 [10 版本策略](10-versioning.md)：`package.json` / `tauri.conf.json` / `Cargo.toml` / 关于页 / tag 一致，正式版不带 `-dev`
-- [ ] tag 推送 → release 工作流产出当前已启用平台的资产 + 聚合 SHA256/manifest；现阶段至少包含 macOS universal dmg、Tauri updater `.app.tar.gz`、签名与 `latest.json`
+- [ ] release workflow 的非发布构建/静态校验覆盖 macOS universal 与 Windows NSIS x64；平台 updater fragment 聚合后 `latest.json` 的平台键唯一且 stable/nightly 隔离
 - [ ] 签名/公证启用后：从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）
+
+## 11. Windows 专项
+
+交互桌面 harness 不属于默认测试集；在已解锁桌面显式串行运行：
+
+```powershell
+cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test windows_platform_harness -- --ignored --test-threads=1
+```
+
+- [ ] Windows 10 22H2+ 与 Windows 11 x64 构建基线通过；Rust default / `--no-default-features` 均完成 check、clippy、test
+- [ ] 右 Ctrl、右 Alt、两键乱序组合、349/351 ms、toggle、Esc、漏 release 恢复均符合规格
+- [ ] 中文输入法与 AltGr 原始事件 fixture 不触发误录音、HUD 或提示音；Typex 自身 SendInput 不反向触发热键
+- [ ] WASAPI `f32/i16/u16` 转换与实际 USB 麦克风录音通过；设备拔出/切换可恢复且不崩溃
+- [ ] HUD fixture 通过 `WS_EX_NOACTIVATE` 与显示前后台 HWND 不变契约；100% DPI 本机位置正确，mixed-DPI/负坐标由坐标测试覆盖，额外实机条件可用时抽测
+- [ ] UIA worker 纯逻辑测试覆盖空/非空选区、不支持、COM/Internal 错误、超时熔断、队列故障和多 range/bounds；显式 harness 覆盖真实 UIA、无 TextPattern 的 Ctrl+C 后备与 bounds
+- [ ] 向管理员权限目标进程实际注入时被 UIPI 拒绝，不自动提权，结果进入剪贴板并显示 `InjectionBlocked`；这是人工边界，可选使用独立 elevated fixture，纯完整性比较单测不能替代该项
+- [ ] 记事本、Edge、VS Code、Windows Terminal 的 UIA/注入行为完成代表性人工抽测
+- [ ] NSIS 全新安装、覆盖安装、卸载、重装通过；WebView2 缺失路径由配置/受控 smoke 验证；卸载默认保留设置、历史和模型
+- [ ] 作为手动安装和 Tauri 2 updater 共用资产的 NSIS `.exe` 解包后，EXE 同目录包含 sherpa/ONNX 四 DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll`、`vulkan-1.dll` 与 runtime manifest，第三方许可位于 `licenses/`；相对路径与文件哈希均和 staging 一致
+- [ ] 在未预装 VC++ Redistributable、没有系统级 Vulkan loader/可用 Vulkan ICD 的干净 Windows 基线首启成功，本地模型诊断显示 CPU fallback 而不是进程装载失败
+- [ ] 每个平台的 Tauri updater artifact 都使用配置的 `TAURI_UPDATER_PUBKEY` 对 `.sig` 完成实际验签，manifest schema 校验通过；Windows manifest 直接引用 NSIS `.exe` 而非 legacy `.nsis.zip`；未接入 SignPath 时 artifact 明确标记 unsigned，不把 SHA256 或 updater 签名误称为 Authenticode

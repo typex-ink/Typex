@@ -21,6 +21,7 @@ use wiremock::{
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap()

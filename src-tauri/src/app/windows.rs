@@ -200,7 +200,12 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
             });
         }
         _ => {
+            // A failed HUD may still be visible when a new session starts in another app. Re-read
+            // the foreground HWND so Windows follows the new target monitor without a hide/show.
+            #[cfg(target_os = "windows")]
+            position_hud(&hud);
             if !hud.is_visible().unwrap_or(false) {
+                #[cfg(not(target_os = "windows"))]
                 position_hud(&hud);
                 let _ = hud.show();
             }
@@ -209,6 +214,62 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
 }
 
 /// HUD 位置：屏幕底部居中，距底边 48px（05 §3.1）。
+#[cfg(target_os = "windows")]
+fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
+    use crate::platform::windows::{
+        PhysicalScreenRect, configure_hud_window, foreground_monitor_work_area, hud_origin_px,
+        logical_size_to_physical, place_window_px,
+    };
+
+    let hwnd = match hud.hwnd() {
+        Ok(hwnd) => hwnd,
+        Err(_) => return,
+    };
+    if let Err(classification) = configure_hud_window(hwnd) {
+        tracing::warn!(classification, "Windows HUD 原生样式设置失败");
+    }
+
+    let monitor = foreground_monitor_work_area().or_else(|| {
+        let monitor = hud.current_monitor().ok().flatten()?;
+        let pos = monitor.position();
+        let size = monitor.size();
+        let work = monitor.work_area();
+        Some(crate::platform::windows::MonitorWorkArea {
+            monitor_px: PhysicalScreenRect {
+                left: pos.x,
+                top: pos.y,
+                right: pos.x.saturating_add(i32::try_from(size.width).ok()?),
+                bottom: pos.y.saturating_add(i32::try_from(size.height).ok()?),
+            },
+            work_area_px: PhysicalScreenRect {
+                left: work.position.x,
+                top: work.position.y,
+                right: work
+                    .position
+                    .x
+                    .saturating_add(i32::try_from(work.size.width).ok()?),
+                bottom: work
+                    .position
+                    .y
+                    .saturating_add(i32::try_from(work.size.height).ok()?),
+            },
+            scale_factor: monitor.scale_factor(),
+        })
+    });
+    let Some(monitor) = monitor else {
+        return;
+    };
+
+    // 352×76 is the Tauri logical outer window. The capsule has a 16 DIP transparent inset,
+    // so a 32 DIP outer gap preserves the specified 48 DIP visual distance from the work area.
+    let size = logical_size_to_physical(352.0, 76.0, monitor.scale_factor);
+    let origin = hud_origin_px(monitor.work_area_px, size, monitor.scale_factor, 32.0);
+    if let Err(classification) = place_window_px(hwnd, origin, size, true, true) {
+        tracing::warn!(classification, "Windows HUD 定位失败");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
     if let Ok(Some(monitor)) = hud.current_monitor() {
         let screen = monitor.size();
@@ -248,6 +309,8 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("settings", &window, native_theme(&theme));
     Ok(())
@@ -277,6 +340,8 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("home", &window, native_theme(&theme));
     Ok(())
@@ -331,6 +396,54 @@ pub fn show_assistant<R: Runtime>(app: &AppHandle<R>, has_selection: bool) -> ta
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn position_assistant<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+    selection_bounds: Option<SelectionBounds>,
+) {
+    use crate::platform::windows::{
+        LogicalScreenRect, assistant_origin_px, foreground_monitor_work_area,
+        logical_rect_to_physical_screen, logical_size_to_physical, place_window_px,
+    };
+
+    let Some(monitor) = foreground_monitor_work_area() else {
+        position_assistant_fallback(app, assistant);
+        return;
+    };
+    let size = logical_size_to_physical(560.0, 136.0, monitor.scale_factor);
+    // Windows SelectionReader returns screen-space logical DIPs. Convert exactly once with the
+    // foreground HWND monitor that supplied the work area.
+    let selection_px = selection_bounds.map(|bounds| {
+        logical_rect_to_physical_screen(
+            LogicalScreenRect {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+            },
+            monitor,
+        )
+    });
+    let origin = assistant_origin_px(
+        monitor.work_area_px,
+        selection_px,
+        size,
+        monitor.scale_factor,
+    );
+    if let Ok(hwnd) = assistant.hwnd()
+        && place_window_px(hwnd, origin, size, true, true).is_ok()
+    {
+        return;
+    }
+    let _ = assistant.set_size(tauri::PhysicalSize::new(
+        size.width.max(1) as u32,
+        size.height.max(1) as u32,
+    ));
+    let _ = assistant.set_position(tauri::PhysicalPosition::new(origin.x, origin.y));
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_assistant<R: Runtime>(
     app: &AppHandle<R>,
     assistant: &tauri::WebviewWindow<R>,
@@ -392,6 +505,48 @@ fn position_assistant<R: Runtime>(
     let _ = assistant.set_position(tauri::LogicalPosition::new(x, y));
 }
 
+#[cfg(target_os = "windows")]
+fn position_assistant_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+) {
+    use crate::platform::windows::{
+        PhysicalScreenRect, assistant_origin_px, logical_size_to_physical, place_window_px,
+    };
+
+    let monitor = app.primary_monitor().ok().flatten().or_else(|| {
+        app.available_monitors()
+            .ok()
+            .and_then(|mut monitors| monitors.pop())
+    });
+    let Some(monitor) = monitor else {
+        let _ = assistant.center();
+        return;
+    };
+    let work = monitor.work_area();
+    let Ok(width) = i32::try_from(work.size.width) else {
+        return;
+    };
+    let Ok(height) = i32::try_from(work.size.height) else {
+        return;
+    };
+    let work_area = PhysicalScreenRect {
+        left: work.position.x,
+        top: work.position.y,
+        right: work.position.x.saturating_add(width),
+        bottom: work.position.y.saturating_add(height),
+    };
+    let size = logical_size_to_physical(560.0, 136.0, monitor.scale_factor());
+    let origin = assistant_origin_px(work_area, None, size, monitor.scale_factor());
+    if let Ok(hwnd) = assistant.hwnd()
+        && place_window_px(hwnd, origin, size, true, true).is_ok()
+    {
+        return;
+    }
+    let _ = assistant.set_position(tauri::PhysicalPosition::new(origin.x, origin.y));
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_assistant_fallback<R: Runtime>(
     app: &AppHandle<R>,
     assistant: &tauri::WebviewWindow<R>,

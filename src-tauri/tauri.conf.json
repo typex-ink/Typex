@@ -47,6 +47,22 @@
     "macOS": {
       "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "12.0"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
+        "startMenuFolder": "Typex"
+      }
     }
   },
   "plugins": {

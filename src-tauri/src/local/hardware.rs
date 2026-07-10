@@ -2,7 +2,8 @@
 //!
 //! 探测 RAM 总量 + CPU 核数；GPU 加速：
 //! - macOS = Metal 恒可用（Apple Silicon / Intel GPU 均支持）
-//! - Windows / Linux = false 占位，适配时补齐 CUDA / Vulkan 探测
+//! - Windows = llama.cpp Vulkan backend 实际 GPU offload 能力
+//! - Linux = false 占位，平台后端落地时补齐探测
 //!
 //! 纯函数 `recommend_tier` 根据硬件返回推荐档位。
 
@@ -91,15 +92,41 @@ pub fn detect() -> HardwareInfo {
 /// GPU 加速探测。
 ///
 /// macOS：Metal 始终可用（Apple Silicon + Intel GPU 均支持 Metal）→ 返回 `true`。
-/// Windows / Linux：暂返回 `false`；平台适配时补齐 CUDA / Vulkan 探测。
+/// Windows：通过实际推理 backend 探测 Vulkan GPU offload；Linux 暂返回 false。
 fn probe_gpu() -> bool {
     #[cfg(target_os = "macos")]
     {
         true
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // llama.cpp loads its ggml backends here and returns true only when a GPU/iGPU
+        // device is registered, so a loader without a working Vulkan ICD remains false.
+        gpu_probe_or_false(|| crate::local::llm_llama::llama_backend().supports_gpu_offload())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         false
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn gpu_probe_or_false(probe: impl FnOnce() -> bool + std::panic::UnwindSafe) -> bool {
+    std::panic::catch_unwind(probe).unwrap_or_default()
+}
+
+pub fn gpu_backend_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Metal"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Vulkan"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        "GPU"
     }
 }
 
@@ -126,9 +153,9 @@ pub fn diagnostics_string() -> String {
     let hw = detect();
     let tier = recommend_tier(hw.ram_gb, hw.cpu_cores, hw.gpu_available);
     let gpu_label = if hw.gpu_available {
-        "Metal ✓"
+        format!("{} ✓", gpu_backend_label())
     } else {
-        "GPU ✗"
+        format!("{} ✗", gpu_backend_label())
     };
     format!(
         "RAM {} GB · {} 核 · {} · 推荐档位：{}",
@@ -188,6 +215,17 @@ mod tests {
     }
 
     #[test]
+    fn gpu_probe_uses_backend_capability() {
+        assert!(gpu_probe_or_false(|| true));
+        assert!(!gpu_probe_or_false(|| false));
+    }
+
+    #[test]
+    fn gpu_probe_failure_disables_acceleration() {
+        assert!(!gpu_probe_or_false(|| panic!("backend init failed")));
+    }
+
+    #[test]
     fn tier_labels_are_chinese() {
         assert_eq!(Tier::Lightweight.label(), "轻量");
         assert_eq!(Tier::Standard.label(), "标准");
@@ -204,9 +242,9 @@ mod tests {
         };
         let tier = recommend_tier(hw.ram_gb, hw.cpu_cores, hw.gpu_available);
         let gpu_label = if hw.gpu_available {
-            "Metal ✓"
+            format!("{} ✓", gpu_backend_label())
         } else {
-            "GPU ✗"
+            format!("{} ✗", gpu_backend_label())
         };
         let s = format!(
             "RAM {} GB · {} 核 · {} · 推荐档位：{}",
@@ -217,7 +255,10 @@ mod tests {
         );
         assert!(s.contains("RAM 24 GB"), "缺 RAM 信息：{s}");
         assert!(s.contains("10 核"), "缺核数：{s}");
-        assert!(s.contains("Metal ✓"), "缺 GPU 标签：{s}");
+        assert!(
+            s.contains(&format!("{} ✓", gpu_backend_label())),
+            "缺 GPU 标签：{s}"
+        );
         assert!(s.contains("推荐档位：性能"), "缺档位：{s}");
     }
 }

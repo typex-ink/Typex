@@ -8,6 +8,7 @@
     "invalid_request": "Request rejected",
     "no_speech": "No speech detected",
     "no_focus": "No input focus — result copied to clipboard",
+    "injection_blocked": "The target app has higher privileges — result copied; paste it manually",
     "permission_missing": "Accessibility permission missing — cannot type text",
     "audio_device": "Microphone unavailable",
     "not_configured": "No model service configured",
@@ -59,13 +60,28 @@
   "keys": {
     "MetaLeft": "Left ⌘",
     "MetaRight": "Right ⌘",
-    "Alt": "Left ⌥",
-    "AltGr": "Right ⌥",
+    "AltLeft": "Left ⌥",
+    "AltRight": "Right ⌥",
     "ControlLeft": "Left Ctrl",
     "ControlRight": "Right Ctrl",
     "ShiftLeft": "Left ⇧",
     "ShiftRight": "Right ⇧",
-    "CapsLock": "CapsLock"
+    "CapsLock": "CapsLock",
+    "Enter": "Return",
+    "Menu": "Menu"
+  },
+  "keys_windows": {
+    "MetaLeft": "Left Win",
+    "MetaRight": "Right Win",
+    "AltLeft": "Left Alt",
+    "AltRight": "Right Alt",
+    "ControlLeft": "Left Ctrl",
+    "ControlRight": "Right Ctrl",
+    "ShiftLeft": "Left Shift",
+    "ShiftRight": "Right Shift",
+    "CapsLock": "CapsLock",
+    "Enter": "Enter",
+    "Menu": "Menu key"
   },
   "prompt": {
     "expand": "Expand ▾",
@@ -118,6 +134,8 @@
       "esc_cancels": "Esc cancels recording",
       "microphone": "Microphone",
       "mic_default": "System default",
+      "mic_unavailable": "Selected microphone unavailable",
+      "mic_load_failed": "Could not enumerate microphones",
       "level_preview": "Level preview"
     },
     "translation": {
@@ -223,7 +241,7 @@
       "none_downloaded": "No models downloaded yet.",
       "req_gpu": "Requires GPU acceleration (this device: {check})",
       "req_ram": "Recommended ≥ {min} GB RAM (this device: {check})",
-      "check_ok_gpu": "✓ Metal",
+      "check_ok_gpu": "✓ {backend}",
       "check_ok_ram": "✓ {ram} GB",
       "check_fail": "✗ not met",
       "total": "Total {size} on disk",
@@ -245,7 +263,8 @@
     },
     "hotkeys": {
       "desc": "Dictation and assistant keys are customizable; translation = both keys held together (follows automatically).",
-      "translation_hint": "Hold the dictation key + assistant key together"
+      "translation_hint": "Hold the dictation key + assistant key together",
+      "unreachable_chords": "Choose two non-empty shortcuts; neither may contain the other."
     },
     "history": {
       "desc": "History is stored on this device only and contains no audio.",
@@ -265,6 +284,12 @@
       "perm_accessibility": "Accessibility permission (typing + reading selection)",
       "perm_input_monitoring": "Input monitoring permission (hotkeys)",
       "inject_backend": "Typing backend: {backend}",
+      "cap_keyboard_hook": "Low-level keyboard hook",
+      "cap_send_input": "Windows text injection",
+      "cap_ui_automation": "UI Automation selection",
+      "cap_webview2": "WebView2 Runtime",
+      "cap_integrity": "Process integrity level",
+      "hardware": "Local inference: {summary}",
       "open_log_dir": "Open log directory",
       "log_path": "Logs: {path}",
       "export": "Export diagnostics",
@@ -397,7 +422,10 @@
       "recording_hint": "Press the keys you want (a single modifier works); Esc to cancel.",
       "conflict_capslock": "CapsLock conflicts with the Chinese input method's language toggle on macOS — not recommended.",
       "conflict_meta_left": "Left ⌘ is part of many system shortcuts — high risk of accidental triggers.",
-      "conflict_alt": "Left ⌥ is used to type special characters and may interfere with normal typing."
+      "conflict_alt": "Left ⌥ is used to type special characters and may interfere with normal typing.",
+      "conflict_capslock_windows": "CapsLock may conflict with an input method or key remapping — not recommended.",
+      "conflict_meta_left_windows": "Left Win is part of many system shortcuts — high risk of accidental triggers.",
+      "conflict_alt_windows": "Left Alt is used by menus and system shortcuts and may interfere with normal typing."
     },
     "provider_card": {
       "testing": "Testing…",

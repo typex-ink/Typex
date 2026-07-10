@@ -47,10 +47,11 @@ fn build_menu<R: Runtime>(
     }
     let target_menu = target_menu.build()?;
 
-    // 模型 ▸ 子菜单（ADR-21：听写/翻译/问答 三组档案快速切换）
+    // 模型 ▸ 子菜单（ADR-21：四个功能槽快速切换）
     let mut model_menu = SubmenuBuilder::with_id(app, "model_menu", "模型");
-    let groups: [(&str, SlotKind); 3] = [
+    let groups: [(&str, SlotKind); 4] = [
         ("听写", SlotKind::Stt),
+        ("文本整理", SlotKind::Polish),
         ("翻译", SlotKind::Translate),
         ("问答", SlotKind::Assistant),
     ];
@@ -92,8 +93,13 @@ fn build_menu<R: Runtime>(
         },
     )
     .build(app)?;
+    let settings_accelerator = if cfg!(target_os = "macos") {
+        "Cmd+,"
+    } else {
+        "Ctrl+,"
+    };
     let settings_item = MenuItemBuilder::with_id("settings", "设置…")
-        .accelerator("Cmd+,")
+        .accelerator(settings_accelerator)
         .build(app)?;
     let home = MenuItemBuilder::with_id("home", "主页…").build(app)?;
     let update = MenuItemBuilder::with_id("update", "检查更新").build(app)?;
@@ -117,7 +123,10 @@ fn build_menu<R: Runtime>(
 }
 
 /// 状态行文本（05 §2）。
-pub fn status_line(snap: Option<&SessionSnapshot>, paused: bool) -> String {
+pub fn status_line(snap: Option<&SessionSnapshot>, paused: bool, hotkey_healthy: bool) -> String {
+    if !hotkey_healthy {
+        return "⚠ 快捷键不可用".into();
+    }
     if paused {
         return "◌ Typex 已暂停".into();
     }
@@ -131,16 +140,48 @@ pub fn status_line(snap: Option<&SessionSnapshot>, paused: bool) -> String {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn hotkey_is_healthy<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.try_state::<crate::hotkey::ManagedWindowsHotkey>()
+        .is_some_and(|runtime| runtime.health().is_healthy())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hotkey_is_healthy<R: Runtime>(_app: &AppHandle<R>) -> bool {
+    true
+}
+
+fn toggle_paused(
+    paused: &crate::app::PausedState,
+    commander: &crate::orchestrator::SessionCommander,
+) -> bool {
+    let next = !*paused.0.borrow();
+    paused.0.send_replace(next);
+    if next {
+        // Resetting the hotkey detector only clears held keys. The orchestrator must also leave
+        // Recording so push-to-talk and toggle sessions release the microphone while paused.
+        let _ = commander
+            .0
+            .send(crate::orchestrator::SessionCommand::Cancel);
+    }
+    next
+}
+
 pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let settings = app.state::<Arc<SettingsService>>().inner().clone();
-    let menu = build_menu(app, &settings, &status_line(None, false), false)?;
+    let menu = build_menu(
+        app,
+        &settings,
+        &status_line(None, false, hotkey_is_healthy(app)),
+        false,
+    )?;
 
     TrayIconBuilder::with_id("main")
         .icon(
             tauri::image::Image::from_bytes(include_bytes!("../../icons/tray.png"))
                 .expect("tray icon"),
         )
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Typex")
         .menu(&menu)
         .show_menu_on_left_click(cfg!(target_os = "macos"))
@@ -162,9 +203,11 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             match id {
                 "quit" => app.exit(0),
                 "pause" => {
-                    if let Some(paused) = app.try_state::<crate::app::PausedState>() {
-                        let cur = *paused.0.borrow();
-                        let _ = paused.0.send(!cur);
+                    if let (Some(paused), Some(commander)) = (
+                        app.try_state::<crate::app::PausedState>(),
+                        app.try_state::<crate::orchestrator::SessionCommander>(),
+                    ) {
+                        toggle_paused(paused.inner(), commander.inner());
                         refresh(app);
                     }
                 }
@@ -258,7 +301,12 @@ pub fn refresh<R: Runtime>(app: &AppHandle<R>) {
         .try_state::<crate::app::PausedState>()
         .map(|p| *p.0.borrow())
         .unwrap_or(false);
-    if let Ok(menu) = build_menu(app, &settings, &status_line(None, paused), paused) {
+    if let Ok(menu) = build_menu(
+        app,
+        &settings,
+        &status_line(None, paused, hotkey_is_healthy(app)),
+        paused,
+    ) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -273,7 +321,50 @@ pub fn update_status<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapshot) {
         .try_state::<crate::app::PausedState>()
         .map(|p| *p.0.borrow())
         .unwrap_or(false);
-    if let Ok(menu) = build_menu(app, &settings, &status_line(Some(snap), paused), paused) {
+    if let Ok(menu) = build_menu(
+        app,
+        &settings,
+        &status_line(Some(snap), paused, hotkey_is_healthy(app)),
+        paused,
+    ) {
         let _ = tray.set_menu(Some(menu));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_hotkey_has_priority_in_tray_status() {
+        assert_eq!(status_line(None, false, false), "⚠ 快捷键不可用");
+        assert_eq!(status_line(None, true, false), "⚠ 快捷键不可用");
+    }
+
+    #[test]
+    fn entering_pause_updates_listener_and_requests_session_cancel() {
+        let (paused_tx, paused_rx) = tokio::sync::watch::channel(false);
+        let paused = crate::app::PausedState(paused_tx);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let commander = crate::orchestrator::SessionCommander(command_tx);
+
+        assert!(toggle_paused(&paused, &commander));
+        assert!(*paused_rx.borrow());
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(crate::orchestrator::SessionCommand::Cancel)
+        ));
+    }
+
+    #[test]
+    fn resuming_listener_does_not_cancel_a_session() {
+        let (paused_tx, paused_rx) = tokio::sync::watch::channel(true);
+        let paused = crate::app::PausedState(paused_tx);
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let commander = crate::orchestrator::SessionCommander(command_tx);
+
+        assert!(!toggle_paused(&paused, &commander));
+        assert!(!*paused_rx.borrow());
+        assert!(command_rx.try_recv().is_err());
     }
 }

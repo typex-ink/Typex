@@ -74,6 +74,7 @@ fn normalize_body(body: &str) -> serde_json::Value {
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap()

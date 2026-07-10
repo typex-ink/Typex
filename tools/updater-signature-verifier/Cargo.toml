@@ -1,0 +1,10 @@
+[package]
+name = "typex-updater-signature-verifier"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+base64 = "=0.22.1"
+minisign-verify = "=0.2.5"

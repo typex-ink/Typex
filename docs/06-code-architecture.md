@@ -25,7 +25,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 
 | 用途 | crate | 备注 |
 |---|---|---|
-| 全局按键监听（push-to-talk） | `rdev`（mac/win/X11）+ `ashpd`（Wayland Portal）| Handy 同款路线；支持单修饰键按住 |
+| 全局按键监听（push-to-talk） | `rdev`（mac/X11）+ 原生 Win32 `WH_KEYBOARD_LL` + `ashpd`（Wayland Portal）| Windows 需要选择性吞右 Alt keyup、识别 AltGr 与注入事件，因此不用 rdev 监听后端 |
 | 录音 | `cpal` | 事实标准 |
 | 重采样 | `rubato` | 设备原生采样率 → 16 kHz mono |
 | VAD | `vad-rs`（Silero） | 静音裁剪 + 长录音切片边界 |
@@ -39,8 +39,9 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 本地数据 | `rusqlite`（历史）+ `tauri-plugin-store`（设置） | |
 | macOS 权限 | `tauri-plugin-macos-permissions` + `macos-accessibility-client` | 检测 + 引导跳转 |
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
+| Windows 系统 API | target-specific `windows` crate | 最小 feature 集；`unsafe` 集中在 `platform/windows.rs` 与对应平台 backend 边界 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
-| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`（官方 crate，静态链接）；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)）；whisper.cpp 降为可选扩展 |
+| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；`llama-cpp-2` target-gate 为 macOS Metal / Windows Vulkan / 其他 CPU；GPU-loaded 模型仅在运行初始化/decode 错误且尚可安全重放时回退一次 CPU；Windows 的 sherpa/ONNX、Vulkan loader 与 MSVC runtime 采用安装目录内 app-local 部署；推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)） |
 
 ## 2. 进程与窗口模型
 
@@ -151,6 +152,7 @@ typex/
 │       ├── types/                # 跨层共享类型（serde + specta derive）
 │       │   ├── session.rs        # SessionSnapshot, SessionMode, SessionPhase…
 │       │   ├── profile.rs        # ProviderProfile, SlotKind…
+│       │   ├── hotkey.rs         # 稳定 KeyId 规范、别名迁移与 chord 归一化
 │       │   └── diagnostics.rs
 │       ├── error.rs              # TypexError 顶层错误 + 用户可见错误码（§5.4）
 │       └── logging.rs            # tracing 初始化 + redact 层
@@ -207,9 +209,11 @@ pub enum SessionPhase {
 |---|---|---|
 | Tauri 主线程 | 事件循环 | 窗口/托盘/菜单（部分平台 API 要求主线程） |
 | tokio runtime | Tauri 自带 | orchestrator 执行器、全部 provider HTTP、settings/history IO |
-| hotkey 线程 | `std::thread`（rdev 阻塞监听） | 键盘事件 → 判定逻辑 → `mpsc` 发给 orchestrator |
+| hotkey 线程 | `std::thread`（mac/X11 为 rdev；Windows 为 Win32 消息循环） | 键盘事件 → 判定逻辑 → `mpsc` 发给 orchestrator；Windows 安装/卸载 `WH_KEYBOARD_LL` |
+| UIA 线程（Windows） | 专用 COM STA/MTA worker | 初始化 COM、执行 `TextPattern.GetSelection` 与 bounds 查询；请求有超时且不阻塞 Tauri 主线程 |
 | cpal 回调线程 | 音频驱动回调 | **只做** ring buffer 写入（实时线程禁止分配/锁/日志） |
 | audio worker 线程 | `std::thread` | 从 ring buffer 取样 → 重采样/电平/VAD → 电平事件节流 50ms 发前端 |
+| 本地推理 worker | LLM 使用专属 `std::thread`；ASR 使用 `spawn_blocking` | 每个模型缓存用独占 inference lease 串行推理；条目携带 GPU/CPU load mode 与代际；GPU runtime fallback 先释放失败代际，再在缓存锁外以无设备、无 context/mtmd offload 的严格 CPU 参数加载，LLM 在首个可见 delta 前、ASR 在非流式返回前最多从头重试一次 |
 
 跨线程通信统一 `tokio::sync::mpsc`（service → orchestrator）与 `watch`（配置广播）；hotkey/audio 线程持有的发送端是它们与外界的唯一接口。
 
@@ -245,11 +249,11 @@ pub enum SessionPhase {
 
 ### 7.1 平台适配矩阵（总览）
 
-当前可用平台是 macOS；Windows 与 Linux 是接下来要适配的目标平台。下表同时作为目标方案与验收边界，不表示所有平台后端已经落地。
+当前支持 macOS 与 Windows；Linux 是下一步适配目标。Windows 首发边界为 `x86_64-pc-windows-msvc`、Windows 10 22H2+ 与 Windows 11。
 
 | 能力 | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
-| 全局按住说话 | rdev（需辅助功能/输入监听权限） | rdev（WH_KEYBOARD_LL） | rdev（XTEST/XRecord） | Portal GlobalShortcuts（ashpd）；evdev 兜底 |
+| 全局按住说话 | rdev（需辅助功能/输入监听权限） | 原生 `WH_KEYBOARD_LL` 消息循环 | rdev（XTEST/XRecord） | Portal GlobalShortcuts（ashpd）；evdev 兜底 |
 | 文本注入 | 剪贴板 + CGEvent Cmd+V | 剪贴板 + SendInput Ctrl+V | 剪贴板 + XTEST Ctrl+V | wtype（wlroots 系）/ ydotool·dotool（GNOME/KDE）/ 仅复制降级 |
 | 读选中文本 | AX API → 静音 Cmd+C 降级 | UIA TextPattern → Ctrl+C 降级 | primary selection | primary selection（部分可用）→ 仅手动粘贴降级 |
 | HUD 置顶浮窗 | NSPanel（不抢焦点） | 原生支持 | 原生支持 | gtk-layer-shell（GNOME 不支持 → 降级为托盘状态） |
@@ -263,25 +267,37 @@ pub enum SessionPhase {
 4. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
 5. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
 6. **X11 组合键 release 事件顺序 bug**（global-hotkey#39）→ 用 rdev 自维护按键状态，不依赖热键 API 的 release。
-7. **Windows UIPI**：目标窗口是管理员进程时 SendInput 被拦截 → 检测失败并提示（或建议以管理员运行）。
+7. **Windows UIPI**：目标窗口是更高完整性进程时 SendInput 被拦截 → 预先比较完整性级别并检查发送计数；失败后把完整结果留在剪贴板并提示手动粘贴。Typex 不自动提权，也不建议长期以管理员身份运行。
 8. **webkit2gtk**：NVIDIA 驱动下白屏/崩溃 → 启动时探测并自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`；仅支持 webkit2gtk-4.1 的发行版（Ubuntu 22.04+）。
 9. **剪贴板恢复不保真**（arboard 仅文本/图片）→ 设置页明示；与剪贴板管理器可能互相干扰记录中间内容。
+10. **Windows 混合 DPI 与负坐标**：HUD/回答窗定位统一以目标 HWND 的 monitor work area 为源，在物理/逻辑坐标边界显式换算；禁止用 HUD 自身 monitor 推断目标屏幕。
+11. **Windows 原生运行库不能依赖开发机环境**：默认 feature 的 EXE 硬链接 sherpa/ONNX、MSVC C++/OpenMP runtime 与 Vulkan loader；NSIS 必须把四个 sherpa/ONNX DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll` 和 `vulkan-1.dll` 放在 EXE 同目录。Vulkan loader 存在但没有可用 ICD/GPU 时直接加载 CPU 模型；GPU 模型已加载后的 context/decode 错误仅在无可见输出时从头 CPU 重试一次。不得因缺少 loader 在进程装载阶段退出，也不得在 LLM 已流式输出后重放造成重复文本。
 
 ### 7.3 快捷键（push-to-talk 细节）
 
-- 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug），改用 **rdev 独立线程**自维护 down/up 状态——默认键位为全修饰键三角方案（右⌘/右⌥ 及其组合，见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
-- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`AltGr+E` 等），立即静默取消本次录音、不产生任何输出、按键完全放行。监听是 listen-only，普通键本来就不被拦截，此规则只是状态机层面的取消逻辑。
+- 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug）。macOS/X11 用 **rdev 独立线程**，Windows 用 `WH_KEYBOARD_LL` + 消息循环；两者都把归一化事件送入同一个纯判定器维护 down/up 状态——默认键位为全修饰键三角方案（见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
+- **稳定 `KeyId` 契约**：持久化名称以物理 `KeyboardEvent.code` 为主，至少包括 `Enter`、`Digit0..9`、`ArrowLeft/Right/Up/Down`、`AltLeft/AltRight`、`MetaLeft/MetaRight`、`Menu`、`F1..F19`、`KeyA..Z`、`Semicolon`/`Period`/`Backquote`/`BracketLeft`/`BracketRight`/`Backslash` 与 `Numpad*`。`Menu` 是对浏览器 `ContextMenu` 的稳定例外。前端 code、rdev `Key` 与 Win32 VK/scan 必须在各自 adapter 显式映射，禁止把 crate `Debug` 文本当持久化协议。`Return`→`Enter`、`Num1`→`Digit1`、`LeftArrow`→`ArrowLeft`、`AltGr`→`AltRight`、`Alt`→`AltLeft`、`ContextMenu`→`Menu`、`SemiColon`→`Semicolon`、`Dot`→`Period`、`Kp*`→`Numpad*` 等旧名仅作读取/迁移别名。
+- 字母、数字行与标点是**物理位置语义**：浏览器读取 `KeyboardEvent.code`，Windows 普通键优先按低级 hook 的 set-1 scan code 解码（VK 只作 scan 缺失时的后备），rdev 使用其物理 `Key` variant。不得用 `KeyboardEvent.key`、当前布局产生的字符或输入法结果作为绑定 ID。
+- 听写与助手的 `Vec<KeyId>` 各表示一个完整 chord；判定器持有全局 physical-held 集合，只有某 chord 全部 held 才发 `TriggerDown`。翻译 chord 是两功能 chord 的有序去重并集；已启动的听写/助手手势在该并集完整时发 `ModeUpgraded(Translation)`。partial chord 从未启动时，全释放不得误发 `TriggerUp`；手势已启动后仍等本次 tracked 触发键全部释放才发一次 `TriggerUp`。
+- 听写与助手 chord 必须非空且互不为子集；相同 chord 也按不可达配置处理。前端在 IPC 前阻止，`SettingsService::update` 再以 `InvalidRequest` 拒绝；启动读取到历史非法值时只恢复 `HotkeySettings::default()` 并写无键值 warning，其他设置不得丢失。
+- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，但立即把物理 down 送入纯判定器维护 held/yielded：窗口内普通键会同时丢弃候选 `TriggerDown` 与对应 `Yielded`，因此 orchestrator 从未启动录音；双触发键则立即提交候选并发送模式升级。原始 down 时间戳必须保留用于 350 ms 长短按判定。
 - **漏 release 自恢复**：rdev/CGEventTap 偶发漏掉触发键 release 时，`HotkeyDetector` 会残留 held 状态。修饰键正常不会自动连发，因此同一触发键在 250 ms 抖动窗口后再次 down 视为上一轮 release 丢失：旧 held 状态重置，必要时向状态机发 `Yielded` 取消卡住的录音，再发新的 `TriggerDown`，保证下一次按键恢复响应。
+- **配置热更新边界**：settings 桥接只广播归一化后确实变化的 `HotkeyConfig`，判定器和 Windows adapter 仍须对相同配置幂等。听写/助手 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未提交的候选必须成对提交 `TriggerDown + TriggerUp` 或成对丢弃，禁止只发一侧。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；AltGr、让路和未配置路径不得设置该 tombstone。
 - **唯一需要事件拦截的点**：Windows 上单击 Alt 会聚焦菜单栏——助手键（右 Alt）短按时用低级钩子 `WH_KEYBOARD_LL` 吞掉对应 keyup。macOS/Linux 的修饰键单按无系统副作用，无需拦截。启动时自检钩子可用性，失败降级为「监听不拦截」+ UI 提示改键。
-- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：触发键按下即开始录音，判定窗口内组合出第二触发键则无缝切换为翻译模式，音频保留。
+- Windows 事件解码必须区分 `VK_RCONTROL`、`VK_RMENU`、扩展键与 `LLKHF_INJECTED`；Typex 自己的 SendInput 事件不得反向触发会话。右 Ctrl / Ctrl+C、物理右 Alt / 普通键和 AltGr 常见的伪 `Left Ctrl` + `Right Alt` 序列必须经过同一 75 ms 副作用确认边界；只有已确认的右 Alt 助手/翻译手势可以吞对应 keyup。
+- Windows hook 的 health watch 是运行期安全信号而不只是诊断查询：从 Healthy 进入 `Failed` 或意外 `Stopped` 时，runner 必须只发送一次会话 `Cancel` 并刷新托盘为「快捷键不可用」，防止漏掉 TriggerUp 后持续占用麦克风。callback panic 或事件通道关闭进入 `Failed` 时，hook state 必须原子禁止后续 raw event、退出消息循环并卸钩，且该 `Failed` 不得在 `WM_QUIT` 收尾时被覆盖为 `Stopped`。启动失败走同一个可订阅 health 状态；应用主动退出使用独立的正常 `Shutdown` 终态，不取消、不报错。
+- rdev backend 必须观察暂停 watch 的版本变化而不只读取最终布尔值；任一暂停/恢复 transition 都先清空 detector held 状态，暂停期间到达的 release 不得在恢复后留下 stale gesture。
+- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：非 Windows 默认修饰键在触发键按下即开始录音；Windows 默认右侧修饰键在 75 ms 内确认，判定窗口内组合出第二触发键则立即开始并无缝切换为翻译模式，音频保留。
 - Wayland：探测 `XDG_SESSION_TYPE`；优先 `ashpd` 走 `org.freedesktop.portal.GlobalShortcuts`（KDE/GNOME≥48/Hyprland 支持，Activated/Deactivated 信号天然支持按住；注意 Portal 快捷键由 compositor 分配，未必能绑到「单独的右⌥」，此时默认键退化为 compositor 允许的组合键）；不可用时提示 evdev 方案（用户加入 `input` 组）或 compositor 绑定 `typex toggle` CLI 命令（经 single-instance 转发）。
 
 ### 7.4 录音
 
 - cpal 以设备原生采样率（44.1/48 kHz）开流；callback 内只做 ring buffer 拷贝，重采样（rubato → 16 kHz mono f32）与电平计算在 worker 线程。
+- 输入流按 `cpal::SampleFormat` 分派并统一归一化为 mono f32；Windows WASAPI 至少覆盖 `f32`、`i16`、`u16`，不假定默认设备一定输出 f32。callback 使用有界缓冲，溢出只累计丢弃计数，不阻塞、不分配、不记录音频内容。
 - HUD 波形数据：每 50 ms 推一次 RMS 电平数组（Tauri event），前端 Canvas 渲染。
 - VAD（Silero）用于：① 结束时裁剪首尾静音（省上传/省钱/提速）；② 长录音在静音处切片（F-1 无上限要求）。
-- 设备选择：默认系统输入设备并跟随系统切换；设置中可固定设备。
+- 设备选择：空配置使用系统默认输入设备并在下次开流时跟随系统切换；设置中固定设备时，Windows 保存 WASAPI `IMMDevice` endpoint ID、界面只显示 friendly label。固定 ID 缺失必须返回 `AudioDevice`，禁止静默回退默认设备。历史版本保存的 display name 仅在当前枚举结果中唯一匹配时迁移为 ID；无匹配或同名歧义均明确失败。
+- 录音启动失败与运行时 stream error/设备拔出通过独立 `RecordingFailed` 事件主动通知 orchestrator；`Recording` 立即转 `Failed(Recording)` 并执行 `CancelRecording` 释放 active stream，不等待下一次 stop。该失败态的重试语义是重新打开麦克风并开始录音，不进入注入或 STT 阶段。
 
 ### 7.5 文本注入（Injector 后端链）
 
@@ -292,21 +308,21 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 按平台组成后备链（每个后端失败自动尝试下一个，全失败 → 复制到剪贴板 + HUD 提示）：
 
 - macOS: `paste`（保存剪贴板 → 写入 → CGEvent Cmd+V → 延迟 → 恢复）
-- Windows: `paste`（SendInput Ctrl+V）；备选 `type_direct`（SendInput KEYEVENTF_UNICODE，无剪贴板污染，用户可选）
+- Windows: `paste`（原生 SendInput Ctrl+V，校验返回发送计数）；备选 `type_direct`（SendInput `KEYEVENTF_UNICODE`，按 UTF-16 code unit 发送完整 down/up，正确处理 surrogate pair、emoji 与换行）。无焦点或 UIPI 阻止时只复制并返回明确分类，不自动提权
 - Linux X11: `paste`（XTEST）
 - Linux Wayland: 探测 compositor → wlroots 系用 `wtype`；GNOME/KDE 用 `dotool`/`ydotool`（需 /dev/uinput 权限，设置页内嵌引导）；全不可用 → 「已复制，请 Ctrl+V」模式
 
 ### 7.6 读取选中文本（Selection 降级链）
 
 1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + CGEvent Cmd+C + 读剪贴板 + 恢复（禁止通过 enigo/rdev 查询输入法布局，避免 HIToolbox 主队列断言）；**AX 属性可读但为空 = 明确无选区，直接返回、不走剪贴板降级**（降级只给不支持 AX 的应用）；定位用 `AXSelectedTextRange` + `AXBoundsForRange`，不可得时回退居中。
-2. Windows：UIA `TextPattern.GetSelection()` → 失败：Ctrl+C 降级。
+2. Windows：专用 COM worker 上执行 UIA `TextPattern.GetSelection()`；可读但为空表示明确无选区，不走剪贴板；不支持 TextPattern、COM 错误或超时才走 Ctrl+C 降级。bounds 使用 UIA range bounding rectangles，并统一转换到目标 monitor 坐标。
 3. Linux：X11 primary selection 直读；Wayland 下 primary selection 可用则用，否则明确降级提示。
-4. 降级链每步有 300 ms 超时；剪贴板法须处理「无选中时复制整行」的误触（对比复制前后剪贴板内容 + 长度启发式）。
+4. 降级链每步有 300 ms 超时。Windows Ctrl+C 降级先写 sentinel，再以 clipboard sequence 变化确认复制发生；文本与已知 metadata 必须在同一次打开剪贴板期间读取。VS Code/Monaco 的 `vscode-editor-data` 只有在大小受限、JSON 合法、`version=1` 且 `isFromEmptySelection` 为布尔 `true` 时才证明无选区；格式缺失、损坏、超大、字段缺失、未知版本或未知编辑器都保守保留文本，禁止按长度或换行猜测。原剪贴板的可恢复 HGLOBAL 格式统一快照，且仅当读取后的 sequence 未再变化时恢复，不能覆盖用户或剪贴板管理器的中途修改。无可信空选区 marker、又把无选区 Ctrl+C 定义为复制整行的第三方编辑器仍是已知残余边界。
 5. **读取时机 = 触发键松开、调 STT 的同时（并发执行，不增加延迟）**——绝不能在触发键按住期间执行：剪贴板降级要模拟 Cmd/Ctrl+C，合成的普通键 down 会命中「组合键让路」规则、把当前会话静默取消。选区在录音期间不会变（HUD 不抢焦点），松开后读取语义等价。
 
 ## 8. Linux/Wayland 支持策略（明确的分级承诺）
 
-**最低系统版本（建议值，随 CI 实测修正）**：macOS 12+（Monterey，覆盖 Tauri 2 与 NSPanel 方案的舒适区）；Windows 10 1809+（WebView2 运行时要求，安装器自动引导安装 WebView2）；Linux 需 webkit2gtk-4.1（Ubuntu 22.04+ / Debian 12+ / Fedora 38+）。
+**最低系统版本**：macOS 12+（Monterey）；Windows 10 22H2+ / Windows 11 x64（MSVC ABI）；Linux 需 webkit2gtk-4.1（Ubuntu 22.04+ / Debian 12+ / Fedora 38+）。Windows 安装器为 NSIS x64，并携带 WebView2 Evergreen Bootstrapper，在缺失 WebView2 时联网安装；本地推理依赖的 sherpa/ONNX、VC++ 2015-2022 x64 runtime 与 Vulkan loader 均 app-local 随包分发，不要求用户另装开发工具或系统级 VC/Vulkan runtime。
 
 | 级别 | 环境 | 承诺 |
 |---|---|---|
@@ -320,6 +336,8 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 
 - **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多；代理凭据若有同样按敏感配置字段处理，导出与日志必须脱敏。
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
+- `hotkeys.dictation` / `hotkeys.assistant` 保存规范化完整 chord；`hotkeys.translation` 是二者的派生有序并集。schema v6 将历史后端/浏览器别名迁移为 §7.3 的稳定 `KeyId`，每次保存仍执行同一归一化以兼容外部编辑的配置。
+- `dictation.microphone`：空字符串表示系统默认；非空值表示平台稳定设备 ID（Windows 为 WASAPI endpoint ID）。旧版设备名称在运行时唯一匹配后写回稳定 ID。
 - 密钥：随 profile 的 `credentials` 字段存入 `settings.json`，与其他配置项同路径；诊断包导出清空 `credentials`，日志 redact 层拦截 Authorization/密钥文本。旧版 `keyring://` 引用在迁移时清除，运行时也视为未配置。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。
 
@@ -344,6 +362,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 |---|---|---|
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置；F-10 词典作为 `Settings.dictionary.terms[]` 随设置同步 |
+| 音频 | `list_audio_devices` | 返回 `Result<AudioInputDevice[]>`；每项为 `{ id, label }`，设置界面展示 label、保存 id，枚举失败不得伪装为空列表 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
@@ -423,15 +442,17 @@ src/
 
 ## 14. 编码、CI 与协作规范
 
-- **Rust**：Edition 2024；`rustfmt` 默认配置；公共 API 必须有 doc comment；`unsafe` 仅允许出现在 `platform/` 并逐处注释理由。
+- **Rust**：Edition 2024；`rustfmt` 默认配置；公共 API 必须有 doc comment；`unsafe` 仅允许出现在 `platform/` 或明确命名的平台 backend（如 `hotkey/windows_backend.rs`、`inject/windows.rs`、`selection/windows.rs`），并逐处注释理由与系统不变量。
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
-- **CI**：GitHub Actions 三平台矩阵（macOS universal、Windows x64、Linux x64 AppImage+deb+rpm）；`cargo clippy -D warnings`、`cargo test`、前端 `vue-tsc --noEmit` + `vitest`。
-- **发布**：tag → 各平台 build job 产出平台资产 artifact → publish job 聚合 SHA256/manifest 并上传 GitHub Release 草稿；当前启用 macOS universal（补齐本地模型 runtime dylib 后手工打 DMG，并生成 Tauri updater `.app.tar.gz`、签名和 `latest.json`），Windows/Linux 适配时新增平台 job 接入同一聚合发布口。更新通道分 stable/nightly：stable 只检查正式 release；nightly 追最新 nightly build。macOS 公证仍待 CP-5.4 启用（[ADR-11](08-decisions.md)）。
+- **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。NSIS smoke 必须解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 PE import 闭包，不能只断言安装器文件存在。
+- **发布**：tag → 各平台 build job 产出唯一命名的平台 artifact 与 updater manifest fragment → publish job 校验后聚合 SHA256 和唯一 `latest.json`。Windows 使用 Tauri 2 原生 updater 格式：同一个 NSIS x64 `.exe` 同时作为手动安装和 updater 下载资产，旁边发布对应 `.exe.sig`，不生成仅供 Tauri v1 迁移的 legacy `.nsis.zip`；Windows 与 macOS 复用仓库现有 updater 密钥。构建前先从原生 release 产物、Microsoft VC tools redist 和固定版本/哈希的 Vulkan Loader 包生成 runtime staging，Tauri Windows resource map 将其安装到 EXE 同目录。Tauri `.sig` 是更新完整性签名，Authenticode 是 Windows 发布者身份，二者独立。SignPath/Authenticode 可后置，但构建链必须保留稳定签名插入点。更新通道分 stable/nightly，任何平台 fragment 不得同名覆盖或跨通道引用。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。
 
-## 15. 最小垂直切片
+## 15. 完整平台适配的实施顺序
+
+以下切片只用于尽早验证高风险系统链路，不是独立交付物或支持范围缩减；平台适配必须继续完成本章全部能力与 [09 发布人工回归清单](09-release-checklist.md)。
 
 1. 仓库骨架 + CI（目录树按 §4 建模块，先跑通最小构建）。
 2. `types/` + `error.rs` + `settings/schema.rs`（数据先行，IPC 生成链路跑通）。

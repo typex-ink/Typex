@@ -26,6 +26,13 @@ const PERM_KEY: Record<string, string> = {
   accessibility: "settings.diagnostics.perm_accessibility",
   input_monitoring: "settings.diagnostics.perm_input_monitoring",
 };
+const CAP_KEY: Record<string, string> = {
+  keyboard_hook: "settings.diagnostics.cap_keyboard_hook",
+  send_input: "settings.diagnostics.cap_send_input",
+  ui_automation: "settings.diagnostics.cap_ui_automation",
+  webview2: "settings.diagnostics.cap_webview2",
+  integrity: "settings.diagnostics.cap_integrity",
+};
 
 onMounted(async () => {
   report.value = await commands.getDiagnostics();
@@ -53,6 +60,15 @@ function openSettings(kind: PermissionStatus["kind"]) {
     <div class="diag">
       <span class="ok">✓</span>
       <span>{{ t("settings.diagnostics.inject_backend", { backend: report.inject_backend }) }}</span>
+    </div>
+    <div v-for="cap in report.platform_capabilities" :key="cap.key" class="diag">
+      <span :class="cap.available ? 'ok' : 'bad'">{{ cap.available ? "✓" : "✗" }}</span>
+      <span>{{ CAP_KEY[cap.key] ? t(CAP_KEY[cap.key]) : cap.key }}</span>
+      <span class="cap-detail">{{ cap.detail }}</span>
+    </div>
+    <div v-if="report.hardware" class="diag">
+      <span class="ok">✓</span>
+      <span>{{ t("settings.diagnostics.hardware", { summary: report.hardware }) }}</span>
     </div>
     <div class="actions">
       <Button @click="commands.openLogDir()">{{ t("settings.diagnostics.open_log_dir") }}</Button>
@@ -87,6 +103,12 @@ function openSettings(kind: PermissionStatus["kind"]) {
 }
 .fix {
   margin-left: auto;
+}
+.cap-detail {
+  margin-left: auto;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 .actions {
   display: flex;

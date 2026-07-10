@@ -29,7 +29,7 @@ vi.mock("@/ipc/bindings", () => ({
 
 function makeSettings(): Settings {
   return {
-    schema_version: 4,
+    schema_version: 6,
     general: {
       theme: "system",
       language: "zh_cn",
@@ -62,8 +62,8 @@ function makeSettings(): Settings {
     history: { enabled: true, retention_days: 90, typing_wpm: 45 },
     hotkeys: {
       dictation: ["MetaRight"],
-      assistant: ["AltGr"],
-      translation: ["MetaRight", "AltGr"],
+      assistant: ["AltRight"],
+      translation: ["MetaRight", "AltRight"],
       hold_threshold_ms: 350,
     },
     dictionary: { terms: [] },

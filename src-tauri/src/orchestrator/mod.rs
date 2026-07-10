@@ -68,6 +68,8 @@ struct Exec {
     recording_started: Option<Instant>,
     /// 录音开始时的前台应用名（历史 app_name / prompt 上下文 / F-11 预留）
     target_app: Option<String>,
+    /// Windows 前台 HWND/PID 的进程内身份；不进入日志、历史或 IPC。
+    target_focus: Option<crate::platform::focus::FocusTarget>,
     tx: mpsc::UnboundedSender<Event>,
 }
 
@@ -85,11 +87,13 @@ impl Orchestrator {
             transcript_store: HashMap::new(),
             recording_started: None,
             target_app: None,
+            target_focus: None,
             tx: tx.clone(),
         };
 
         // 电平转发 task（audio worker → 前端）
         let (level_tx, mut level_rx) = mpsc::unbounded_channel::<Vec<f32>>();
+        let mut audio_failures = self.audio.subscribe_failures();
         {
             let this = self.clone();
             tokio::spawn(async move {
@@ -101,6 +105,12 @@ impl Orchestrator {
 
         loop {
             let event = tokio::select! {
+                biased;
+                Some(ev) = internal_rx.recv() => Some(ev),
+                failure = audio_failures.recv() => failure.ok().map(|failure| Event::RecordingFailed {
+                    session_id: failure.session_id,
+                    error: failure.error,
+                }),
                 Some(hk) = hotkeys.recv() => self.map_hotkey(hk, &mut exec),
                 Some(cmd) = commands.recv() => Some(match cmd {
                     SessionCommand::Cancel => Event::Esc,
@@ -109,7 +119,6 @@ impl Orchestrator {
                     SessionCommand::CopyTranscript => Event::CopyTranscriptRequested,
                     SessionCommand::InjectOriginal => Event::InjectOriginalRequested,
                 }),
-                Some(ev) = internal_rx.recv() => Some(ev),
                 else => break,
             };
             let Some(event) = event else { continue };
@@ -179,21 +188,39 @@ impl Orchestrator {
         match effect {
             Effect::StartRecording => {
                 let mic = self.settings.get().dictation.microphone.clone();
+                let Some(session_id) = exec.state.session_id() else {
+                    return;
+                };
                 exec.recording_started = Some(Instant::now());
                 // 采样注入目标应用（02 F-7：录音开始时的前台应用即注入目标）
-                exec.target_app = crate::platform::focus::frontmost_app_name();
+                exec.target_focus = crate::platform::focus::FocusTarget::capture();
+                exec.target_app = exec
+                    .target_focus
+                    .as_ref()
+                    .and_then(crate::platform::focus::FocusTarget::app_name);
                 // 助手模式的选区读取推迟到触发键松开（CallStt 时并发执行，06 §7.6-5）：
                 // 剪贴板降级的模拟 Cmd+C 在按住期间会触发组合键让路、误取消本会话
                 if exec.state.mode() == Some(SessionMode::Assistant) {
                     *self.pending_selection.lock().unwrap() = None;
                 }
-                if let Err(e) = self.audio.start(&mic, level_tx.clone()) {
-                    tracing::error!("录音启动失败: {}", e.message);
-                    if let Some(sid) = exec.state.session_id() {
-                        let _ = exec.tx.send(Event::SttFailed {
-                            session_id: sid,
-                            error: e,
-                        });
+                match self.audio.start(session_id, &mic, level_tx.clone()) {
+                    Ok(Some(migrated_device_id)) => {
+                        if let Err(error) = self.settings.mutate(|settings| {
+                            settings.dictation.microphone = migrated_device_id;
+                        }) {
+                            tracing::warn!(
+                                error_code = ?error.code,
+                                "failed to persist migrated microphone endpoint ID"
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(
+                            error_code = ?error.code,
+                            "recording failed to start"
+                        );
+                        let _ = exec.tx.send(Event::RecordingFailed { session_id, error });
                     }
                 }
             }
@@ -214,7 +241,7 @@ impl Orchestrator {
                             Some(rec)
                         }
                         Err(e) => {
-                            let _ = exec.tx.send(Event::SttFailed {
+                            let _ = exec.tx.send(Event::RecordingFailed {
                                 session_id,
                                 error: e,
                             });
@@ -242,6 +269,7 @@ impl Orchestrator {
                         self.selection.clone(),
                         self.pending_selection.clone(),
                         self.selection_read_failed.clone(),
+                        exec.target_focus.clone(),
                     )
                 });
                 let registry = self.registry.clone();
@@ -251,8 +279,11 @@ impl Orchestrator {
                 let tx = exec.tx.clone();
                 tokio::spawn(async move {
                     let selection_fut = async {
-                        if let Some((reader, pending, failed)) = assistant_read {
-                            let outcome = tokio::task::spawn_blocking(move || reader.read()).await;
+                        if let Some((reader, pending, failed, target)) = assistant_read {
+                            let outcome = tokio::task::spawn_blocking(move || {
+                                reader.read_targeted(target.as_ref())
+                            })
+                            .await;
                             let (result, read_failed) = match outcome {
                                 Ok(Ok(sel)) => (sel, false),
                                 _ => (None, true), // 读取报错 → 降级为普通提问（05 §4）
@@ -375,10 +406,20 @@ impl Orchestrator {
                 let injector = self.injector.clone();
                 let tx = exec.tx.clone();
                 let method = self.settings.get().dictation.inject_method;
+                let target = exec.target_focus.clone();
                 *self.last_result.lock().unwrap() = Some(text.clone());
                 // enigo/剪贴板是阻塞调用 → blocking 线程
                 tokio::task::spawn_blocking(move || {
-                    let event = match injector.inject_with(&text, method) {
+                    let result =
+                        if crate::platform::focus::captured_target_is_current(target.as_ref()) {
+                            injector.inject_with_target(&text, method, target.as_ref())
+                        } else {
+                            Err(TypexError::new(
+                                ErrorCode::NoFocus,
+                                "foreground target changed before injection",
+                            ))
+                        };
+                    let event = match result {
                         Ok(()) => Event::InjectDone { session_id },
                         Err(e) => Event::InjectFailed {
                             session_id,
@@ -405,11 +446,18 @@ impl Orchestrator {
                 }
             }
             Effect::CopyToClipboard(text) => {
-                tokio::task::spawn_blocking(move || {
-                    if let Ok(mut cb) = arboard::Clipboard::new() {
-                        let _ = cb.set_text(text);
+                // Injection fallback must be confirmed before the following EmitUi claims the
+                // result is available on the clipboard. The Windows implementation uses bounded
+                // retries and a valid owner HWND.
+                if let Err(copy_error) = crate::inject::copy_text_to_clipboard(&text) {
+                    tracing::warn!(
+                        error_code = ?copy_error.code,
+                        "failed to copy injection fallback to clipboard"
+                    );
+                    if let State::Failed { error, .. } = &mut exec.state {
+                        *error = copy_error;
                     }
-                });
+                }
             }
             Effect::ReleaseAudio { session_id } => {
                 exec.audio_store.remove(&session_id);

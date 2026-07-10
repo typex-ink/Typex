@@ -39,11 +39,18 @@ if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && \
   [ -n "${UPDATER_ARCHIVE_NAME}" ]; then
   tar -C "$(dirname "$APP_PATH")" -czf "$ASSET_DIR/$UPDATER_ARCHIVE_NAME" "$(basename "$APP_PATH")"
   pnpm tauri signer sign "$ASSET_DIR/$UPDATER_ARCHIVE_NAME"
+  unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+  env -u TAURI_SIGNING_PRIVATE_KEY -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+    TYPEX_UPDATER_ARTIFACT="$ASSET_DIR/$UPDATER_ARCHIVE_NAME" \
+    TYPEX_UPDATER_SIGNATURE="$ASSET_DIR/$UPDATER_ARCHIVE_NAME.sig" \
+    pnpm verify:updater-signature
 
   SIGNATURE="$(cat "$ASSET_DIR/$UPDATER_ARCHIVE_NAME.sig")"
   UPDATER_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${UPDATER_ARCHIVE_NAME}"
 
+  UPDATER_FRAGMENT="updater-${PLATFORM_ID}.json"
   ASSET_DIR="$ASSET_DIR" \
+    UPDATER_FRAGMENT="$UPDATER_FRAGMENT" \
     UPDATER_VERSION="$UPDATER_VERSION" \
     UPDATE_NOTES="$UPDATE_NOTES" \
     BUILD_TIME="$BUILD_TIME" \
@@ -70,12 +77,12 @@ const manifest = {
 };
 
 fs.writeFileSync(
-  `${process.env.ASSET_DIR}/latest.json`,
+  `${process.env.ASSET_DIR}/${process.env.UPDATER_FRAGMENT}`,
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
 NODE
 
-  ASSETS_JSON="[\"${DMG_NAME}\",\"${UPDATER_ARCHIVE_NAME}\",\"${UPDATER_ARCHIVE_NAME}.sig\",\"latest.json\"]"
+  ASSETS_JSON="[\"${DMG_NAME}\",\"${UPDATER_ARCHIVE_NAME}\",\"${UPDATER_ARCHIVE_NAME}.sig\"]"
 else
   echo "Skipping Tauri updater assets: signing secrets or UPDATER_ARCHIVE_NAME are not configured."
 fi
@@ -89,7 +96,7 @@ const metadata = {
 };
 
 fs.writeFileSync(
-  `${process.env.ASSET_DIR}/${process.env.PLATFORM_ID}.json`,
+  `${process.env.ASSET_DIR}/platform-${process.env.PLATFORM_ID}.json`,
   `${JSON.stringify(metadata, null, 2)}\n`,
 );
 NODE

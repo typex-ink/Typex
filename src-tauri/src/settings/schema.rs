@@ -1,11 +1,14 @@
 //! 全部配置结构体 + 默认值 + schema_version（06 §4 settings/schema.rs）。
 //! settings.json 形态见 03 §6；本文件是其唯一 Rust 定义。
 
-use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
+use crate::types::{
+    derive_translation_chord, hotkey_chords_are_reachable, normalize_hotkey_chord,
+    profile::{ModelDownloadSource, ProviderProfile, SlotKind},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 pub const DICTIONARY_MAX_TERMS: usize = 100;
 pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
@@ -53,6 +56,7 @@ impl Settings {
     pub fn normalize_for_save(&mut self) {
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.dictionary.normalize();
+        self.hotkeys.normalize();
     }
 }
 
@@ -153,7 +157,7 @@ pub struct DictationSettings {
     pub paste_delay_ms: u64,
     /// STT language 提示；"auto" = 自动检测
     pub language: String,
-    /// 固定麦克风设备名；空 = 系统默认
+    /// 固定麦克风稳定设备 ID；空 = 系统默认。v4 旧名称由 audio 运行时唯一匹配迁移。
     pub microphone: String,
     /// Esc 取消录音（05 §3.3 可关）
     pub esc_cancels: bool,
@@ -208,7 +212,7 @@ pub struct AssistantSettings {
     pub ask_prompt: String,
 }
 
-/// 快捷键绑定：一组按键标识（rdev key 的稳定字符串名）。
+/// 快捷键绑定：每组是一个完整 chord，按键使用稳定物理 KeyId。
 /// 默认全修饰键三角方案（ADR-7）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
@@ -222,18 +226,32 @@ pub struct HotkeySettings {
 
 impl Default for HotkeySettings {
     fn default() -> Self {
-        // 注意：rdev 中右 ⌥/右 Alt 的标识是 "AltGr"（rdev::Key 无 AltRight 变体）
         #[cfg(target_os = "macos")]
-        let (dict, assist) = (vec!["MetaRight".to_string()], vec!["AltGr".to_string()]);
+        let (dict, assist) = (vec!["MetaRight".to_string()], vec!["AltRight".to_string()]);
         #[cfg(not(target_os = "macos"))]
-        let (dict, assist) = (vec!["ControlRight".to_string()], vec!["AltGr".to_string()]);
-        let translation = vec![dict[0].clone(), assist[0].clone()];
+        let (dict, assist) = (
+            vec!["ControlRight".to_string()],
+            vec!["AltRight".to_string()],
+        );
+        let translation = derive_translation_chord(&dict, &assist);
         Self {
             dictation: dict,
             assistant: assist,
             translation,
             hold_threshold_ms: 350,
         }
+    }
+}
+
+impl HotkeySettings {
+    pub fn normalize(&mut self) {
+        self.dictation = normalize_hotkey_chord(&self.dictation);
+        self.assistant = normalize_hotkey_chord(&self.assistant);
+        self.translation = derive_translation_chord(&self.dictation, &self.assistant);
+    }
+
+    pub fn chords_are_reachable(&self) -> bool {
+        hotkey_chords_are_reachable(&self.dictation, &self.assistant)
     }
 }
 
@@ -354,9 +372,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 4, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 6, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 4);
+        assert_eq!(s.schema_version, 6);
         assert_eq!(s.general.update_channel, UpdateChannel::Stable);
     }
 
@@ -367,19 +385,61 @@ mod tests {
         assert_eq!(h.translation.len(), 2);
         assert!(h.translation.contains(&h.dictation[0]));
         assert!(h.translation.contains(&h.assistant[0]));
+        assert!(h.assistant.contains(&"AltRight".to_string()));
+    }
+
+    #[test]
+    fn hotkeys_normalize_aliases_and_derive_multi_key_translation() {
+        let mut h = HotkeySettings {
+            dictation: vec!["ControlRight".into(), "Num1".into(), "Digit1".into()],
+            assistant: vec!["AltGr".into(), "KeyA".into()],
+            translation: vec!["stale-value".into()],
+            hold_threshold_ms: 350,
+        };
+
+        h.normalize();
+
+        assert_eq!(h.dictation, vec!["ControlRight", "Digit1"]);
+        assert_eq!(h.assistant, vec!["AltRight", "KeyA"]);
+        assert_eq!(
+            h.translation,
+            vec!["ControlRight", "Digit1", "AltRight", "KeyA"]
+        );
+        assert!(h.chords_are_reachable());
+    }
+
+    #[test]
+    fn equal_or_subset_hotkeys_are_not_reachable() {
+        let equal = HotkeySettings {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["ControlRight".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!equal.chords_are_reachable());
+
+        let subset = HotkeySettings {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["ControlRight".into(), "KeyA".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!subset.chords_are_reachable());
     }
 
     #[test]
     fn dictionary_terms_are_normalized_for_save() {
-        let mut s = Settings::default();
-        s.schema_version = 1;
-        s.dictionary.terms = vec![
-            " Typex ".into(),
-            "".into(),
-            "OpenAI".into(),
-            "Typex".into(),
-            "超长".repeat(40),
-        ];
+        let mut s = Settings {
+            schema_version: 1,
+            dictionary: DictionarySettings {
+                terms: vec![
+                    " Typex ".into(),
+                    "".into(),
+                    "OpenAI".into(),
+                    "Typex".into(),
+                    "超长".repeat(40),
+                ],
+            },
+            ..Settings::default()
+        };
         s.normalize_for_save();
         assert_eq!(s.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(s.dictionary.terms[0], "Typex");

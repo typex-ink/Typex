@@ -1,6 +1,7 @@
 # Rust
 /src-tauri/target
 /target
+/tools/updater-signature-verifier/target/
 
 # Node
 node_modules
@@ -9,6 +10,7 @@ dist
 # 生成物
 /src/ipc/bindings.ts
 /src-tauri/gen/schemas
+/src-tauri/windows-runtime/
 
 # 系统
 .DS_Store

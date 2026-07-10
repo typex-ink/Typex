@@ -31,7 +31,13 @@ pub fn open_settings(kind: PermissionKind) {
             ))
             .spawn();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        if kind == PermissionKind::Microphone {
+            let _ = super::shell::open_uri("ms-settings:privacy-microphone");
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = kind;
 }
 
@@ -64,7 +70,7 @@ fn input_monitoring_granted() -> bool {
 
 /// 检测全部权限状态。
 ///
-/// 当前可用平台是 macOS；Windows / Linux 适配时在这里补齐对应权限探测。
+/// Windows 桌面应用只有麦克风隐私总开关；快捷键与注入不需要预授权。
 pub fn check_all() -> Vec<PermissionStatus> {
     #[cfg(target_os = "macos")]
     {
@@ -83,7 +89,14 @@ pub fn check_all() -> Vec<PermissionStatus> {
             },
         ]
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        vec![PermissionStatus {
+            kind: PermissionKind::Microphone,
+            granted: super::windows::microphone_access_allowed(),
+        }]
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Vec::new()
     }

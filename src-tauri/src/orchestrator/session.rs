@@ -108,6 +108,8 @@ pub enum Event {
     InjectOriginalRequested,
     /// 录音服务完成（携带产物就绪信号；音频本体在 orchestrator 手里）
     RecordingFinished { session_id: u64 },
+    /// 录音启动失败或运行中设备/stream 失效
+    RecordingFailed { session_id: u64, error: TypexError },
     /// STT 成功
     SttResult { session_id: u64, transcript: String },
     /// STT 失败
@@ -263,6 +265,24 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 E::ReleaseAudio { session_id },
             ],
         ),
+        (
+            State::Recording {
+                session_id, mode, ..
+            },
+            Event::RecordingFailed {
+                session_id: sid,
+                error,
+            },
+        ) if sid == session_id => (
+            State::Failed {
+                session_id,
+                mode,
+                stage: FailedStage::Recording,
+                error,
+                transcript: None,
+            },
+            vec![E::CancelRecording, E::EmitUi, E::PlayChime(Chime::Error)],
+        ),
         (s @ State::Recording { .. }, _) => (s, vec![]),
 
         // ───────── Transcribing ─────────
@@ -286,6 +306,22 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 },
                 E::EmitUi,
             ],
+        ),
+        (
+            State::Transcribing { session_id, mode },
+            Event::RecordingFailed {
+                session_id: sid,
+                error,
+            },
+        ) if sid == session_id => (
+            State::Failed {
+                session_id,
+                mode,
+                stage: FailedStage::Recording,
+                error,
+                transcript: None,
+            },
+            vec![E::CancelRecording, E::EmitUi, E::PlayChime(Chime::Error)],
         ),
         (
             State::Transcribing { session_id, mode },
@@ -411,7 +447,8 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
         ) if sid == session_id => {
             // 注入失败 → 自动转剪贴板 + 明示（05 §9 兜底）
-            let effects = if error.code == ErrorCode::NoFocus {
+            let effects = if matches!(error.code, ErrorCode::NoFocus | ErrorCode::InjectionBlocked)
+            {
                 vec![E::CopyToClipboard(text.clone()), E::EmitUi]
             } else {
                 vec![
@@ -469,7 +506,15 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                         ],
                     )
                 }
-                FailedStage::Injecting | FailedStage::Recording => {
+                FailedStage::Recording => (
+                    State::Recording {
+                        session_id,
+                        mode,
+                        toggled: false,
+                    },
+                    vec![E::StartRecording, E::EmitUi, E::PlayChime(Chime::Start)],
+                ),
+                FailedStage::Injecting => {
                     let t = transcript.unwrap_or_default();
                     (
                         State::Injecting {
@@ -791,7 +836,100 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pause_cancel_releases_push_to_talk_recording() {
+        // The tray's SessionCommand::Cancel maps to Event::Esc in the orchestrator.
+        let (state, effects) = advance(recording(7), Event::Esc, T);
+
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::CancelRecording,
+                Effect::EmitUi,
+                Effect::ReleaseAudio { session_id: 7 }
+            ]
+        );
+    }
+
+    #[test]
+    fn pause_cancel_releases_toggle_recording() {
+        let toggled = State::Recording {
+            session_id: 8,
+            mode: SessionMode::Assistant,
+            toggled: true,
+        };
+        let (state, effects) = advance(toggled, Event::Esc, T);
+
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::CancelRecording,
+                Effect::EmitUi,
+                Effect::ReleaseAudio { session_id: 8 }
+            ]
+        );
+    }
+
     // ── 失败恢复（场景 6）──
+
+    #[test]
+    fn recording_failure_enters_failed_and_releases_active_stream() {
+        let (state, effects) = advance(
+            recording(7),
+            Event::RecordingFailed {
+                session_id: 7,
+                error: err(ErrorCode::AudioDevice),
+            },
+            T,
+        );
+
+        assert!(matches!(
+            state,
+            State::Failed {
+                session_id: 7,
+                stage: FailedStage::Recording,
+                transcript: None,
+                ..
+            }
+        ));
+        assert!(effects.contains(&Effect::CancelRecording));
+        assert!(effects.contains(&Effect::EmitUi));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::CallStt { .. }))
+        );
+    }
+
+    #[test]
+    fn retry_after_recording_failure_reopens_microphone() {
+        let failed = State::Failed {
+            session_id: 7,
+            mode: SessionMode::Translation,
+            stage: FailedStage::Recording,
+            error: err(ErrorCode::AudioDevice),
+            transcript: None,
+        };
+
+        let (state, effects) = advance(failed, Event::Retry, T);
+
+        assert!(matches!(
+            state,
+            State::Recording {
+                session_id: 7,
+                mode: SessionMode::Translation,
+                toggled: false,
+            }
+        ));
+        assert!(effects.contains(&Effect::StartRecording));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Inject { .. }))
+        );
+    }
 
     #[test]
     fn stt_failure_keeps_audio_recoverable() {
@@ -1062,6 +1200,30 @@ mod tests {
         assert_eq!(s.phase(), SessionPhase::Failed);
         assert!(fx.contains(&Effect::CopyToClipboard("结果".into())));
         // NoFocus 是常见情况，不放错误音
+        assert!(
+            !fx.iter()
+                .any(|e| matches!(e, Effect::PlayChime(Chime::Error)))
+        );
+    }
+
+    #[test]
+    fn uipi_blocked_copies_without_error_chime() {
+        let s0 = State::Injecting {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            text: "结果".into(),
+            unpolished: false,
+        };
+        let (s, fx) = advance(
+            s0,
+            Event::InjectFailed {
+                session_id: 1,
+                error: err(ErrorCode::InjectionBlocked),
+            },
+            T,
+        );
+        assert_eq!(s.phase(), SessionPhase::Failed);
+        assert!(fx.contains(&Effect::CopyToClipboard("结果".into())));
         assert!(
             !fx.iter()
                 .any(|e| matches!(e, Effect::PlayChime(Chime::Error)))

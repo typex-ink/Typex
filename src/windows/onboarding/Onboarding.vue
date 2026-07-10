@@ -12,10 +12,18 @@ import Select from "@/components/Select.vue";
 import { commands, events, type HardwareTier, type LocalModelInfo, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
 import { formatBytes } from "@/shared/format";
 import { useSettingsStore } from "@/stores/settings";
+import { usePlatform } from "@/composables/usePlatform";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const store = useSettingsStore();
+const { defaultHotkeys, keyLabel } = usePlatform();
 const step = ref(1);
+
+type HotkeySlot = "dictation" | "assistant" | "translation";
+function hotkeyText(slot: HotkeySlot): string {
+  const keys = store.settings?.hotkeys?.[slot] ?? defaultHotkeys.value[slot];
+  return keys.map((key) => keyLabel(key, t, te)).join(" + ");
+}
 // 第 1 步语言下拉：直接写 settings.general.language，全 UI 即时切换（syncLocale 订阅）
 const lang = computed<UiLanguage>({
   get: () => store.settings?.general.language ?? "system",
@@ -358,13 +366,13 @@ onUnmounted(() => {
     <!-- 步骤 4 · 快捷键 + 练习 -->
     <div v-else-if="step === 4" class="body">
       <h5>{{ t("onboarding.hotkeys_title") }}</h5>
-      <div class="frow"><span>{{ t("modes.dictation") }}</span><Kbd>{{ t("keys.MetaRight") }}</Kbd></div>
-      <div class="frow"><span>{{ t("modes.assistant") }}</span><Kbd>{{ t("keys.AltGr") }}</Kbd></div>
-      <div class="frow"><span>{{ t("modes.translation") }}</span><span><Kbd>{{ t("keys.MetaRight") }}</Kbd> + <Kbd>{{ t("keys.AltGr") }}</Kbd></span></div>
+      <div class="frow"><span>{{ t("modes.dictation") }}</span><Kbd>{{ hotkeyText("dictation") }}</Kbd></div>
+      <div class="frow"><span>{{ t("modes.assistant") }}</span><Kbd>{{ hotkeyText("assistant") }}</Kbd></div>
+      <div class="frow"><span>{{ t("modes.translation") }}</span><Kbd>{{ hotkeyText("translation") }}</Kbd></div>
       <div class="practice">
         <p>
           <i18n-t keypath="onboarding.practice" scope="global">
-            <template #key><Kbd>{{ t("keys.MetaRight") }}</Kbd></template>
+            <template #key><Kbd>{{ hotkeyText("dictation") }}</Kbd></template>
           </i18n-t>
         </p>
         <Input v-model="practiceText" :placeholder="t('onboarding.practice_ph')" @input="practiceDone = practiceText.length > 0" />

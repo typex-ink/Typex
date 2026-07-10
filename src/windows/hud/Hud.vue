@@ -89,7 +89,7 @@ const processingText = computed(() => {
 const failText = computed(() => {
   const stage = stageText[snap.failed_stage ?? ""] ?? "";
   const msg = errorText[snap.error ?? "internal"];
-  return snap.error === "no_focus" || snap.error === "no_speech"
+  return snap.error === "no_focus" || snap.error === "injection_blocked" || snap.error === "no_speech"
     ? msg
     : stage
       ? `${stage}失败：${msg}`
@@ -101,15 +101,21 @@ const isProcessing = computed(
   () => snap.phase === "transcribing" || snap.phase === "processing" || snap.phase === "injecting",
 );
 const isFailed = computed(() => snap.phase === "failed");
+const isCopiedInfo = computed(
+  () => isFailed.value && (snap.error === "no_focus" || snap.error === "injection_blocked"),
+);
 // 胶囊是否可见：常驻单节点，阶段切换只换内容不重放出现动画（04 §6 动画仅出现/消失）
 const active = computed(
   () => showSuccess.value || isRecording.value || isProcessing.value || isFailed.value,
 );
 // 翻译失败且转写在手 → 提供「注入原文」（02 F-2 降级）
 const canInjectOriginal = computed(
-  () => isFailed.value && snap.mode === "translation" && snap.has_transcript,
+  () => isFailed.value && !isCopiedInfo.value && snap.mode === "translation" && snap.has_transcript,
 );
-const canRetry = computed(() => isFailed.value && snap.error !== "no_focus");
+const canRetry = computed(() => isFailed.value && !isCopiedInfo.value);
+const canCopyTranscript = computed(
+  () => isFailed.value && !isCopiedInfo.value && snap.has_transcript,
+);
 
 function fmtTime(ms: number) {
   const s = Math.floor(ms / 1000);
@@ -284,7 +290,7 @@ async function syncHudWindowFrame(force = false) {
 
         <!-- 失败（不自动消失，05 §3.2） -->
         <template v-else-if="isFailed">
-          <span v-if="snap.error === 'no_focus'" class="info">ⓘ</span>
+          <span v-if="isCopiedInfo" class="info">ⓘ</span>
           <span v-else class="warn">⚠</span>
           <span class="ftext">{{ failText }}</span>
           <button v-if="canRetry" class="btn-sm" @click="sendCommand('retry')">
@@ -298,7 +304,7 @@ async function syncHudWindowFrame(force = false) {
             {{ L.hud.inject_original }}
           </button>
           <button
-            v-else-if="snap.has_transcript"
+            v-else-if="canCopyTranscript"
             class="btn-ghost-sm"
             @click="sendCommand('copy_transcript')"
           >

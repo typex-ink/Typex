@@ -20,6 +20,7 @@ export type ErrorCode =
   | "invalid_request"
   | "no_speech"
   | "no_focus"
+  | "injection_blocked"
   | "permission_missing"
   | "audio_device"
   | "not_configured"
