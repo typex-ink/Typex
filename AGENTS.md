@@ -40,6 +40,7 @@ docs/               # 长期维护文档集，结构见 docs/README.md
 - 分层依赖单向：前端 → app → orchestrator → service → platform。service 之间不横向依赖；只有 orchestrator 能同时调用多个 service。
 - `app/` 只做 Tauri 胶水；业务流程归 `orchestrator/`。
 - `src/ipc/bindings.ts` 是生成物，禁止手改。
+- 新增、升级或修改 `src-tauri/vendor/` 包时，必须同步更新 [`src-tauri/vendor/README.md`](src-tauri/vendor/README.md)，记录 vendor 原因、上游基线和所有 Typex 修改文件；移除 vendor 时同步删除对应条目。
 - 不记录转写文本内容、音频内容、密钥或凭据；日志只记长度、耗时、错误分类等非敏感信息。
 - 改 IPC 契约、配置 schema、状态机行为、Provider wire shape、UI token 或错误码时，必须同步更新对应章节。
 - 不要删除、回滚或覆盖用户已有改动，除非用户明确要求。
