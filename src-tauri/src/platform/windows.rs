@@ -6,7 +6,8 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, HWND, RECT, SetLastError,
+    CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, RECT, SetLastError,
+    WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
@@ -15,6 +16,7 @@ use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL,
     TOKEN_QUERY, TokenIntegrityLevel,
 };
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
 };
@@ -22,14 +24,18 @@ use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
 };
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForWindow, MDT_EFFECTIVE_DPI};
+use windows::Win32::UI::HiDpi::{
+    GetDpiForMonitor, GetDpiForWindow, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     GUITHREADINFO, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
-    GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST, SW_SHOWNORMAL, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
+    IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON,
+    SM_CYSMICON, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
+    SWP_NOSIZE, SendMessageW, SetWindowLongPtrW, SetWindowPos, WM_SETICON, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -474,6 +480,69 @@ pub fn can_inject_foreground() -> Result<bool, String> {
     let source_integrity = current_process_integrity()?;
     let target_integrity = process_integrity(target.process_id)?;
     Ok(!uipi_blocks_injection(source_integrity, target_integrity))
+}
+
+/// Load both native icon sizes from the executable's multi-size ICO resource for this window's
+/// current DPI. Tauri 2.11 decodes only the first ICO frame (16px) for its default window icon,
+/// which Windows otherwise scales up for both the title bar and taskbar.
+pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
+    if hwnd.is_invalid() {
+        return Err("invalid_app_window".into());
+    }
+
+    let dpi = unsafe { GetDpiForWindow(hwnd) }.max(BASE_DPI as u32);
+    let small_width = unsafe { GetSystemMetricsForDpi(SM_CXSMICON, dpi) };
+    let small_height = unsafe { GetSystemMetricsForDpi(SM_CYSMICON, dpi) };
+    let big_width = unsafe { GetSystemMetricsForDpi(SM_CXICON, dpi) };
+    let big_height = unsafe { GetSystemMetricsForDpi(SM_CYICON, dpi) };
+    if [small_width, small_height, big_width, big_height]
+        .into_iter()
+        .any(|dimension| dimension <= 0)
+    {
+        return Err("app_icon_metrics_unavailable".into());
+    }
+
+    let module =
+        unsafe { GetModuleHandleW(None) }.map_err(|_| "app_icon_module_unavailable".to_string())?;
+    let instance = HINSTANCE(module.0);
+    let small = unsafe {
+        LoadImageW(
+            Some(instance),
+            IDI_APPLICATION,
+            IMAGE_ICON,
+            small_width,
+            small_height,
+            LR_SHARED,
+        )
+    }
+    .map_err(|_| "app_icon_small_load_failed".to_string())?;
+    let big = unsafe {
+        LoadImageW(
+            Some(instance),
+            IDI_APPLICATION,
+            IMAGE_ICON,
+            big_width,
+            big_height,
+            LR_SHARED,
+        )
+    }
+    .map_err(|_| "app_icon_big_load_failed".to_string())?;
+
+    unsafe {
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_SMALL as usize)),
+            Some(LPARAM(small.0 as isize)),
+        );
+        SendMessageW(
+            hwnd,
+            WM_SETICON,
+            Some(WPARAM(ICON_BIG as usize)),
+            Some(LPARAM(big.0 as isize)),
+        );
+    }
+    Ok(())
 }
 
 pub fn configure_hud_window(hwnd: HWND) -> Result<(), String> {

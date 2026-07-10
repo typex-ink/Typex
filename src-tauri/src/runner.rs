@@ -516,6 +516,17 @@ pub fn run() {
                 {
                     let _ = runtime.shutdown();
                 }
+                #[cfg(target_os = "windows")]
+                if let tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::ScaleFactorChanged { .. },
+                    ..
+                } = &event
+                    && matches!(label.as_str(), "home" | "settings" | "onboarding")
+                    && let Some(window) = app.get_webview_window(label)
+                {
+                    crate::app::windows::refresh_windows_window_icons(&window);
+                }
                 // 点击 Dock 图标（无可见窗口时）→ 打开主页（05 §8：Dock/托盘按需打开）
                 #[cfg(target_os = "macos")]
                 if let tauri::RunEvent::Reopen {

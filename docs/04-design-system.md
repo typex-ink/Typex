@@ -50,6 +50,10 @@
 
 小尺寸（≤32px）仍保留五柱 + 竖笔，与应用内 mini 图标一致。
 
+Windows 常规窗口必须按每窗口 DPI 同时设置原生 small / big HICON，并在跨屏 DPI
+变化后刷新；例如 144 DPI 分别使用 24px / 48px 图层。禁止把 `.ico` 第一帧的
+16px 位图放大后同时用于标题栏和任务栏。
+
 源文件：`assets/icon/typex.svg`（单一 SVG 源，脚本导出全平台，禁止手改位图）。
 
 ### 2.3 Logo 与文字标

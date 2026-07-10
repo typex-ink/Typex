@@ -353,7 +353,9 @@ pub fn open_log_dir(app: tauri::AppHandle) {
 /// 打开设置窗口（主页侧边栏 ⚙）。
 #[tauri::command]
 #[specta::specta]
-pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+pub async fn open_settings_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+    // Keep this command async: synchronously creating a second WebView from a WebView2 IPC
+    // callback can leave the new Windows webview stuck before its initial navigation.
     crate::app::windows::show_settings(&app)
         .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
 }
@@ -361,7 +363,8 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), TypexError> {
 /// 打开首次启动引导（设置 → 调试）。
 #[tauri::command]
 #[specta::specta]
-pub fn open_onboarding_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+pub async fn open_onboarding_window(app: tauri::AppHandle) -> Result<(), TypexError> {
+    // This is also called from a webview, so it must avoid synchronous WebView2 re-entry.
     crate::app::windows::show_onboarding(&app)
         .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
 }

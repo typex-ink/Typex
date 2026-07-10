@@ -10,6 +10,16 @@ use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 /// HUD 显隐代际：每次快照 +1；延迟隐藏只在代际未变时执行（防止杀掉新会话的 HUD）。
 static HUD_GEN: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(target_os = "windows")]
+pub fn refresh_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    if let Err(classification) = crate::platform::windows::configure_app_window_icons(hwnd) {
+        tracing::warn!(classification, "Windows 窗口图标设置失败");
+    }
+}
+
 fn native_theme(theme: &ThemeMode) -> Option<tauri::Theme> {
     match theme {
         ThemeMode::System => None,
@@ -289,6 +299,8 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
 /// 设置窗口：720×520 常规窗口，按需创建（05 §5）。
 pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("settings") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -309,7 +321,9 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("settings", &window, native_theme(&theme));
@@ -319,6 +333,8 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 /// 主页窗口：880×560 侧边栏导航（05 §8 / ADR-19）。
 pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("home") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -340,7 +356,9 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("home", &window, native_theme(&theme));
@@ -573,6 +591,8 @@ fn position_assistant_fallback<R: Runtime>(
 /// 首次启动引导：640×480，5 步向导（05 §6）。
 pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("onboarding") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -591,6 +611,10 @@ pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
-    builder.build()?;
+    let window = builder.build()?;
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(target_os = "windows"))]
+    let _ = &window;
     Ok(())
 }
