@@ -9,6 +9,19 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Tauri's Windows PowerShell subprocess may not discover built-in modules automatically.
+foreach ($moduleName in @(
+    "Microsoft.PowerShell.Management",
+    "Microsoft.PowerShell.Utility",
+    "Microsoft.PowerShell.Security"
+)) {
+    $moduleManifest = [IO.Path]::Combine($PSHOME, "Modules", $moduleName, "$moduleName.psd1")
+    if (-not [IO.File]::Exists($moduleManifest)) {
+        throw "Required built-in PowerShell module is missing: $moduleManifest"
+    }
+    Import-Module -Name $moduleManifest -Force -ErrorAction Stop
+}
+
 if ($env:OS -ne "Windows_NT") {
     throw "Windows runtime staging must run on Windows"
 }
@@ -55,7 +68,17 @@ if (-not $SkipBuild) {
 }
 
 function Get-Sha256([string]$Path) {
-    (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
 }
 
 function Assert-Sha256([string]$Path, [string]$Expected) {
