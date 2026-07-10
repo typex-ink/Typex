@@ -171,7 +171,7 @@ jobs:
             throw "VULKAN_SDK was not configured"
           }
           $vulkanCmakePrefix = Join-Path $env:VULKAN_SDK "Lib\cmake"
-          $spirvHeadersConfig = Join-Path $vulkanCmakePrefix "SPIRV-Headers\SPIRV-HeadersConfig.cmake"
+          $spirvHeadersConfig = Join-Path $vulkanCmakePrefix "SPIRV-HeadersConfig.cmake"
           if (-not (Test-Path -LiteralPath $spirvHeadersConfig -PathType Leaf)) {
             throw "Vulkan SDK is missing SPIRV-HeadersConfig.cmake: $spirvHeadersConfig"
           }
