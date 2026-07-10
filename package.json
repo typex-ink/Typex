@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri.mjs",
     "test": "vitest run",
     "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib export_bindings",
     "test:release-metadata": "node --test scripts/aggregate-updater-manifests.test.mjs && cargo check --locked --manifest-path tools/updater-signature-verifier/Cargo.toml",

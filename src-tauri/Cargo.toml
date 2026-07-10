@@ -69,12 +69,13 @@ tauri-plugin-updater = "2.10.1"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 sysinfo = { version = "0.38.4", optional = true }
 sha2 = { version = "0.10", optional = true }
-sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
-sherpa-rs-sys = { version = "0.6.8", default-features = false, optional = true }
 # llama-cpp-2 内部已依赖 encoding_rs；这里显式引用用于 token 增量 UTF-8 解码（CP-8.5）
 encoding_rs = { version = "0.8", optional = true }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
+# macOS/Linux 保持源码构建，避免改变现有本地模型产物。
+sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
+sherpa-rs-sys = { version = "0.6.8", default-features = false, optional = true }
 # Windows uses the native WH_KEYBOARD_LL backend; rdev remains for macOS/Linux.
 rdev = "0.5"
 
@@ -88,6 +89,9 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.
 llama-cpp-2 = { version = "0.1.150", features = ["metal", "mtmd"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# 上游固定版本预编译包带 SHA-256 校验，避免 sherpa-onnx FetchContent 超过 MAX_PATH。
+sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries"], optional = true }
+sherpa-rs-sys = { version = "0.6.8", default-features = false, features = ["download-binaries"], optional = true }
 # Win32 API 集中用于 platform、hotkey、inject 与 selection 的 Windows backend。
 windows = { version = "0.61.3", features = [
     "Win32_Foundation",
@@ -125,6 +129,14 @@ lto = true
 opt-level = "s"
 strip = true
 
+# Both sys crates use Release native libraries in dev/test builds. Compiling
+# their build scripts with debug assertions would incorrectly link msvcrtd.
+[profile.dev.package.llama-cpp-sys-2]
+debug-assertions = false
+
+[profile.dev.package.sherpa-rs-sys]
+debug-assertions = false
+
 # rdev 0.5.3 补丁：监听回调不调 TSM 输入法 API（macOS 26 强制主线程，否则 SIGTRAP）
 # 见 vendor/rdev/src/macos/common.rs 的 Typex patch 注释
 # cpal 0.16.0 补丁：CoreAudio 输出参数必须可变，否则 release/LTO 下设备枚举会 SIGSEGV
@@ -132,7 +144,7 @@ strip = true
 [patch.crates-io]
 rdev = { path = "vendor/rdev" }
 cpal = { path = "vendor/cpal" }
-# sherpa-rs-sys 0.6.8 assumes WMIC and a Visual Studio CMake generator on Windows.
+# sherpa-rs-sys 0.6.8 predates upstream cargs filtering and recoverable Windows source copying.
 sherpa-rs-sys = { path = "vendor/sherpa-rs-sys" }
 # Upstream enables tauri/default unconditionally; the local metadata patch keeps the same API
 # while avoiding a load-time TaskDialogIndirect import in Windows test harnesses.

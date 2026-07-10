@@ -139,7 +139,7 @@ cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 - 当前支持 macOS 与 Windows x64；Linux 仍待适配，代码保持三平台 trait 可扩展。
 - HUD 在 macOS 必须是 nonactivating NSPanel；Windows 必须带 `WS_EX_NOACTIVATE`，显示前后前台 HWND 不得变化。
 - macOS 的 rdev 未获辅助功能权限时会静默无事件；Windows 快捷键先检查低级键盘钩子诊断状态。
-- Windows 默认特性构建使用短 `CARGO_TARGET_DIR`（例如 `C:\t`），避免 sherpa/ONNX 的 CMake 子构建触发传统 260 字符路径限制。
+- Windows 构建保持默认 `src-tauri/target`；不要为规避路径长度把 `CARGO_TARGET_DIR` 重定向到盘符根目录，也不要占用应用运行时 cwd。
 - cpal Stream 非 Send；录音相关问题优先检查专属线程与 callback 是否只做轻量拷贝。
 - macOS 实机 UI 截图可用 `screencapture -x -l <window-id>`；窗口 ID 用 `CGWindowListCopyWindowInfo` 查。
 - 不要用全局鼠标点击自动化验证 UI，会干扰正在使用电脑的用户。

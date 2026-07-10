@@ -80,12 +80,17 @@ fn delete_folder(src: &Path) -> std::io::Result<()> {
 fn copy_folder(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).expect("Failed to create dst directory");
     if cfg!(windows) {
-        std::process::Command::new("robocopy.exe")
+        let status = std::process::Command::new("robocopy.exe")
             .arg("/e")
             .arg(src)
             .arg(dst)
             .status()
             .expect("Failed to execute robocopy command");
+        match status.code() {
+            Some(0..=7) => {}
+            Some(code) => panic!("robocopy failed with exit code {code}"),
+            None => panic!("robocopy terminated without an exit code"),
+        }
     } else {
         std::process::Command::new("cp")
             .arg("-rf")
@@ -125,6 +130,12 @@ fn extract_lib_names(out_dir: &Path, is_dynamic: bool, target_os: &str) -> Vec<S
             Ok(path) => {
                 let stem = path.file_stem().unwrap();
                 let stem_str = stem.to_str().unwrap();
+
+                // cargs is only used by sherpa's command-line examples.
+                if stem_str == "cargs" {
+                    debug_log!("Skipping library: {}", stem_str);
+                    continue;
+                }
 
                 // Remove the "lib" prefix if present
                 let lib_name = if stem_str.starts_with("lib") {
@@ -291,11 +302,23 @@ fn main() {
     debug_log!("TARGET_DIR: {}", target_dir.display());
     debug_log!("OUT_DIR: {}", out_dir.display());
 
-    // Prepare sherpa-onnx source
-    if !sherpa_dst.exists() {
+    // Prepare sherpa-onnx source. An interrupted robocopy can leave the
+    // destination present but incomplete, so the manifest is the sentinel.
+    let sherpa_manifest = sherpa_dst.join("CMakeLists.txt");
+    if sherpa_dst.exists() && !sherpa_manifest.is_file() {
+        debug_log!("Remove incomplete {}", sherpa_dst.display());
+        delete_folder(&sherpa_dst).expect("Failed to remove incomplete sherpa-onnx source");
+    }
+    if !sherpa_manifest.is_file() {
         debug_log!("Copy {} to {}", sherpa_src.display(), sherpa_dst.display());
         delete_folder(&sherpa_src.join("scripts")).unwrap();
         copy_folder(&sherpa_src, &sherpa_dst);
+    }
+    if !sherpa_manifest.is_file() {
+        panic!(
+            "sherpa-onnx source copy is incomplete: {} is missing",
+            sherpa_manifest.display()
+        );
     }
     // Speed up build
     env::set_var(
@@ -549,6 +572,20 @@ fn main() {
                 }
             }
         }
+
+        libs_assets.retain(|path| {
+            let filename = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+            let lowercase = filename.to_ascii_lowercase();
+            let is_cargs = lowercase == "cargs.dll"
+                || lowercase == "libcargs.so"
+                || lowercase == "libcargs.dylib"
+                || lowercase.starts_with("cargs.")
+                || lowercase.starts_with("libcargs.");
+            if is_cargs {
+                debug_log!("Skipping asset {}", filename);
+            }
+            !is_cargs
+        });
 
         for asset in libs_assets {
             let asset_clone = asset.clone();

@@ -90,12 +90,17 @@ foreach ($name in $requiredRuntime) {
     }
 }
 
+$llvmObjdump = if ([string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+    $null
+} else {
+    Join-Path $env:ProgramFiles "LLVM\bin\llvm-objdump.exe"
+}
 $dependencyTool = if (Get-Command dumpbin.exe -ErrorAction SilentlyContinue) {
     "dumpbin"
 } elseif (Get-Command llvm-objdump.exe -ErrorAction SilentlyContinue) {
     "llvm-objdump"
-} elseif (Test-Path -LiteralPath "C:\Program Files\LLVM\bin\llvm-objdump.exe") {
-    "C:\Program Files\LLVM\bin\llvm-objdump.exe"
+} elseif ($llvmObjdump -and (Test-Path -LiteralPath $llvmObjdump -PathType Leaf)) {
+    $llvmObjdump
 } else {
     throw "dumpbin.exe or llvm-objdump.exe is required for PE dependency verification"
 }
@@ -239,84 +244,88 @@ function Assert-ExtractedPayload(
     }
     $extractRoot = Join-Path $tempBase ("typex-nsis-audit-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $extractRoot | Out-Null
-    & $sevenZip x -y "-o$extractRoot" $Installer | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        throw "7-Zip failed to extract $Label"
-    }
-
-    $extractedByName = @{}
-    foreach ($entry in $expectedInstalled.GetEnumerator()) {
-        $expectedHash = Get-Sha256 $entry.Value
-        $matches = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter $entry.Key)
-        if ($matches.Count -ne 1) {
-            throw "$Label must contain exactly one $($entry.Key); found $($matches.Count)"
+    try {
+        & $sevenZip x -y "-o$extractRoot" $Installer | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "7-Zip failed to extract $Label"
         }
-        if ((Get-Sha256 $matches[0].FullName) -ne $expectedHash) {
-            throw "$Label contains $($entry.Key), but its hash does not match the staged payload"
+
+        $extractedByName = @{}
+        foreach ($entry in $expectedInstalled.GetEnumerator()) {
+            $expectedHash = Get-Sha256 $entry.Value
+            $matches = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter $entry.Key)
+            if ($matches.Count -ne 1) {
+                throw "$Label must contain exactly one $($entry.Key); found $($matches.Count)"
+            }
+            if ((Get-Sha256 $matches[0].FullName) -ne $expectedHash) {
+                throw "$Label contains $($entry.Key), but its hash does not match the staged payload"
+            }
+            $extractedByName[$entry.Key.ToLowerInvariant()] = $matches[0].FullName
         }
-        $extractedByName[$entry.Key.ToLowerInvariant()] = $matches[0].FullName
-    }
 
-    $executableMatches = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "typex.exe")
-    if ($executableMatches.Count -ne 1) {
-        throw "$Label must contain exactly one typex.exe; found $($executableMatches.Count)"
-    }
-
-    $expectedPayloadLocations = @{
-        "windows-runtime-manifest.json" = "windows-runtime-manifest.json"
-        "THIRD-PARTY-NOTICES.windows.txt" = "licenses\THIRD-PARTY-NOTICES.windows.txt"
-        "Apache-2.0.txt" = "licenses\Apache-2.0.txt"
-    }
-    foreach ($file in $manifest.files) {
-        $relativePath = if ([IO.Path]::GetExtension($file.name) -eq ".txt") {
-            "licenses\$($file.name)"
-        } else {
-            $file.name
+        $executableMatches = @(Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "typex.exe")
+        if ($executableMatches.Count -ne 1) {
+            throw "$Label must contain exactly one typex.exe; found $($executableMatches.Count)"
         }
-        $expectedPayloadLocations[$file.name] = $relativePath
-    }
-    foreach ($entry in $expectedPayloadLocations.GetEnumerator()) {
-        $actualPath = [IO.Path]::GetFullPath($extractedByName[$entry.Key.ToLowerInvariant()])
-        $expectedPath = [IO.Path]::GetFullPath((Join-Path $extractRoot $entry.Value))
-        if (-not $actualPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "$Label places $($entry.Key) outside its required location $($entry.Value)"
+
+        $expectedPayloadLocations = @{
+            "windows-runtime-manifest.json" = "windows-runtime-manifest.json"
+            "THIRD-PARTY-NOTICES.windows.txt" = "licenses\THIRD-PARTY-NOTICES.windows.txt"
+            "Apache-2.0.txt" = "licenses\Apache-2.0.txt"
         }
-    }
-
-    $webviewBootstrappers = @(
-        Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "MicrosoftEdgeWebview2Setup.exe"
-    )
-    if ($webviewBootstrappers.Count -ne 1) {
-        throw "$Label must contain exactly one WebView2 Evergreen Bootstrapper"
-    }
-    $webviewSignature = Get-AuthenticodeSignature -LiteralPath $webviewBootstrappers[0].FullName
-    if ($webviewSignature.Status -ne "Valid" -or
-        $null -eq $webviewSignature.SignerCertificate -or
-        $webviewSignature.SignerCertificate.Subject -notlike "*Microsoft*") {
-        throw "$Label contains a WebView2 Bootstrapper without a valid Microsoft signature"
-    }
-
-    $extractedExecutable = $executableMatches[0].FullName
-    $expectedVersion = (Get-Item -LiteralPath $binaryPath).VersionInfo
-    $actualVersion = (Get-Item -LiteralPath $extractedExecutable).VersionInfo
-    foreach ($property in @("ProductName", "ProductVersion", "OriginalFilename")) {
-        if ($actualVersion.$property -ne $expectedVersion.$property) {
-            throw "$Label typex.exe has unexpected $property metadata"
+        foreach ($file in $manifest.files) {
+            $relativePath = if ([IO.Path]::GetExtension($file.name) -eq ".txt") {
+                "licenses\$($file.name)"
+            } else {
+                $file.name
+            }
+            $expectedPayloadLocations[$file.name] = $relativePath
         }
-    }
+        foreach ($entry in $expectedPayloadLocations.GetEnumerator()) {
+            $actualPath = [IO.Path]::GetFullPath($extractedByName[$entry.Key.ToLowerInvariant()])
+            $expectedPath = [IO.Path]::GetFullPath((Join-Path $extractRoot $entry.Value))
+            if (-not $actualPath.Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "$Label places $($entry.Key) outside its required location $($entry.Value)"
+            }
+        }
 
-    $expectedImports = @(Get-PeImports $binaryPath)
-    $actualImports = @(Get-PeImports $extractedExecutable)
-    $importDifference = @(Compare-Object $expectedImports $actualImports)
-    if ($importDifference.Count -ne 0) {
-        throw "$Label typex.exe imports differ from the release build"
-    }
+        $webviewBootstrappers = @(
+            Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "MicrosoftEdgeWebview2Setup.exe"
+        )
+        if ($webviewBootstrappers.Count -ne 1) {
+            throw "$Label must contain exactly one WebView2 Evergreen Bootstrapper"
+        }
+        $webviewSignature = Get-AuthenticodeSignature -LiteralPath $webviewBootstrappers[0].FullName
+        if ($webviewSignature.Status -ne "Valid" -or
+            $null -eq $webviewSignature.SignerCertificate -or
+            $webviewSignature.SignerCertificate.Subject -notlike "*Microsoft*") {
+            throw "$Label contains a WebView2 Bootstrapper without a valid Microsoft signature"
+        }
 
-    $extractedRuntimeByName = @{}
-    foreach ($name in $requiredRuntime) {
-        $extractedRuntimeByName[$name.ToLowerInvariant()] = $extractedByName[$name.ToLowerInvariant()]
+        $extractedExecutable = $executableMatches[0].FullName
+        $expectedVersion = (Get-Item -LiteralPath $binaryPath).VersionInfo
+        $actualVersion = (Get-Item -LiteralPath $extractedExecutable).VersionInfo
+        foreach ($property in @("ProductName", "ProductVersion", "OriginalFilename")) {
+            if ($actualVersion.$property -ne $expectedVersion.$property) {
+                throw "$Label typex.exe has unexpected $property metadata"
+            }
+        }
+
+        $expectedImports = @(Get-PeImports $binaryPath)
+        $actualImports = @(Get-PeImports $extractedExecutable)
+        $importDifference = @(Compare-Object $expectedImports $actualImports)
+        if ($importDifference.Count -ne 0) {
+            throw "$Label typex.exe imports differ from the release build"
+        }
+
+        $extractedRuntimeByName = @{}
+        foreach ($name in $requiredRuntime) {
+            $extractedRuntimeByName[$name.ToLowerInvariant()] = $extractedByName[$name.ToLowerInvariant()]
+        }
+        Assert-PayloadDependencyClosure $extractedExecutable $extractedRuntimeByName
+    } finally {
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force
     }
-    Assert-PayloadDependencyClosure $extractedExecutable $extractedRuntimeByName
 }
 
 $installer = Get-ChildItem -LiteralPath $bundleDir -Filter "*.exe" -File |

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { aggregateUpdaterManifests } from "./aggregate-updater-manifests.mjs";
 
-function fixture() {
+function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), "typex-updater-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(join(dir, "mac.tar.gz"), "mac");
   writeFileSync(join(dir, "mac.tar.gz.sig"), "mac-signature");
   writeFileSync(join(dir, "win-setup.exe"), "win");
@@ -40,9 +41,9 @@ function fixture() {
   return dir;
 }
 
-test("aggregates unique platform fragments", () => {
+test("aggregates unique platform fragments", (t) => {
   const verified = [];
-  const manifest = aggregateUpdaterManifests(fixture(), {
+  const manifest = aggregateUpdaterManifests(fixture(t), {
     expectedTag: "v1.2.3",
     expectedChannel: "stable",
     verifyArtifact: (artifact, signature) => {
@@ -61,8 +62,8 @@ test("aggregates unique platform fragments", () => {
   ]);
 });
 
-test("rejects detached signatures that differ from the manifest", () => {
-  const dir = fixture();
+test("rejects detached signatures that differ from the manifest", (t) => {
+  const dir = fixture(t);
   writeFileSync(join(dir, "win-setup.exe.sig"), "different-signature");
   assert.throws(
     () =>
@@ -74,8 +75,8 @@ test("rejects detached signatures that differ from the manifest", () => {
   );
 });
 
-test("rejects non-canonical manifest signatures", () => {
-  const dir = fixture();
+test("rejects non-canonical manifest signatures", (t) => {
+  const dir = fixture(t);
   const path = join(dir, "updater-windows.json");
   const fragment = JSON.parse(readFileSync(path, "utf8"));
   fragment.platforms["windows-x86_64"].signature = " win-signature\n";
@@ -90,8 +91,8 @@ test("rejects non-canonical manifest signatures", () => {
   );
 });
 
-test("rejects duplicate platform keys", () => {
-  const dir = fixture();
+test("rejects duplicate platform keys", (t) => {
+  const dir = fixture(t);
   const path = join(dir, "updater-windows.json");
   const fragment = JSON.parse(readFileSync(path, "utf8"));
   fragment.platforms = {
@@ -111,8 +112,8 @@ test("rejects duplicate platform keys", () => {
   );
 });
 
-test("rejects cross-channel URLs and empty signatures", () => {
-  const dir = fixture();
+test("rejects cross-channel URLs and empty signatures", (t) => {
+  const dir = fixture(t);
   const path = join(dir, "updater-windows.json");
   const fragment = JSON.parse(readFileSync(path, "utf8"));
   fragment.platforms["windows-x86_64"].url =
