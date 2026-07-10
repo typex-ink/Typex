@@ -264,7 +264,9 @@ pub struct DiagnosticsReport {
 #[specta::specta]
 pub fn get_diagnostics(app: tauri::AppHandle) -> DiagnosticsReport {
     use tauri::Manager;
-    let mut platform_capabilities = crate::platform::capability_diagnostics();
+    let platform_capabilities = crate::platform::capability_diagnostics();
+    #[cfg(target_os = "windows")]
+    let mut platform_capabilities = platform_capabilities;
     #[cfg(target_os = "windows")]
     {
         use crate::hotkey::windows_backend::WindowsHookHealth;
