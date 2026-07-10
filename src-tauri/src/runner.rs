@@ -469,10 +469,14 @@ pub fn run() {
                 // 设置变更（含设置窗口改动）→ 托盘菜单重建 + 全窗口广播
                 let handle = app.handle().clone();
                 let mut rx = settings_for_onboarding.subscribe();
+                let mut applied_native_theme = settings_for_onboarding.get().general.theme;
                 tauri::async_runtime::spawn(async move {
                     while rx.changed().await.is_ok() {
                         let s = rx.borrow_and_update().clone();
-                        crate::app::windows::apply_native_theme(&handle, &s.general.theme);
+                        if s.general.theme != applied_native_theme {
+                            crate::app::windows::apply_native_theme(&handle, &s.general.theme);
+                            applied_native_theme = s.general.theme;
+                        }
                         crate::app::tray::refresh(&handle);
                         use tauri_specta::Event as _;
                         let _ = events::SettingsChangedEvent(s).emit(&handle);

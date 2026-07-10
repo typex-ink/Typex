@@ -20,6 +20,28 @@ pub fn refresh_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>
     }
 }
 
+#[cfg(target_os = "windows")]
+fn queue_windows_frame_redraw<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let raw_hwnd = hwnd.0 as isize;
+    let label = window.label().to_owned();
+    if let Err(error) = window.run_on_main_thread(move || {
+        // DwmSetWindowAttribute returns before the compositor has repainted the non-client area.
+        // A short post-message delay keeps the old title color from surviving until reactivation.
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(32)).await;
+            let hwnd = windows::Win32::Foundation::HWND(raw_hwnd as *mut std::ffi::c_void);
+            if let Err(classification) = crate::platform::windows::redraw_window_frame(hwnd) {
+                tracing::warn!(window = label, classification, "Windows 标题栏主题刷新失败");
+            }
+        });
+    }) {
+        tracing::warn!(window = window.label(), %error, "Windows 标题栏主题刷新排队失败");
+    }
+}
+
 fn native_theme(theme: &ThemeMode) -> Option<tauri::Theme> {
     match theme {
         ThemeMode::System => None,
@@ -94,7 +116,15 @@ pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
     app.set_theme(theme);
     for label in ["hud", "home", "settings", "onboarding", "assistant"] {
         if let Some(window) = app.get_webview_window(label) {
-            let _ = window.set_theme(theme);
+            if let Err(error) = window.set_theme(theme) {
+                tracing::warn!(window = label, %error, "原生窗口主题设置失败");
+                continue;
+            }
+            #[cfg(target_os = "windows")]
+            if matches!(label, "home" | "settings" | "onboarding") {
+                // Tauri/Tao updates the DWM flag asynchronously; queue the frame repaint after it.
+                queue_windows_frame_redraw(&window);
+            }
             #[cfg(target_os = "macos")]
             apply_macos_window_chrome(label, &window, theme);
         }

@@ -10,7 +10,8 @@ use windows::Win32::Foundation::{
     WPARAM,
 };
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow, RDW_FRAME,
+    RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
 };
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TOKEN_MANDATORY_LABEL,
@@ -34,8 +35,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
     IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON,
     SM_CYSMICON, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-    SWP_NOSIZE, SendMessageW, SetWindowLongPtrW, SetWindowPos, WM_SETICON, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    SWP_NOSIZE, SendMessageW, SetWindowLongPtrW, SetWindowPos, WM_NCACTIVATE, WM_SETICON,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -543,6 +544,47 @@ pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// Repaint the non-client frame after changing a Tauri window theme. DWM can apply the new
+/// immersive-dark-mode attribute without repainting the active title bar until activation changes.
+pub fn redraw_window_frame(hwnd: HWND) -> Result<(), String> {
+    if hwnd.is_invalid() {
+        return Err("invalid_app_window".into());
+    }
+
+    // Re-run non-client activation painting without changing the final active state. A plain
+    // RDW_FRAME does not reliably make an active Windows 11 title bar consume the new DWM theme.
+    let is_foreground = unsafe { GetForegroundWindow() } == hwnd;
+    let activation_states = if is_foreground {
+        [false, true]
+    } else {
+        [true, false]
+    };
+    for active in activation_states {
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_NCACTIVATE,
+                Some(WPARAM(active as usize)),
+                Some(LPARAM(0)),
+            );
+        }
+    }
+
+    let redrawn = unsafe {
+        RedrawWindow(
+            Some(hwnd),
+            None,
+            None,
+            RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW,
+        )
+    };
+    if redrawn.as_bool() {
+        Ok(())
+    } else {
+        Err("app_window_frame_redraw_failed".into())
+    }
 }
 
 pub fn configure_hud_window(hwnd: HWND) -> Result<(), String> {
