@@ -446,6 +446,11 @@ fn main() {
 
         if target_os == "windows" {
             config.static_crt(static_crt);
+            if target.ends_with("-msvc") {
+                // Eigen's optional BLAS probe can pick up a MinGW gfortran from PATH and
+                // combine it with MSVC linker flags. Sherpa uses Eigen's C/C++ fallback.
+                config.define("CMAKE_Fortran_COMPILER", "NOTFOUND");
+            }
         }
 
         // TTS

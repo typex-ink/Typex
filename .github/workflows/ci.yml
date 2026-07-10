@@ -170,6 +170,18 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:VULKAN_SDK)) {
             throw "VULKAN_SDK was not configured"
           }
+          $vulkanCmakePrefix = Join-Path $env:VULKAN_SDK "Lib\cmake"
+          $spirvHeadersConfig = Join-Path $vulkanCmakePrefix "SPIRV-Headers\SPIRV-HeadersConfig.cmake"
+          if (-not (Test-Path -LiteralPath $spirvHeadersConfig -PathType Leaf)) {
+            throw "Vulkan SDK is missing SPIRV-HeadersConfig.cmake: $spirvHeadersConfig"
+          }
+          $cmakePrefixPath = if ([string]::IsNullOrWhiteSpace($env:CMAKE_PREFIX_PATH)) {
+            $vulkanCmakePrefix
+          } else {
+            "$vulkanCmakePrefix;$env:CMAKE_PREFIX_PATH"
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8 `
+            -Value "CMAKE_PREFIX_PATH=$cmakePrefixPath"
           & (Join-Path $env:VULKAN_SDK "Bin\glslc.exe") --version
           $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
           if (-not (Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
