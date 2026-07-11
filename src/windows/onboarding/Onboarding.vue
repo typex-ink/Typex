@@ -5,17 +5,62 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
+import Callout from "@/components/Callout.vue";
+import HotkeyRecorder from "@/components/HotkeyRecorder.vue";
 import Kbd from "@/components/Kbd.vue";
 import SecretInput from "@/components/SecretInput.vue";
 import Input from "@/components/Input.vue";
 import Select from "@/components/Select.vue";
 import { commands, events, type HardwareTier, type LocalModelInfo, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
 import { formatBytes } from "@/shared/format";
+import {
+  deriveTranslationChord,
+  hotkeyChordsAreReachable,
+  normalizeHotkeyChord,
+} from "@/shared/hotkeys";
 import { useSettingsStore } from "@/stores/settings";
+import { usePlatform } from "@/composables/usePlatform";
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 const store = useSettingsStore();
+const { defaultHotkeys, keyLabel } = usePlatform();
 const step = ref(1);
+
+type HotkeySlot = "dictation" | "assistant" | "translation";
+type EditableHotkeySlot = Exclude<HotkeySlot, "translation">;
+function hotkeyText(slot: HotkeySlot): string {
+  const keys = store.settings?.hotkeys?.[slot] ?? defaultHotkeys.value[slot];
+  return keys.map((key) => keyLabel(key, t, te)).join(" + ");
+}
+
+const hotkeyValidationError = ref(false);
+function saveHotkey(slot: EditableHotkeySlot, value: string[]) {
+  const settings = store.settings;
+  if (!settings) return;
+
+  const normalized = normalizeHotkeyChord(value);
+  const dictation = slot === "dictation" ? normalized : settings.hotkeys.dictation;
+  const assistant = slot === "assistant" ? normalized : settings.hotkeys.assistant;
+  if (!hotkeyChordsAreReachable(dictation, assistant)) {
+    hotkeyValidationError.value = true;
+    return;
+  }
+
+  hotkeyValidationError.value = false;
+  void store.mutate((draft) => {
+    draft.hotkeys[slot] = normalized;
+    draft.hotkeys.translation = deriveTranslationChord(dictation, assistant);
+  });
+}
+
+const dictationHotkey = computed({
+  get: () => store.settings?.hotkeys?.dictation ?? defaultHotkeys.value.dictation,
+  set: (value: string[]) => saveHotkey("dictation", value),
+});
+const assistantHotkey = computed({
+  get: () => store.settings?.hotkeys?.assistant ?? defaultHotkeys.value.assistant,
+  set: (value: string[]) => saveHotkey("assistant", value),
+});
 // 第 1 步语言下拉：直接写 settings.general.language，全 UI 即时切换（syncLocale 订阅）
 const lang = computed<UiLanguage>({
   get: () => store.settings?.general.language ?? "system",
@@ -358,13 +403,22 @@ onUnmounted(() => {
     <!-- 步骤 4 · 快捷键 + 练习 -->
     <div v-else-if="step === 4" class="body">
       <h5>{{ t("onboarding.hotkeys_title") }}</h5>
-      <div class="frow"><span>{{ t("modes.dictation") }}</span><Kbd>{{ t("keys.MetaRight") }}</Kbd></div>
-      <div class="frow"><span>{{ t("modes.assistant") }}</span><Kbd>{{ t("keys.AltGr") }}</Kbd></div>
-      <div class="frow"><span>{{ t("modes.translation") }}</span><span><Kbd>{{ t("keys.MetaRight") }}</Kbd> + <Kbd>{{ t("keys.AltGr") }}</Kbd></span></div>
+      <Callout v-if="hotkeyValidationError" variant="warn" class="hotkey-error">
+        {{ t("settings.hotkeys.unreachable_chords") }}
+      </Callout>
+      <div class="frow">
+        <span>{{ t("modes.dictation") }}</span>
+        <HotkeyRecorder v-model="dictationHotkey" />
+      </div>
+      <div class="frow">
+        <span>{{ t("modes.assistant") }}</span>
+        <HotkeyRecorder v-model="assistantHotkey" />
+      </div>
+      <div class="frow"><span>{{ t("modes.translation") }}</span><Kbd>{{ hotkeyText("translation") }}</Kbd></div>
       <div class="practice">
         <p>
           <i18n-t keypath="onboarding.practice" scope="global">
-            <template #key><Kbd>{{ t("keys.MetaRight") }}</Kbd></template>
+            <template #key><Kbd>{{ hotkeyText("dictation") }}</Kbd></template>
           </i18n-t>
         </p>
         <Input v-model="practiceText" :placeholder="t('onboarding.practice_ph')" @input="practiceDone = practiceText.length > 0" />
@@ -516,6 +570,9 @@ onUnmounted(() => {
 }
 .practice {
   margin-top: 16px;
+}
+.hotkey-error {
+  margin-bottom: 8px;
 }
 .practice p {
   font-size: 12px;

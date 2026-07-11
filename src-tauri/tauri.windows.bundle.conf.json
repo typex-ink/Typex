@@ -1,0 +1,14 @@
+{
+  "build": {
+    "beforeBundleCommand": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts/stage-windows-runtime.ps1 -SkipBuild"
+  },
+  "bundle": {
+    "resources": {
+      "windows-runtime/*.dll": "",
+      "windows-runtime/*.txt": "licenses",
+      "windows-runtime/windows-runtime-manifest.json": "",
+      "windows-runtime-notices/THIRD-PARTY-NOTICES.windows.txt": "licenses/THIRD-PARTY-NOTICES.windows.txt",
+      "vendor/sherpa-rs-sys/sherpa-onnx/LICENSE": "licenses/Apache-2.0.txt"
+    }
+  }
+}

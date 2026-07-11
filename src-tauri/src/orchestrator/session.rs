@@ -108,6 +108,8 @@ pub enum Event {
     InjectOriginalRequested,
     /// 录音服务完成（携带产物就绪信号；音频本体在 orchestrator 手里）
     RecordingFinished { session_id: u64 },
+    /// 录音启动失败或运行中设备/stream 失效
+    RecordingFailed { session_id: u64, error: TypexError },
     /// STT 成功
     SttResult { session_id: u64, transcript: String },
     /// STT 失败
@@ -195,12 +197,19 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (s @ State::Idle, _) => (s, vec![]),
 
         // ───────── Recording ─────────
-        (State::Recording { session_id, .. }, Event::ModeUpgraded { mode }) => (
+        (
+            State::Recording {
+                session_id,
+                toggled,
+                ..
+            },
+            Event::ModeUpgraded { mode },
+        ) => (
             // 模式升级（听写→翻译）：音频保留，仅换徽标
             State::Recording {
                 session_id,
                 mode,
-                toggled: false,
+                toggled,
             },
             vec![E::EmitUi],
         ),
@@ -223,12 +232,23 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                     vec![E::EmitUi],
                 )
             } else {
-                // push-to-talk 结束（或 toggle 后的松开——不可能路径，防御性同样结束）
+                // push-to-talk 结束，或 toggle 模式第二次触发 chord 已完整释放。
                 (
                     State::Transcribing { session_id, mode },
                     vec![E::CallStt { session_id }, E::EmitUi],
                 )
             }
+        }
+        (
+            s @ State::Recording {
+                mode: SessionMode::Assistant,
+                toggled: true,
+                ..
+            },
+            Event::TriggerDown { .. },
+        ) => {
+            // 助手要等 chord 完整释放，避免仍按住的触发修饰键污染 Ctrl+C 选区读取。
+            (s, vec![])
         }
         (
             State::Recording {
@@ -238,7 +258,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
             Event::TriggerDown { .. },
         ) => {
-            // toggle 模式下二次按下 = 结束录音
+            // 听写/翻译 toggle 模式下二次按下 = 结束录音。
             (
                 State::Transcribing { session_id, mode },
                 vec![E::CallStt { session_id }, E::EmitUi],
@@ -263,6 +283,24 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 E::ReleaseAudio { session_id },
             ],
         ),
+        (
+            State::Recording {
+                session_id, mode, ..
+            },
+            Event::RecordingFailed {
+                session_id: sid,
+                error,
+            },
+        ) if sid == session_id => (
+            State::Failed {
+                session_id,
+                mode,
+                stage: FailedStage::Recording,
+                error,
+                transcript: None,
+            },
+            vec![E::CancelRecording, E::EmitUi, E::PlayChime(Chime::Error)],
+        ),
         (s @ State::Recording { .. }, _) => (s, vec![]),
 
         // ───────── Transcribing ─────────
@@ -286,6 +324,22 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 },
                 E::EmitUi,
             ],
+        ),
+        (
+            State::Transcribing { session_id, mode },
+            Event::RecordingFailed {
+                session_id: sid,
+                error,
+            },
+        ) if sid == session_id => (
+            State::Failed {
+                session_id,
+                mode,
+                stage: FailedStage::Recording,
+                error,
+                transcript: None,
+            },
+            vec![E::CancelRecording, E::EmitUi, E::PlayChime(Chime::Error)],
         ),
         (
             State::Transcribing { session_id, mode },
@@ -411,7 +465,8 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
         ) if sid == session_id => {
             // 注入失败 → 自动转剪贴板 + 明示（05 §9 兜底）
-            let effects = if error.code == ErrorCode::NoFocus {
+            let effects = if matches!(error.code, ErrorCode::NoFocus | ErrorCode::InjectionBlocked)
+            {
                 vec![E::CopyToClipboard(text.clone()), E::EmitUi]
             } else {
                 vec![
@@ -469,7 +524,15 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                         ],
                     )
                 }
-                FailedStage::Injecting | FailedStage::Recording => {
+                FailedStage::Recording => (
+                    State::Recording {
+                        session_id,
+                        mode,
+                        toggled: false,
+                    },
+                    vec![E::StartRecording, E::EmitUi, E::PlayChime(Chime::Start)],
+                ),
+                FailedStage::Injecting => {
                     let t = transcript.unwrap_or_default();
                     (
                         State::Injecting {
@@ -606,12 +669,54 @@ mod tests {
     }
 
     #[test]
-    fn toggle_second_press_ends_recording() {
-        let (s, _) = advance(recording(1), Event::TriggerUp { held_ms: 100 }, T);
-        let (s, fx) = advance(s, down(99), T);
-        assert_eq!(s.phase(), SessionPhase::Transcribing);
-        assert_eq!(s.session_id(), Some(1)); // 沿用原会话，不开新会话
-        assert!(fx.contains(&Effect::CallStt { session_id: 1 }));
+    fn dictation_and_translation_toggle_second_press_calls_stt_on_keydown() {
+        for mode in [SessionMode::Dictation, SessionMode::Translation] {
+            let initial = State::Recording {
+                session_id: 1,
+                mode,
+                toggled: false,
+            };
+            let (toggled, _) = advance(initial, Event::TriggerUp { held_ms: 100 }, T);
+            let (transcribing, down_fx) = advance(
+                toggled,
+                Event::TriggerDown {
+                    mode,
+                    next_session_id: 99,
+                },
+                T,
+            );
+
+            assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+            assert_eq!(transcribing.session_id(), Some(1));
+            assert!(down_fx.contains(&Effect::CallStt { session_id: 1 }));
+        }
+    }
+
+    #[test]
+    fn assistant_toggle_second_press_waits_for_keyup_before_calling_stt() {
+        let initial = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            toggled: false,
+        };
+        let (toggled, _) = advance(initial, Event::TriggerUp { held_ms: 100 }, T);
+        let (still_recording, down_fx) = advance(
+            toggled,
+            Event::TriggerDown {
+                mode: SessionMode::Assistant,
+                next_session_id: 99,
+            },
+            T,
+        );
+
+        assert_eq!(still_recording.phase(), SessionPhase::Recording);
+        assert_eq!(still_recording.session_id(), Some(1));
+        assert!(!down_fx.contains(&Effect::CallStt { session_id: 1 }));
+
+        let (transcribing, up_fx) = advance(still_recording, Event::TriggerUp { held_ms: 100 }, T);
+        assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+        assert_eq!(transcribing.session_id(), Some(1));
+        assert!(up_fx.contains(&Effect::CallStt { session_id: 1 }));
     }
 
     #[test]
@@ -699,6 +804,27 @@ mod tests {
         // 无 CancelRecording/StartRecording —— 音频保留
         assert!(!fx.contains(&Effect::CancelRecording));
         assert!(!fx.contains(&Effect::StartRecording));
+    }
+
+    #[test]
+    fn combo_upgrade_during_toggle_still_stops_after_release() {
+        let toggled = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            toggled: true,
+        };
+        let (upgraded, _) = advance(
+            toggled,
+            Event::ModeUpgraded {
+                mode: SessionMode::Translation,
+            },
+            T,
+        );
+        let (transcribing, effects) = advance(upgraded, Event::TriggerUp { held_ms: 100 }, T);
+
+        assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+        assert_eq!(transcribing.mode(), Some(SessionMode::Translation));
+        assert!(effects.contains(&Effect::CallStt { session_id: 1 }));
     }
 
     // ── 组合键让路（场景 3）──
@@ -791,7 +917,100 @@ mod tests {
         }
     }
 
+    #[test]
+    fn pause_cancel_releases_push_to_talk_recording() {
+        // The tray's SessionCommand::Cancel maps to Event::Esc in the orchestrator.
+        let (state, effects) = advance(recording(7), Event::Esc, T);
+
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::CancelRecording,
+                Effect::EmitUi,
+                Effect::ReleaseAudio { session_id: 7 }
+            ]
+        );
+    }
+
+    #[test]
+    fn pause_cancel_releases_toggle_recording() {
+        let toggled = State::Recording {
+            session_id: 8,
+            mode: SessionMode::Assistant,
+            toggled: true,
+        };
+        let (state, effects) = advance(toggled, Event::Esc, T);
+
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::CancelRecording,
+                Effect::EmitUi,
+                Effect::ReleaseAudio { session_id: 8 }
+            ]
+        );
+    }
+
     // ── 失败恢复（场景 6）──
+
+    #[test]
+    fn recording_failure_enters_failed_and_releases_active_stream() {
+        let (state, effects) = advance(
+            recording(7),
+            Event::RecordingFailed {
+                session_id: 7,
+                error: err(ErrorCode::AudioDevice),
+            },
+            T,
+        );
+
+        assert!(matches!(
+            state,
+            State::Failed {
+                session_id: 7,
+                stage: FailedStage::Recording,
+                transcript: None,
+                ..
+            }
+        ));
+        assert!(effects.contains(&Effect::CancelRecording));
+        assert!(effects.contains(&Effect::EmitUi));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::CallStt { .. }))
+        );
+    }
+
+    #[test]
+    fn retry_after_recording_failure_reopens_microphone() {
+        let failed = State::Failed {
+            session_id: 7,
+            mode: SessionMode::Translation,
+            stage: FailedStage::Recording,
+            error: err(ErrorCode::AudioDevice),
+            transcript: None,
+        };
+
+        let (state, effects) = advance(failed, Event::Retry, T);
+
+        assert!(matches!(
+            state,
+            State::Recording {
+                session_id: 7,
+                mode: SessionMode::Translation,
+                toggled: false,
+            }
+        ));
+        assert!(effects.contains(&Effect::StartRecording));
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::Inject { .. }))
+        );
+    }
 
     #[test]
     fn stt_failure_keeps_audio_recoverable() {
@@ -1062,6 +1281,30 @@ mod tests {
         assert_eq!(s.phase(), SessionPhase::Failed);
         assert!(fx.contains(&Effect::CopyToClipboard("结果".into())));
         // NoFocus 是常见情况，不放错误音
+        assert!(
+            !fx.iter()
+                .any(|e| matches!(e, Effect::PlayChime(Chime::Error)))
+        );
+    }
+
+    #[test]
+    fn uipi_blocked_copies_without_error_chime() {
+        let s0 = State::Injecting {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+            text: "结果".into(),
+            unpolished: false,
+        };
+        let (s, fx) = advance(
+            s0,
+            Event::InjectFailed {
+                session_id: 1,
+                error: err(ErrorCode::InjectionBlocked),
+            },
+            T,
+        );
+        assert_eq!(s.phase(), SessionPhase::Failed);
+        assert!(fx.contains(&Effect::CopyToClipboard("结果".into())));
         assert!(
             !fx.iter()
                 .any(|e| matches!(e, Effect::PlayChime(Chime::Error)))

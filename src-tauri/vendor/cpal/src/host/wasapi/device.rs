@@ -58,6 +58,10 @@ impl DeviceTrait for Device {
         Device::name(self)
     }
 
+    fn id(&self) -> Result<String, DeviceNameError> {
+        Device::id(self)
+    }
+
     fn supports_input(&self) -> bool {
         self.data_flow() == Audio::eCapture
     }
@@ -269,6 +273,31 @@ unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
 impl Device {
+    pub fn id(&self) -> Result<String, DeviceNameError> {
+        unsafe {
+            struct IdRAII(windows::core::PWSTR);
+
+            impl Drop for IdRAII {
+                fn drop(&mut self) {
+                    unsafe { Com::CoTaskMemFree(Some(self.0.0 as *mut _)) }
+                }
+            }
+
+            let id = self.device.GetId().map_err(|_| {
+                DeviceNameError::from(BackendSpecificError {
+                    description: "failed to retrieve WASAPI endpoint ID".into(),
+                })
+            })?;
+            let id = IdRAII(id);
+            let mut len = 0;
+            while *id.0.0.offset(len) != 0 {
+                len += 1;
+            }
+            let id_slice = slice::from_raw_parts(id.0.0, len as usize);
+            Ok(OsString::from_wide(id_slice).to_string_lossy().into_owned())
+        }
+    }
+
     pub fn name(&self) -> Result<String, DeviceNameError> {
         unsafe {
             // Open the device's property store.

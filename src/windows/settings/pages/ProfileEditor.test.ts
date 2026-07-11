@@ -10,12 +10,15 @@ const mockUpsertProfile = vi.hoisted(() =>
 const mockSetProfileSecret = vi.hoisted(() =>
   vi.fn(async (): Promise<unknown> => ({ status: "ok" as const, data: null })),
 );
+const mockActivateProfile = vi.hoisted(() =>
+  vi.fn(async () => ({ status: "ok" as const, data: null })),
+);
 
 vi.mock("@/ipc/bindings", () => ({
   commands: {
     upsertProfile: mockUpsertProfile,
     setProfileSecret: mockSetProfileSecret,
-    activateProfile: vi.fn(async () => ({ status: "ok" })),
+    activateProfile: mockActivateProfile,
     testProfile: vi.fn(async () => ({ status: "ok", data: 10 })),
     deleteProfile: vi.fn(async () => ({ status: "ok" })),
     listLocalModels: vi.fn(async () => ({ status: "ok", data: [] })),
@@ -93,7 +96,38 @@ describe("ProfileEditor", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
+  });
+
+  it("新建档案测试后保存复用同一个 ID", async () => {
+    vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(2_000);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "stt", profile: null, assignTo: "stt" },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const inputs = wrapper.findAll("input");
+    await inputs[0].setValue("Test STT");
+    await inputs[1].setValue("https://api.example.com/v1");
+    await inputs[2].setValue("whisper-test");
+    await wrapper.find("input[type='password']").setValue("sk-test");
+
+    const test = wrapper.findAll("button").find((button) => button.text().includes("测试连接"))!;
+    await test.trigger("click");
+    await flushPromises();
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    const savedIds = mockUpsertProfile.mock.calls.map(([profile]) => profile.id);
+    expect(savedIds).toHaveLength(2);
+    expect(new Set(savedIds).size).toBe(1);
+    expect(mockActivateProfile).toHaveBeenNthCalledWith(1, "stt", savedIds[0]);
+    expect(mockActivateProfile).toHaveBeenNthCalledWith(2, "stt", savedIds[0]);
   });
 
   it("Responses 档案可保存思考等级", async () => {

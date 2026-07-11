@@ -2,7 +2,8 @@
 """从 assets/icon/typex.svg 的几何规格导出全平台图标（04 §2.2）。
 
 不依赖 SVG 光栅化库——图形只是圆角矩形组合，直接用 PIL 按同一几何绘制。
-产物：src-tauri/icons/{32x32,128x128,128x128@2x,icon}.png、icon.icns、icon.ico、tray.png。
+产物：src-tauri/icons/{32x32,128x128,128x128@2x,icon}.png、icon.icns、
+icon.ico、icon-ink.ico、tray.png。
 """
 from pathlib import Path
 from PIL import Image, ImageDraw
@@ -77,6 +78,8 @@ subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(OUT / "icon.ic
 ico_sizes = [16, 24, 32, 48, 64, 256]
 imgs = [render(sz, WHITE, BLACK, tile_scale=APP_TILE_SCALE) for sz in ico_sizes]
 imgs[-1].save(OUT / "icon.ico", format="ICO", sizes=[(sz, sz) for sz in ico_sizes], append_images=imgs[:-1])
+ink_imgs = [render(sz, BLACK, WHITE, tile_scale=APP_TILE_SCALE) for sz in ico_sizes]
+ink_imgs[-1].save(OUT / "icon-ink.ico", format="ICO", sizes=[(sz, sz) for sz in ico_sizes], append_images=ink_imgs[:-1])
 
 # --- 托盘图标：去竖笔的五柱 glyph，macOS template image（纯黑 + alpha）---
 def render_tray(size: int) -> Image.Image:

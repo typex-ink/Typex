@@ -11,15 +11,31 @@ rust-version = "1.88"
 name = "typex_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "typex"
+path = "src/main.rs"
+test = false
+bench = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri = { version = "2", default-features = false, features = [
+    "wry",
+    "compression",
+    "dynamic-acl",
+    "x11",
+    "dbus",
+    "tray-icon",
+    "image-png",
+    "macos-private-api",
+] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
+tauri-plugin-os = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 specta = { version = "2.0.0-rc.22", features = ["derive", "serde_json"] }
@@ -32,10 +48,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
 # 系统能力（07 §1）
-rdev = "0.5"
 cpal = "0.16"
 rubato = "0.16"
 hound = "3.5"
+silero-vad-crs = { version = "0.4", features = ["auto"] }
 arboard = "3"
 enigo = "0.6"
 
@@ -51,22 +67,57 @@ rodio = { version = "0.21.1", default-features = false, features = ["playback"] 
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 base64 = "0.22.1"
 tauri-plugin-updater = "2.10.1"
-objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 sysinfo = { version = "0.38.4", optional = true }
 sha2 = { version = "0.10", optional = true }
-sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
-sherpa-rs-sys = { version = "0.6.8", default-features = false, optional = true }
-# mtmd feature：Qwen3-ASR 音频输入需要 llama.cpp tools/mtmd（CP-8.4）
-llama-cpp-2 = { version = "0.1.150", features = ["metal", "mtmd"], optional = true }
 # llama-cpp-2 内部已依赖 encoding_rs；这里显式引用用于 token 增量 UTF-8 解码（CP-8.5）
 encoding_rs = { version = "0.8", optional = true }
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# macOS/Linux 保持源码构建，避免改变现有本地模型产物。
+sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
+sherpa-rs-sys = { version = "0.6.8", default-features = false, optional = true }
+# Windows uses the native WH_KEYBOARD_LL backend; rdev remains for macOS/Linux.
+rdev = "0.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSColor", "NSAppearance", "objc2-core-foundation"] }
+objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# Qwen3-ASR 音频输入需要 llama.cpp tools/mtmd；macOS 使用 Metal。
+llama-cpp-2 = { version = "0.1.150", features = ["metal", "mtmd"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# 上游固定版本预编译包带 SHA-256 校验，避免 sherpa-onnx FetchContent 超过 MAX_PATH。
+sherpa-rs = { version = "0.6.8", default-features = false, features = ["download-binaries"], optional = true }
+sherpa-rs-sys = { version = "0.6.8", default-features = false, features = ["download-binaries"], optional = true }
+# Win32 API 集中用于 platform、hotkey、inject 与 selection 的 Windows backend。
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# Windows GPU 加速统一使用 Vulkan；运行时失败回退 CPU。
+llama-cpp-2 = { version = "0.1.150", features = ["vulkan", "mtmd"], optional = true }
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+llama-cpp-2 = { version = "0.1.150", features = ["mtmd"], optional = true }
 
 [dev-dependencies]
 wiremock = "0.6"
@@ -79,13 +130,20 @@ lto = true
 opt-level = "s"
 strip = true
 
-# rdev 0.5.3 补丁：监听回调不调 TSM 输入法 API（macOS 26 强制主线程，否则 SIGTRAP）
-# 见 vendor/rdev/src/macos/common.rs 的 Typex patch 注释
-# cpal 0.16.0 补丁：CoreAudio 输出参数必须可变，否则 release/LTO 下设备枚举会 SIGSEGV
-# 见 vendor/cpal/src/host/coreaudio/macos/* 的 Typex patch 注释
+# Both sys crates use Release native libraries in dev/test builds. Compiling
+# their build scripts with debug assertions would incorrectly link msvcrtd.
+[profile.dev.package.llama-cpp-sys-2]
+debug-assertions = false
+
+[profile.dev.package.sherpa-rs-sys]
+debug-assertions = false
+
+# Vendor 原因与本地补丁清单见 vendor/README.md。
 [patch.crates-io]
 rdev = { path = "vendor/rdev" }
 cpal = { path = "vendor/cpal" }
+sherpa-rs-sys = { path = "vendor/sherpa-rs-sys" }
+tauri-specta = { path = "vendor/tauri-specta" }
 
 [features]
 # 本地模型默认启用；可用 --no-default-features 裁剪推理引擎依赖。

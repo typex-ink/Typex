@@ -76,6 +76,9 @@ const testOk = ref(false);
 const saving = ref(false);
 
 const isNew = computed(() => !props.profile);
+// A connection test persists the draft so the backend can exercise it. Keep one ID for the
+// editor lifetime so a later test or final save updates that draft instead of cloning it.
+const draftProfileId = props.profile?.id ?? `p-${Date.now().toString(36)}`;
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
 const canConfigureReasoning = computed(
@@ -199,7 +202,7 @@ const valid = computed(() => {
 async function save(): Promise<string | null> {
   if (!valid.value) return null;
   saving.value = true;
-  const id = props.profile?.id ?? `p-${Date.now().toString(36)}`;
+  const id = draftProfileId;
   const options = { ...(props.profile?.options ?? {}) };
   if (isLocal.value) options["load_policy"] = loadPolicy.value;
   if (canConfigureReasoning.value && isReasoningEffort(reasoningEffort.value)) {

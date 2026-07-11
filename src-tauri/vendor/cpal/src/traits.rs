@@ -89,6 +89,13 @@ pub trait DeviceTrait {
     /// The human-readable name of the device.
     fn name(&self) -> Result<String, DeviceNameError>;
 
+    /// A stable identifier for the device.
+    ///
+    /// Backends without a distinct stable identifier retain the historical name-based behavior.
+    fn id(&self) -> Result<String, DeviceNameError> {
+        self.name()
+    }
+
     /// True if the device supports audio input, otherwise false
     fn supports_input(&self) -> bool {
         self.supported_input_configs()

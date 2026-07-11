@@ -31,6 +31,10 @@ Typex is an open-source, desktop AI voice input tool. Hold a shortcut and speak 
 
 Get the latest release from the [GitHub Releases page](https://github.com/typex-ink/Typex/releases).
 
+Windows builds support 64-bit Windows 10 22H2 or later and Windows 11. The NSIS installer uses the WebView2 Evergreen Bootstrapper and may need an internet connection when WebView2 is not already installed. Native AI runtimes, the required VC++ runtime files, and the Vulkan loader are deployed app-locally; no separate developer tools or system-wide VC++/Vulkan runtime installation is required.
+
+Windows release candidates are currently not Authenticode-signed. Windows may therefore show an **Unknown Publisher** or Microsoft Defender SmartScreen warning. Verify the SHA-256 checksum and Tauri updater signature published with the release before choosing **More info > Run anyway**. Managed devices using WDAC, AppLocker, or Smart App Control may block unsigned builds entirely.
+
 **On macOS**, if you see a warning that the app "cannot be verified to be free of malware" on launch, remove the quarantine attribute after installing:
 
 ```bash

@@ -2,15 +2,18 @@
   "name": "typex",
   "private": true,
   "version": "0.1.0-dev",
+  "packageManager": "pnpm@10.15.1",
   "type": "module",
   "license": "GPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri.mjs",
     "test": "vitest run",
-    "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml export_bindings"
+    "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib export_bindings",
+    "test:release-metadata": "node --test scripts/aggregate-updater-manifests.test.mjs && cargo check --locked --manifest-path tools/updater-signature-verifier/Cargo.toml",
+    "verify:updater-signature": "cargo run --locked --quiet --manifest-path tools/updater-signature-verifier/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

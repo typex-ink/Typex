@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Canvas 波形（04 §6：60fps 仅录音时运行；80ms 电平平滑；处理中 = 五柱依次呼吸）
 import { onMounted, onUnmounted, ref, watch } from "vue";
-import { levelToVisualAmplitude } from "./waveform-scale";
+import { levelToVisualAmplitude, processingWavePhase } from "./waveform-scale";
 
 const props = defineProps<{
   levels: number[];
@@ -17,7 +17,7 @@ let raf = 0;
 let smoothed = new Array(BAR_COUNT).fill(0);
 let target = new Array(BAR_COUNT).fill(0);
 let running = false;
-let breathePhase = 0;
+let breathingStartedAt: number | null = null;
 let reducedMotion = false;
 
 watch(
@@ -33,7 +33,15 @@ watch(
   },
 );
 
-function draw() {
+watch(
+  () => props.breathing,
+  () => {
+    breathingStartedAt = null;
+    if (reducedMotion) draw(0);
+  },
+);
+
+function draw(timestamp = 0) {
   const cv = canvas.value;
   if (!cv) return;
   const ctx = cv.getContext("2d")!;
@@ -44,6 +52,8 @@ function draw() {
 
   const barW = 3.5 * dpr;
   const gap = ((W - (BAR_COUNT * 3.5)) / (BAR_COUNT - 1)) * dpr;
+  if (props.breathing && breathingStartedAt === null) breathingStartedAt = timestamp;
+  const breathePhase = processingWavePhase(timestamp - (breathingStartedAt ?? timestamp));
 
   for (let i = 0; i < BAR_COUNT; i++) {
     let h: number;
@@ -67,7 +77,6 @@ function draw() {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
-  breathePhase += 0.05;
   if (running) raf = requestAnimationFrame(draw);
 }
 
@@ -75,10 +84,10 @@ function start() {
   if (running) return;
   running = true;
   reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (reducedMotion && !props.breathing) {
-    // 降级：静态电平条（04 §6）
+  if (reducedMotion) {
+    // 降级：所有状态均使用静态电平条（04 §6）
     running = false;
-    draw();
+    draw(0);
     return;
   }
   raf = requestAnimationFrame(draw);

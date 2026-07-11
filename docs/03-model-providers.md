@@ -98,6 +98,7 @@ Content-Type: application/json
 
 - **Qwen3-ASR（标准/性能档）**：llama.cpp（qwen3vl 音频架构，官方 ggml-org GGUF）跑 `Qwen3-ASR-0.6B`（Q8_0 主模型 + mmproj 约 1.0 GB）/ `Qwen3-ASR-1.7B`（Q8_0 主模型 + mmproj 约 2.5 GB，仅 GPU 加速可用时提供——纯 CPU 低于实时）。52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA。**注意**：llama.cpp 音频支持仍标 experimental、长音频有已知 bug——所有音频先过 VAD 切片成短分段再转写（本来就是 F-1 的路径），规避该问题。
   - Qwen3-ASR 的 llama.cpp / OpenAI-compatible 网关输出可能带 `language Chinese<asr_text>...` 包装；Provider 层必须剥离 `language ...<asr_text>` 前缀、把语言填入 `Transcript.detected_language`，不得把包装文本传给 orchestrator / 前端 / 注入层。
+  - 缓存条目记录 GPU/CPU load mode，同一缓存的转写通过独占 inference lease 串行执行。仅 GPU-loaded 条目的不透明 mtmd 初始化错误或 context/eval/decode 运行错误触发一次完整 CPU 重载，并用同一音频与词典从头重试；CPU 模型设备列表为空，context offload 与 mtmd GPU 均关闭。fallback 先释放失败 GPU 代际，再在缓存锁外加载 CPU；WAV/GGUF/mmproj 预校验、明确的 `support_audio=false`、prompt/tokenize 等输入或模型契约错误不重试，显式 unload 后不得把重试模型重新写回缓存。
 - **SenseVoice（轻量档）**：sherpa-onnx（官方 Rust crate，静态链接）+ `SenseVoice-Small int8`（约 230 MB）。非自回归，CPU 实时数倍速——弱机器上唯一保证实时的选项；自带 VAD 可复用。F-10 词典经 sherpa hotwords 接口传入。
 - **Whisper large-v3（高配精度档）**：sherpa-onnx Whisper 导出（encoder/decoder int8 + tokens，约 1.8 GB）。质量和语言覆盖优先，CPU 推理通常低于实时，只作为设置页手动下载/选择的高精度 STT，不参与零配置推荐档。
 - whisper.cpp 降为可选扩展（当前 Whisper large-v3 先走 sherpa-onnx；large-v3-turbo / Parakeet / Moonshine 等需新增运行时或稳定导出后再进入清单）。
@@ -157,7 +158,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 - **引擎**：llama.cpp（`llama-cpp-2` 绑定——GGUF 生态最全，Apple Silicon Metal 加速成熟；与本地 STT 的 Qwen3-ASR 共用同一引擎，[ADR-22](08-decisions.md)）。
 - **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高。
 - **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B–32B 级模型（[ADR-22](08-decisions.md)）。
-- **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。
+- **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。缓存记录 GPU/CPU load mode；同一缓存的推理由独占租约串行执行。仅 GPU-loaded 模型在 context 初始化或 decode 失败、且 ThinkingFilter 后尚未向调用方发出首个可见 delta 时，允许严格关闭模型设备、K/Q/V 与算子 offload 后从头 CPU 重试一次。fallback 必须先从缓存移除并释放失败 GPU 代际，再在缓存锁外加载 CPU；显式 unload 与 CPU 加载竞态时本次请求使用 detached CPU 模型，不得回填过时代际。首个可见 delta 发出后发生错误时不得重放，直接返回明确错误；prompt/tokenize/上下文长度等输入错误、无 GPU、CPU-loaded 模型和 CPU 重试错误不再重试。`UnloadAfterUse` 只清理自己持有的缓存代际。
 - **思考模式**：本地 Qwen LLM 仅支持开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。Provider 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
 
@@ -330,7 +331,7 @@ F-3 不引入新的 Provider 类型：
 
 ```jsonc
 {
-  "schema_version": 4,
+  "schema_version": 7,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
@@ -338,6 +339,19 @@ F-3 不引入新的 Provider 类型：
     "model_download_source": "auto", // auto | huggingface | modelscope；仅影响本地模型下载
     "check_updates": true,
     "update_channel": "stable" // stable = 正式版 release；nightly = 最新 nightly build
+  },
+  "dictation": {
+    "vad": {
+      "mode": "neural",              // neural | energy；v7 默认 neural
+      "energy_threshold": 0.010,      // 0.001..0.050，步长 0.001
+      "neural_threshold": 0.50        // 0.10..0.90，步长 0.05
+    }
+  },
+  "hotkeys": {
+    "dictation": ["ControlRight"],       // 一个完整 chord，稳定物理 KeyId
+    "assistant": ["AltRight"],
+    "translation": ["ControlRight", "AltRight"], // 前两组的派生有序并集
+    "hold_threshold_ms": 350
   },
   "slots": {
     "stt":       { "active_profile": "groq-fast" },
@@ -398,6 +412,7 @@ F-3 不引入新的 Provider 类型：
 要点：
 
 - `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值随 profile 存在 `settings.json`，与其他配置项一致。诊断包、导出配置与日志必须剔除或脱敏 credentials；旧版 `keyring://` 引用会在迁移时清除，运行时也视为未配置，用户需重新保存密钥。
+- schema v7 为 `dictation.vad` 增加双路径配置。所有旧版本统一迁移为 `mode: neural`，两个门限独立保存；后端拒绝非有限值或越界值。磁盘中只有 VAD 子配置无效时，仅恢复 `dictation.vad` 默认值，其他设置必须保留。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。

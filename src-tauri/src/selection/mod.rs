@@ -5,6 +5,10 @@
 
 use crate::error::{ErrorCode, Result, TypexError};
 
+#[cfg(target_os = "windows")]
+mod windows;
+
+/// Screen-space logical coordinates: macOS points; Windows DIPs converted on the target monitor.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SelectionBounds {
     pub x: f64,
@@ -16,6 +20,28 @@ pub struct SelectionBounds {
 pub trait SelectionReader: Send + Sync {
     /// 读取当前选中文本；None = 无选区。
     fn read(&self) -> Result<Option<String>>;
+
+    /// Read only while the session's original focus target is still active. Windows overrides
+    /// this so its UIA and Ctrl+C paths can validate the target at their actual I/O boundary.
+    fn read_targeted(
+        &self,
+        target: Option<&crate::platform::focus::FocusTarget>,
+    ) -> Result<Option<String>> {
+        if !crate::platform::focus::captured_target_is_current(target) {
+            return Err(TypexError::new(
+                ErrorCode::NoFocus,
+                "foreground target changed before selection read",
+            ));
+        }
+        let selection = self.read()?;
+        if !crate::platform::focus::captured_target_is_current(target) {
+            return Err(TypexError::new(
+                ErrorCode::NoFocus,
+                "foreground target changed during selection read",
+            ));
+        }
+        Ok(selection)
+    }
 
     /// 读取当前选中文本的屏幕 bounds；None = 无选区或目标应用不支持。
     fn read_bounds(&self) -> Result<Option<SelectionBounds>> {
@@ -29,7 +55,11 @@ pub fn platform_default() -> Box<dyn SelectionReader> {
     {
         Box::new(MacSelectionReader)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(windows::WindowsSelectionReader::new())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Box::new(ClipboardFallbackReader)
     }
@@ -314,7 +344,11 @@ impl SelectionReader for ClipboardFallbackReader {
         {
             crate::platform::macos::post_command_shortcut(crate::platform::macos::KEY_CODE_C)?;
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            crate::inject::windows::send_ctrl_c()?;
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             use enigo::{Direction, Enigo, Key, Keyboard, Settings};
             let mut enigo = Enigo::new(&Settings::default()).map_err(|e| {

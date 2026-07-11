@@ -40,6 +40,7 @@ docs/               # 长期维护文档集，结构见 docs/README.md
 - 分层依赖单向：前端 → app → orchestrator → service → platform。service 之间不横向依赖；只有 orchestrator 能同时调用多个 service。
 - `app/` 只做 Tauri 胶水；业务流程归 `orchestrator/`。
 - `src/ipc/bindings.ts` 是生成物，禁止手改。
+- 新增、升级或修改 `src-tauri/vendor/` 包时，必须同步更新 [`src-tauri/vendor/README.md`](src-tauri/vendor/README.md)，记录 vendor 原因、上游基线和所有 Typex 修改文件；移除 vendor 时同步删除对应条目。
 - 不记录转写文本内容、音频内容、密钥或凭据；日志只记长度、耗时、错误分类等非敏感信息。
 - 改 IPC 契约、配置 schema、状态机行为、Provider wire shape、UI token 或错误码时，必须同步更新对应章节。
 - 不要删除、回滚或覆盖用户已有改动，除非用户明确要求。
@@ -136,9 +137,10 @@ cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
 
 ## 平台验证
 
-- 当前可用平台是 macOS；Windows / Linux 适配即将展开，代码保持三平台 trait 可扩展。
-- HUD 必须是 nonactivating NSPanel。
-- rdev 未获辅助功能权限时会静默无事件，排查热键问题先看权限。
+- 当前支持 macOS 与 Windows x64；Linux 仍待适配，代码保持三平台 trait 可扩展。
+- HUD 在 macOS 必须是 nonactivating NSPanel；Windows 必须带 `WS_EX_NOACTIVATE`，显示前后前台 HWND 不得变化。
+- macOS 的 rdev 未获辅助功能权限时会静默无事件；Windows 快捷键先检查低级键盘钩子诊断状态。
+- Windows 构建保持默认 `src-tauri/target`；不要为规避路径长度把 `CARGO_TARGET_DIR` 重定向到盘符根目录，也不要占用应用运行时 cwd。
 - cpal Stream 非 Send；录音相关问题优先检查专属线程与 callback 是否只做轻量拷贝。
 - macOS 实机 UI 截图可用 `screencapture -x -l <window-id>`；窗口 ID 用 `CGWindowListCopyWindowInfo` 查。
 - 不要用全局鼠标点击自动化验证 UI，会干扰正在使用电脑的用户。

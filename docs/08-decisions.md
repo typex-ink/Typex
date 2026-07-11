@@ -56,7 +56,7 @@
 
 ### ADR-11 · 分发策略：签名、更新、语言（2026-07-03，项目所有者拍板）
 
-- macOS 购买 Apple Developer Program（$99/年）做签名 + 公证；Windows 先走 SignPath 开源免费签名。
+- macOS 购买 Apple Developer Program（$99/年）做签名 + 公证；Windows 构建链预留 Authenticode 插入点，SignPath 作为公开分发前的后置加固，不阻塞平台功能适配（见 ADR-24）。
 - 自动更新默认开启（检查自动、安装需确认；Linux 包管理渠道除外）。
 - UI 语言中英双语首发（i18n 框架就位，`zh-CN` / `en` 两份资源）。
 
@@ -135,3 +135,20 @@
 - **弹窗形态**：指令回显 + 流式 Markdown 回答 + ✕ 关闭；无输入条、无麦克风键、无动作按钮、无 📌；位置 = 选区下方（无选区时屏幕上 1/3 居中）；失焦（焦点切到其他应用）自动关闭。
 - **连带简化**：助手键短按 = 切换式录音（与听写键语义一致，「仅呼出面板」废除）；托盘「打开助手」菜单项移除；打字提问入口（`ask_assistant` command）移除；设置「结果处置（自动替换/预览确认）」移除（改写恒直接替换）。
 - **影响**：02 F-3、05 §2/§4/§7、03 §3.4、07 窗口表与 §10.1、08 场景表同步更新。
+
+### ADR-24 · Windows 首发边界与分发链（2026-07-10，项目所有者拍板）
+
+- **支持范围**：Windows 10 22H2+ 与 Windows 11，首发只构建 `x86_64-pc-windows-msvc`。不在首发维护 ARM64、32 位、MSI、MSIX、Microsoft Store 或 winget。
+- **系统能力**：全局键采用原生 `WH_KEYBOARD_LL`，文本注入采用 SendInput，选区主路径采用 UI Automation。HUD 使用 Win32 no-activate/tool-window/topmost 语义，并按前台窗口所在 monitor 的 work area 与 DPI 定位。
+- **安全与降级**：Typex 不自动提权。目标窗口因 UIPI 处于更高完整性级别、无焦点或不支持选区接口时，保住结果并降级到剪贴板/普通提问，给出明确提示；不得静默失败或注入到错误窗口。
+- **音频与推理**：WASAPI 输入覆盖设备实际报告的 sample format；本地模型保证 CPU 路径，Windows GPU 统一走 Vulkan，不维护 CUDA 构建矩阵。缓存记录实际 load mode，并用独占 inference lease 串行同一模型的推理；仅 GPU-loaded 模型的运行初始化/decode 失败可自动 CPU 重试一次。CPU 重载必须清空模型设备并关闭 context/mtmd 的全部 GPU offload，先释放失败 GPU 代际，再在缓存锁外加载。LLM 只在首个可见 delta 前从头重试，已输出后不得重放；ASR 非流式可整次重试。输入/模型契约错误、无 GPU 或 CPU 路径错误不盲目重试。
+- **安装器**：只产出 NSIS x64 用户安装器，WebView2 使用 Evergreen Bootstrapper；卸载默认保留设置、历史与模型，由应用内入口负责主动清理用户数据。默认 feature 的 sherpa/ONNX 四个 DLL 采用 app-local 分发；VC++ 2015-2022 x64 runtime 从构建机 Microsoft VC tools 的合法 redistributable 目录复制，优先当前 `VCToolsRedistDir` 或与 `VCToolsInstallDir` 同版本的目录，未显式提供当前 toolchain 时按 DLL `FileVersion` 选择最新完整集合，CRT 与 OpenMP 不得跨版本混装；Vulkan loader 从固定版本且校验 SHA256 的 Apache-2.0 包提取并随附许可。所有运行库与 EXE 同目录，使无系统级 VC runtime/Vulkan loader 的干净机器仍可启动，并在没有 Vulkan ICD/GPU 时进入 CPU fallback。
+- **更新与密钥**：Windows 与 macOS 复用仓库现有 Tauri updater 密钥。Windows 采用 Tauri 2 原生 updater 产物，直接对作为安装器的 NSIS `.exe` 生成 `.exe.sig`，不保留 Tauri v1 legacy zip；各平台资产在上传前必须用配置公钥实际验签。各平台先上传唯一 manifest fragment，再聚合为单一 stable/nightly `latest.json`；平台键、资产名和通道不得互相覆盖。
+- **发布者签名**：Tauri updater `.sig` 负责更新完整性，Windows Authenticode 负责发布者身份，二者不能互相替代。SignPath Foundation 审批时间属于外部依赖，因此功能适配与 CI artifact 允许暂时 unsigned，但必须保留内层 EXE 与外层 NSIS 的稳定签名插入点；正式大范围公开分发前重新评估。自签名证书不作为公共信任替代方案。
+- **验收**：受控 Win32/UIA harness 是系统契约门槛；记事本、Edge、VS Code、Windows Terminal 是代表性应用矩阵。微信、Slack、Word、Chrome 等只作非阻塞兼容抽测，除非问题导致崩溃、数据/剪贴板损坏、隐私泄露、错窗口注入，或能在 harness 复现为 Windows 契约错误。
+
+### ADR-25 · VAD 双路径与 Windows 即时起音候选录音（2026-07-12）
+
+- **背景**：固定能量门限会漏掉轻声或噪声环境中的语音；Windows 为保护 `Ctrl+C`/AltGr 等普通组合键而延迟 75 ms 提交 `TriggerDown`，若确认后才打开麦克风，会形成固定起音缺口。
+- **决策**：schema v7 增加神经网络/能量双 VAD，升级后默认使用带完整内嵌权重的 `silero-vad-crs 0.4`，失败时降级到用户能量门限；首尾保护采用 300/150 ms，连续弱信号提供 90 ms 保底。Windows 在原始触发键按下时启动带 token 的内存候选流，确认后原位提升，普通组合键、暂停、配置更新、hook 终态与退出均匹配取消。
+- **隐私与边界**：候选阶段不可见、不落盘、不进历史、不发 Provider/电平事件，取消即释放；不采用常驻麦克风，因此设备真正开始回调前的硬件启动时间仍不可追溯。录音开始时快照 VAD 配置，失败重试与长录音切片保持同一判断口径。

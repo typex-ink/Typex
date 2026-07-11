@@ -10,6 +10,54 @@ use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 /// HUD 显隐代际：每次快照 +1；延迟隐藏只在代际未变时执行（防止杀掉新会话的 HUD）。
 static HUD_GEN: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(target_os = "windows")]
+pub fn refresh_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let theme = current_theme_mode(window.app_handle());
+    set_windows_window_icons(window, windows_window_icon_uses_ink(&theme));
+}
+
+#[cfg(target_os = "windows")]
+fn windows_window_icon_uses_ink(theme: &ThemeMode) -> bool {
+    match theme {
+        ThemeMode::Light => true,
+        ThemeMode::Dark => false,
+        ThemeMode::System => !crate::platform::windows::apps_use_dark_theme(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>, use_ink: bool) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    if let Err(classification) = crate::platform::windows::configure_app_window_icons(hwnd, use_ink)
+    {
+        tracing::warn!(classification, "Windows 窗口图标设置失败");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn queue_windows_frame_redraw<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let raw_hwnd = hwnd.0 as isize;
+    let label = window.label().to_owned();
+    if let Err(error) = window.run_on_main_thread(move || {
+        // DwmSetWindowAttribute returns before the compositor has repainted the non-client area.
+        // A short post-message delay keeps the old title color from surviving until reactivation.
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(32)).await;
+            let hwnd = windows::Win32::Foundation::HWND(raw_hwnd as *mut std::ffi::c_void);
+            if let Err(classification) = crate::platform::windows::redraw_window_frame(hwnd) {
+                tracing::warn!(window = label, classification, "Windows 标题栏主题刷新失败");
+            }
+        });
+    }) {
+        tracing::warn!(window = window.label(), %error, "Windows 标题栏主题刷新排队失败");
+    }
+}
+
 fn native_theme(theme: &ThemeMode) -> Option<tauri::Theme> {
     match theme {
         ThemeMode::System => None,
@@ -80,11 +128,22 @@ fn current_system_theme() -> Option<tauri::Theme> {
 
 /// 同步系统原生窗口外观；macOS 的标题栏/红绿灯区域不会跟随 WebView CSS 自动切换。
 pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
+    #[cfg(target_os = "windows")]
+    let use_ink_icon = windows_window_icon_uses_ink(theme);
     let theme = native_theme(theme);
     app.set_theme(theme);
     for label in ["hud", "home", "settings", "onboarding", "assistant"] {
         if let Some(window) = app.get_webview_window(label) {
-            let _ = window.set_theme(theme);
+            if let Err(error) = window.set_theme(theme) {
+                tracing::warn!(window = label, %error, "原生窗口主题设置失败");
+                continue;
+            }
+            #[cfg(target_os = "windows")]
+            if matches!(label, "home" | "settings" | "onboarding") {
+                set_windows_window_icons(&window, use_ink_icon);
+                // Tauri/Tao updates the DWM flag asynchronously; queue the frame repaint after it.
+                queue_windows_frame_redraw(&window);
+            }
             #[cfg(target_os = "macos")]
             apply_macos_window_chrome(label, &window, theme);
         }
@@ -200,7 +259,12 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
             });
         }
         _ => {
+            // A failed HUD may still be visible when a new session starts in another app. Re-read
+            // the foreground HWND so Windows follows the new target monitor without a hide/show.
+            #[cfg(target_os = "windows")]
+            position_hud(&hud);
             if !hud.is_visible().unwrap_or(false) {
+                #[cfg(not(target_os = "windows"))]
                 position_hud(&hud);
                 let _ = hud.show();
             }
@@ -209,6 +273,62 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
 }
 
 /// HUD 位置：屏幕底部居中，距底边 48px（05 §3.1）。
+#[cfg(target_os = "windows")]
+fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
+    use crate::platform::windows::{
+        PhysicalScreenRect, configure_hud_window, foreground_monitor_work_area, hud_origin_px,
+        logical_size_to_physical, place_window_px,
+    };
+
+    let hwnd = match hud.hwnd() {
+        Ok(hwnd) => hwnd,
+        Err(_) => return,
+    };
+    if let Err(classification) = configure_hud_window(hwnd) {
+        tracing::warn!(classification, "Windows HUD 原生样式设置失败");
+    }
+
+    let monitor = foreground_monitor_work_area().or_else(|| {
+        let monitor = hud.current_monitor().ok().flatten()?;
+        let pos = monitor.position();
+        let size = monitor.size();
+        let work = monitor.work_area();
+        Some(crate::platform::windows::MonitorWorkArea {
+            monitor_px: PhysicalScreenRect {
+                left: pos.x,
+                top: pos.y,
+                right: pos.x.saturating_add(i32::try_from(size.width).ok()?),
+                bottom: pos.y.saturating_add(i32::try_from(size.height).ok()?),
+            },
+            work_area_px: PhysicalScreenRect {
+                left: work.position.x,
+                top: work.position.y,
+                right: work
+                    .position
+                    .x
+                    .saturating_add(i32::try_from(work.size.width).ok()?),
+                bottom: work
+                    .position
+                    .y
+                    .saturating_add(i32::try_from(work.size.height).ok()?),
+            },
+            scale_factor: monitor.scale_factor(),
+        })
+    });
+    let Some(monitor) = monitor else {
+        return;
+    };
+
+    // 352×76 is the Tauri logical outer window. The capsule has a 16 DIP transparent inset,
+    // so a 32 DIP outer gap preserves the specified 48 DIP visual distance from the work area.
+    let size = logical_size_to_physical(352.0, 76.0, monitor.scale_factor);
+    let origin = hud_origin_px(monitor.work_area_px, size, monitor.scale_factor, 32.0);
+    if let Err(classification) = place_window_px(hwnd, origin, size, true, true) {
+        tracing::warn!(classification, "Windows HUD 定位失败");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
     if let Ok(Some(monitor)) = hud.current_monitor() {
         let screen = monitor.size();
@@ -228,6 +348,8 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
 /// 设置窗口：720×520 常规窗口，按需创建（05 §5）。
 pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("settings") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -248,6 +370,10 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("settings", &window, native_theme(&theme));
     Ok(())
@@ -256,6 +382,8 @@ pub fn show_settings<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 /// 主页窗口：880×560 侧边栏导航（05 §8 / ADR-19）。
 pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("home") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -277,6 +405,10 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Transparent)
         .hidden_title(true);
     let window = builder.build()?;
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("home", &window, native_theme(&theme));
     Ok(())
@@ -331,6 +463,54 @@ pub fn show_assistant<R: Runtime>(app: &AppHandle<R>, has_selection: bool) -> ta
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn position_assistant<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+    selection_bounds: Option<SelectionBounds>,
+) {
+    use crate::platform::windows::{
+        LogicalScreenRect, assistant_origin_px, foreground_monitor_work_area,
+        logical_rect_to_physical_screen, logical_size_to_physical, place_window_px,
+    };
+
+    let Some(monitor) = foreground_monitor_work_area() else {
+        position_assistant_fallback(app, assistant);
+        return;
+    };
+    let size = logical_size_to_physical(560.0, 136.0, monitor.scale_factor);
+    // Windows SelectionReader returns screen-space logical DIPs. Convert exactly once with the
+    // foreground HWND monitor that supplied the work area.
+    let selection_px = selection_bounds.map(|bounds| {
+        logical_rect_to_physical_screen(
+            LogicalScreenRect {
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+            },
+            monitor,
+        )
+    });
+    let origin = assistant_origin_px(
+        monitor.work_area_px,
+        selection_px,
+        size,
+        monitor.scale_factor,
+    );
+    if let Ok(hwnd) = assistant.hwnd()
+        && place_window_px(hwnd, origin, size, true, true).is_ok()
+    {
+        return;
+    }
+    let _ = assistant.set_size(tauri::PhysicalSize::new(
+        size.width.max(1) as u32,
+        size.height.max(1) as u32,
+    ));
+    let _ = assistant.set_position(tauri::PhysicalPosition::new(origin.x, origin.y));
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_assistant<R: Runtime>(
     app: &AppHandle<R>,
     assistant: &tauri::WebviewWindow<R>,
@@ -392,6 +572,48 @@ fn position_assistant<R: Runtime>(
     let _ = assistant.set_position(tauri::LogicalPosition::new(x, y));
 }
 
+#[cfg(target_os = "windows")]
+fn position_assistant_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: &tauri::WebviewWindow<R>,
+) {
+    use crate::platform::windows::{
+        PhysicalScreenRect, assistant_origin_px, logical_size_to_physical, place_window_px,
+    };
+
+    let monitor = app.primary_monitor().ok().flatten().or_else(|| {
+        app.available_monitors()
+            .ok()
+            .and_then(|mut monitors| monitors.pop())
+    });
+    let Some(monitor) = monitor else {
+        let _ = assistant.center();
+        return;
+    };
+    let work = monitor.work_area();
+    let Ok(width) = i32::try_from(work.size.width) else {
+        return;
+    };
+    let Ok(height) = i32::try_from(work.size.height) else {
+        return;
+    };
+    let work_area = PhysicalScreenRect {
+        left: work.position.x,
+        top: work.position.y,
+        right: work.position.x.saturating_add(width),
+        bottom: work.position.y.saturating_add(height),
+    };
+    let size = logical_size_to_physical(560.0, 136.0, monitor.scale_factor());
+    let origin = assistant_origin_px(work_area, None, size, monitor.scale_factor());
+    if let Ok(hwnd) = assistant.hwnd()
+        && place_window_px(hwnd, origin, size, true, true).is_ok()
+    {
+        return;
+    }
+    let _ = assistant.set_position(tauri::PhysicalPosition::new(origin.x, origin.y));
+}
+
+#[cfg(not(target_os = "windows"))]
 fn position_assistant_fallback<R: Runtime>(
     app: &AppHandle<R>,
     assistant: &tauri::WebviewWindow<R>,
@@ -418,6 +640,8 @@ fn position_assistant_fallback<R: Runtime>(
 /// 首次启动引导：640×480，5 步向导（05 §6）。
 pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window("onboarding") {
+        #[cfg(target_os = "windows")]
+        refresh_windows_window_icons(&w);
         w.show()?;
         w.set_focus()?;
         return Ok(());
@@ -436,6 +660,10 @@ pub fn show_onboarding<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
-    builder.build()?;
+    let window = builder.build()?;
+    #[cfg(target_os = "windows")]
+    refresh_windows_window_icons(&window);
+    #[cfg(not(target_os = "windows"))]
+    let _ = &window;
     Ok(())
 }

@@ -25,6 +25,8 @@ pub enum ErrorCode {
     NoSpeech,
     /// 当前无输入焦点，结果已转剪贴板
     NoFocus,
+    /// Windows 目标进程完整性更高（UIPI）或 SendInput 被系统阻止，结果已转剪贴板
+    InjectionBlocked,
     /// 缺少系统权限（辅助功能/麦克风/输入监听）
     PermissionMissing,
     /// 录音设备错误

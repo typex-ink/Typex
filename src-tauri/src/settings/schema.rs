@@ -1,11 +1,19 @@
 //! 全部配置结构体 + 默认值 + schema_version（06 §4 settings/schema.rs）。
 //! settings.json 形态见 03 §6；本文件是其唯一 Rust 定义。
 
-use crate::types::profile::{ModelDownloadSource, ProviderProfile, SlotKind};
+use crate::types::{
+    derive_translation_chord, hotkey_chords_are_reachable, normalize_hotkey_chord,
+    profile::{ModelDownloadSource, ProviderProfile, SlotKind},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+
+pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
+pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
+pub const VAD_NEURAL_THRESHOLD_MIN: f32 = 0.10;
+pub const VAD_NEURAL_THRESHOLD_MAX: f32 = 0.90;
 
 pub const DICTIONARY_MAX_TERMS: usize = 100;
 pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
@@ -53,6 +61,7 @@ impl Settings {
     pub fn normalize_for_save(&mut self) {
         self.schema_version = CURRENT_SCHEMA_VERSION;
         self.dictionary.normalize();
+        self.hotkeys.normalize();
     }
 }
 
@@ -153,10 +162,12 @@ pub struct DictationSettings {
     pub paste_delay_ms: u64,
     /// STT language 提示；"auto" = 自动检测
     pub language: String,
-    /// 固定麦克风设备名；空 = 系统默认
+    /// 固定麦克风稳定设备 ID；空 = 系统默认。v4 旧名称由 audio 运行时唯一匹配迁移。
     pub microphone: String,
     /// Esc 取消录音（05 §3.3 可关）
     pub esc_cancels: bool,
+    /// 录音开始时快照；失败重试与长录音切片沿用同一份配置。
+    pub vad: VadSettings,
 }
 
 impl Default for DictationSettings {
@@ -169,7 +180,45 @@ impl Default for DictationSettings {
             language: "auto".into(),
             microphone: String::new(),
             esc_cancels: true,
+            vad: VadSettings::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum VadMode {
+    Energy,
+    #[default]
+    Neural,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(default)]
+pub struct VadSettings {
+    pub mode: VadMode,
+    pub energy_threshold: f32,
+    pub neural_threshold: f32,
+}
+
+impl Default for VadSettings {
+    fn default() -> Self {
+        Self {
+            mode: VadMode::Neural,
+            energy_threshold: 0.010,
+            neural_threshold: 0.50,
+        }
+    }
+}
+
+impl VadSettings {
+    pub fn is_valid(self) -> bool {
+        self.energy_threshold.is_finite()
+            && (VAD_ENERGY_THRESHOLD_MIN..=VAD_ENERGY_THRESHOLD_MAX)
+                .contains(&self.energy_threshold)
+            && self.neural_threshold.is_finite()
+            && (VAD_NEURAL_THRESHOLD_MIN..=VAD_NEURAL_THRESHOLD_MAX)
+                .contains(&self.neural_threshold)
     }
 }
 
@@ -208,7 +257,7 @@ pub struct AssistantSettings {
     pub ask_prompt: String,
 }
 
-/// 快捷键绑定：一组按键标识（rdev key 的稳定字符串名）。
+/// 快捷键绑定：每组是一个完整 chord，按键使用稳定物理 KeyId。
 /// 默认全修饰键三角方案（ADR-7）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
@@ -222,18 +271,32 @@ pub struct HotkeySettings {
 
 impl Default for HotkeySettings {
     fn default() -> Self {
-        // 注意：rdev 中右 ⌥/右 Alt 的标识是 "AltGr"（rdev::Key 无 AltRight 变体）
         #[cfg(target_os = "macos")]
-        let (dict, assist) = (vec!["MetaRight".to_string()], vec!["AltGr".to_string()]);
+        let (dict, assist) = (vec!["MetaRight".to_string()], vec!["AltRight".to_string()]);
         #[cfg(not(target_os = "macos"))]
-        let (dict, assist) = (vec!["ControlRight".to_string()], vec!["AltGr".to_string()]);
-        let translation = vec![dict[0].clone(), assist[0].clone()];
+        let (dict, assist) = (
+            vec!["ControlRight".to_string()],
+            vec!["AltRight".to_string()],
+        );
+        let translation = derive_translation_chord(&dict, &assist);
         Self {
             dictation: dict,
             assistant: assist,
             translation,
             hold_threshold_ms: 350,
         }
+    }
+}
+
+impl HotkeySettings {
+    pub fn normalize(&mut self) {
+        self.dictation = normalize_hotkey_chord(&self.dictation);
+        self.assistant = normalize_hotkey_chord(&self.assistant);
+        self.translation = derive_translation_chord(&self.dictation, &self.assistant);
+    }
+
+    pub fn chords_are_reachable(&self) -> bool {
+        hotkey_chords_are_reachable(&self.dictation, &self.assistant)
     }
 }
 
@@ -354,9 +417,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 4, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 7, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 4);
+        assert_eq!(s.schema_version, 7);
         assert_eq!(s.general.update_channel, UpdateChannel::Stable);
     }
 
@@ -367,19 +430,61 @@ mod tests {
         assert_eq!(h.translation.len(), 2);
         assert!(h.translation.contains(&h.dictation[0]));
         assert!(h.translation.contains(&h.assistant[0]));
+        assert!(h.assistant.contains(&"AltRight".to_string()));
+    }
+
+    #[test]
+    fn hotkeys_normalize_aliases_and_derive_multi_key_translation() {
+        let mut h = HotkeySettings {
+            dictation: vec!["ControlRight".into(), "Num1".into(), "Digit1".into()],
+            assistant: vec!["AltGr".into(), "KeyA".into()],
+            translation: vec!["stale-value".into()],
+            hold_threshold_ms: 350,
+        };
+
+        h.normalize();
+
+        assert_eq!(h.dictation, vec!["ControlRight", "Digit1"]);
+        assert_eq!(h.assistant, vec!["AltRight", "KeyA"]);
+        assert_eq!(
+            h.translation,
+            vec!["ControlRight", "Digit1", "AltRight", "KeyA"]
+        );
+        assert!(h.chords_are_reachable());
+    }
+
+    #[test]
+    fn equal_or_subset_hotkeys_are_not_reachable() {
+        let equal = HotkeySettings {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["ControlRight".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!equal.chords_are_reachable());
+
+        let subset = HotkeySettings {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["ControlRight".into(), "KeyA".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!subset.chords_are_reachable());
     }
 
     #[test]
     fn dictionary_terms_are_normalized_for_save() {
-        let mut s = Settings::default();
-        s.schema_version = 1;
-        s.dictionary.terms = vec![
-            " Typex ".into(),
-            "".into(),
-            "OpenAI".into(),
-            "Typex".into(),
-            "超长".repeat(40),
-        ];
+        let mut s = Settings {
+            schema_version: 1,
+            dictionary: DictionarySettings {
+                terms: vec![
+                    " Typex ".into(),
+                    "".into(),
+                    "OpenAI".into(),
+                    "Typex".into(),
+                    "超长".repeat(40),
+                ],
+            },
+            ..Settings::default()
+        };
         s.normalize_for_save();
         assert_eq!(s.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(s.dictionary.terms[0], "Typex");
@@ -403,5 +508,38 @@ mod tests {
         let llm = dictionary.llm_context().unwrap();
         assert!(llm.contains("- Typex"));
         assert!(llm.contains("A&amp;B &lt;tag&gt;"));
+    }
+
+    #[test]
+    fn vad_defaults_to_neural_with_independent_thresholds() {
+        let vad = VadSettings::default();
+        assert_eq!(vad.mode, VadMode::Neural);
+        assert_eq!(vad.energy_threshold, 0.010);
+        assert_eq!(vad.neural_threshold, 0.50);
+        assert!(vad.is_valid());
+    }
+
+    #[test]
+    fn vad_validation_rejects_non_finite_and_out_of_range_thresholds() {
+        for vad in [
+            VadSettings {
+                energy_threshold: f32::NAN,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                energy_threshold: 0.0009,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                neural_threshold: f32::INFINITY,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                neural_threshold: 0.95,
+                ..VadSettings::default()
+            },
+        ] {
+            assert!(!vad.is_valid());
+        }
     }
 }

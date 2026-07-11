@@ -8,6 +8,7 @@
     "invalid_request": "请求被拒绝",
     "no_speech": "没有听到声音",
     "no_focus": "当前没有输入焦点，结果已复制",
+    "injection_blocked": "目标应用权限更高，结果已复制，请手动粘贴",
     "permission_missing": "缺少辅助功能权限，无法输入文字",
     "audio_device": "麦克风不可用",
     "not_configured": "尚未配置模型服务",
@@ -59,13 +60,28 @@
   "keys": {
     "MetaLeft": "左 ⌘",
     "MetaRight": "右 ⌘",
-    "Alt": "左 ⌥",
-    "AltGr": "右 ⌥",
+    "AltLeft": "左 ⌥",
+    "AltRight": "右 ⌥",
     "ControlLeft": "左 Ctrl",
     "ControlRight": "右 Ctrl",
     "ShiftLeft": "左 ⇧",
     "ShiftRight": "右 ⇧",
-    "CapsLock": "CapsLock"
+    "CapsLock": "CapsLock",
+    "Enter": "回车",
+    "Menu": "菜单键"
+  },
+  "keys_windows": {
+    "MetaLeft": "左 Win",
+    "MetaRight": "右 Win",
+    "AltLeft": "左 Alt",
+    "AltRight": "右 Alt",
+    "ControlLeft": "左 Ctrl",
+    "ControlRight": "右 Ctrl",
+    "ShiftLeft": "左 Shift",
+    "ShiftRight": "右 Shift",
+    "CapsLock": "CapsLock",
+    "Enter": "Enter",
+    "Menu": "菜单键"
   },
   "prompt": {
     "expand": "展开编辑 ▾",
@@ -92,6 +108,7 @@
       "autostart": "开机自启",
       "chimes": "提示音",
       "chimes_hint": "开始 / 成功 / 错误 三枚，可关",
+      "chimes_volume": "提示音音量",
       "proxy": "网络代理",
       "proxy_system": "跟随系统",
       "proxy_manual": "手动",
@@ -110,6 +127,14 @@
       "ph_help_dictionary": "个人词典（可选，F-10）",
       "ph_help_target_app": "目标应用（可选）",
       "ph_missing": "缺少必需占位符 {ph}，无法保存",
+      "vad_mode": "语音活动检测",
+      "vad_mode_hint": "神经网络适合多数环境；能量门限仅按输入音量判断",
+      "vad_neural": "神经网络",
+      "vad_energy": "能量门限",
+      "vad_neural_threshold": "神经网络门限",
+      "vad_neural_threshold_hint": "语音置信度。越低越灵敏，越高越能过滤噪声；通常保持默认即可",
+      "vad_energy_threshold": "能量门限",
+      "vad_energy_threshold_hint": "输入音量。越低越灵敏，越高越能过滤底噪；通常保持默认即可",
       "inject_method": "注入方式",
       "inject_auto": "自动（推荐）",
       "inject_paste": "剪贴板粘贴",
@@ -118,7 +143,8 @@
       "esc_cancels": "Esc 取消录音",
       "microphone": "麦克风",
       "mic_default": "系统默认",
-      "level_preview": "电平预览"
+      "mic_unavailable": "已选麦克风不可用",
+      "mic_load_failed": "无法读取麦克风列表"
     },
     "translation": {
       "source": "源语言",
@@ -223,7 +249,7 @@
       "none_downloaded": "尚未下载任何模型。",
       "req_gpu": "需 GPU 加速（本机 {check}）",
       "req_ram": "建议 ≥ {min} GB 内存（本机 {check}）",
-      "check_ok_gpu": "✓ Metal",
+      "check_ok_gpu": "✓ {backend}",
       "check_ok_ram": "✓ {ram} GB",
       "check_fail": "✗ 不满足",
       "total": "占用合计 {size}",
@@ -245,7 +271,8 @@
     },
     "hotkeys": {
       "desc": "听写与助手键位可改；翻译 = 两键同按（自动跟随）。",
-      "translation_hint": "听写键 + 助手键 同时按住"
+      "translation_hint": "听写键 + 助手键 同时按住",
+      "unreachable_chords": "请选择两个非空快捷键，且任一组合都不能包含另一组合。"
     },
     "history": {
       "desc": "历史仅保存在本机，不含音频。",
@@ -265,6 +292,12 @@
       "perm_accessibility": "辅助功能权限（注入 + 读选区）",
       "perm_input_monitoring": "输入监听权限（快捷键）",
       "inject_backend": "注入后端：{backend}",
+      "cap_keyboard_hook": "低级键盘钩子",
+      "cap_send_input": "Windows 文本注入",
+      "cap_ui_automation": "UI Automation 选区读取",
+      "cap_webview2": "WebView2 Runtime",
+      "cap_integrity": "进程完整性级别",
+      "hardware": "本地推理：{summary}",
       "open_log_dir": "打开日志目录",
       "log_path": "日志：{path}",
       "export": "导出诊断包",
@@ -393,11 +426,12 @@
     "hotkey": {
       "press": "按下键位…",
       "change": "更改",
-      "recording": "正在录制…",
-      "recording_hint": "按下想要的键位（支持单个修饰键）；Esc 取消。",
       "conflict_capslock": "CapsLock 与 macOS 中文输入法的中英切换冲突，不推荐。",
       "conflict_meta_left": "左 ⌘ 参与大量系统组合键，误触发风险高。",
-      "conflict_alt": "左 ⌥ 常用于输入特殊字符，可能干扰日常输入。"
+      "conflict_alt": "左 ⌥ 常用于输入特殊字符，可能干扰日常输入。",
+      "conflict_capslock_windows": "CapsLock 可能与输入法或键位重映射冲突，不推荐。",
+      "conflict_meta_left_windows": "左 Win 参与大量系统快捷键，误触发风险高。",
+      "conflict_alt_windows": "左 Alt 参与菜单和系统快捷键，可能干扰日常输入。"
     },
     "provider_card": {
       "testing": "测试中…",

@@ -17,8 +17,8 @@ const GAP: usize = 2;
 const IDLE_HEIGHTS: [usize; 5] = [6, 10, 14, 10, 6];
 /// 录音红 / 错误红（04 §3 唯一彩色）
 const RED: [u8; 4] = [226, 61, 45, 255];
-/// macOS 菜单栏常驻深色/壁纸融合背景；非 template 帧也必须可见。
 const WHITE: [u8; 4] = [255, 255, 255, 255];
+const BLACK: [u8; 4] = [0, 0, 0, 255];
 
 /// 托盘视觉状态（snapshot/level 回调写入，动画 task 读取）。
 #[derive(Default)]
@@ -67,7 +67,7 @@ fn put(buf: &mut [u8], x: usize, y: usize, c: [u8; 4]) {
 }
 
 /// 画一根竖柱：底对齐，高 h，alpha 0–255。
-fn draw_bar(buf: &mut [u8], idx: usize, h: usize, alpha: u8) {
+fn draw_bar(buf: &mut [u8], idx: usize, h: usize, alpha: u8, color: [u8; 4]) {
     let x0 = (SIZE - (5 * BAR_W + 4 * GAP)) / 2 + idx * (BAR_W + GAP);
     let base = (SIZE + 14) / 2; // 柱体在 14px 高的带内底对齐，垂直居中
     for dy in 0..h.min(14) {
@@ -76,7 +76,7 @@ fn draw_bar(buf: &mut [u8], idx: usize, h: usize, alpha: u8) {
                 buf,
                 x0 + dx,
                 base - 1 - dy,
-                [WHITE[0], WHITE[1], WHITE[2], alpha],
+                [color[0], color[1], color[2], alpha],
             );
         }
     }
@@ -95,25 +95,31 @@ fn draw_badge(buf: &mut [u8]) {
 }
 
 /// 斜杠角标（暂停）。
-fn draw_slash(buf: &mut [u8]) {
+fn draw_slash(buf: &mut [u8], color: [u8; 4]) {
     for i in 0..SIZE {
-        put(buf, i, SIZE - 1 - i, WHITE);
+        put(buf, i, SIZE - 1 - i, color);
         if i + 1 < SIZE {
-            put(buf, i + 1, SIZE - 1 - i, WHITE);
+            put(buf, i + 1, SIZE - 1 - i, color);
         }
     }
 }
 
-fn render(visual: &TrayVisual, tick: u64) -> Frame {
+fn render(visual: &TrayVisual, tick: u64, dark_theme: bool) -> Frame {
     let mut buf = blank();
+    let foreground = if cfg!(target_os = "macos") || dark_theme {
+        WHITE
+    } else {
+        BLACK
+    };
+    let template = cfg!(target_os = "macos");
     if visual.paused.load(Ordering::Relaxed) {
         for (i, h) in IDLE_HEIGHTS.iter().enumerate() {
-            draw_bar(&mut buf, i, *h, 102); // 40%
+            draw_bar(&mut buf, i, *h, 102, foreground); // 40%
         }
-        draw_slash(&mut buf);
+        draw_slash(&mut buf, foreground);
         return Frame {
             rgba: buf,
-            template: true,
+            template,
         };
     }
     match visual.mode.load(Ordering::Relaxed) {
@@ -123,11 +129,14 @@ fn render(visual: &TrayVisual, tick: u64) -> Frame {
             for i in 0..5 {
                 let l = levels.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
                 let h = 3 + (l * 11.0) as usize;
-                draw_bar(&mut buf, i, h, 255);
+                draw_bar(&mut buf, i, h, 255, foreground);
+            }
+            if !template {
+                draw_badge(&mut buf);
             }
             Frame {
                 rgba: buf,
-                template: true,
+                template,
             }
         }
         2 => {
@@ -135,17 +144,17 @@ fn render(visual: &TrayVisual, tick: u64) -> Frame {
             for (i, h) in IDLE_HEIGHTS.iter().enumerate() {
                 let phase = ((tick as f32 * 0.35) - i as f32 * 0.7).sin() * 0.5 + 0.5;
                 let alpha = (102.0 + phase * 153.0) as u8;
-                draw_bar(&mut buf, i, *h, alpha);
+                draw_bar(&mut buf, i, *h, alpha, foreground);
             }
             Frame {
                 rgba: buf,
-                template: true,
+                template,
             }
         }
         3 => {
             // 错误：静态五柱 + 红点（需真彩，非 template）
             for (i, h) in IDLE_HEIGHTS.iter().enumerate() {
-                draw_bar(&mut buf, i, *h, 255);
+                draw_bar(&mut buf, i, *h, 255, foreground);
             }
             draw_badge(&mut buf);
             Frame {
@@ -155,11 +164,11 @@ fn render(visual: &TrayVisual, tick: u64) -> Frame {
         }
         _ => {
             for (i, h) in IDLE_HEIGHTS.iter().enumerate() {
-                draw_bar(&mut buf, i, *h, 255);
+                draw_bar(&mut buf, i, *h, 255, foreground);
             }
             Frame {
                 rgba: buf,
-                template: true,
+                template,
             }
         }
     }
@@ -170,6 +179,7 @@ pub fn spawn_animator<R: Runtime>(app: AppHandle<R>) {
     tauri::async_runtime::spawn(async move {
         let mut tick: u64 = 0;
         let mut last_static = false; // 上一帧是否为静态态（避免空闲期重复 set_icon）
+        let mut last_dark = None;
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(125)).await; // 8 fps
             tick += 1;
@@ -179,11 +189,20 @@ pub fn spawn_animator<R: Runtime>(app: AppHandle<R>) {
             let mode = visual.mode.load(Ordering::Relaxed);
             let paused = visual.paused.load(Ordering::Relaxed);
             let is_static = matches!(mode, 0 | 3) || paused;
-            if is_static && last_static {
+            #[cfg(target_os = "windows")]
+            let dark_theme = crate::platform::windows::taskbar_uses_dark_theme();
+            #[cfg(not(target_os = "windows"))]
+            let dark_theme = app
+                .get_webview_window("hud")
+                .and_then(|window| window.theme().ok())
+                .is_some_and(|theme| theme == tauri::Theme::Dark);
+            let theme_changed = last_dark != Some(dark_theme);
+            last_dark = Some(dark_theme);
+            if is_static && last_static && !theme_changed {
                 continue; // 静态态已渲染过，零活动
             }
             last_static = is_static;
-            let frame = render(&visual, tick);
+            let frame = render(&visual, tick, dark_theme);
             if let Some(tray) = app.tray_by_id("main") {
                 let img = tauri::image::Image::new_owned(frame.rgba, SIZE as u32, SIZE as u32);
                 let _ = tray.set_icon(Some(img));
@@ -204,8 +223,8 @@ mod tests {
     #[test]
     fn idle_frame_is_template_with_bars() {
         let v = TrayVisual::default();
-        let f = render(&v, 0);
-        assert!(f.template);
+        let f = render(&v, 0, false);
+        assert_eq!(f.template, cfg!(target_os = "macos"));
         assert!(alpha_sum(&f.rgba) > 0, "空帧");
     }
 
@@ -213,26 +232,30 @@ mod tests {
     fn error_frame_has_red_badge_not_template() {
         let v = TrayVisual::default();
         v.mode.store(3, Ordering::Relaxed);
-        let f = render(&v, 0);
+        let f = render(&v, 0, false);
         assert!(!f.template);
         let has_red = f
             .rgba
             .chunks(4)
             .any(|p| p[0] == RED[0] && p[1] == RED[1] && p[3] == 255);
         assert!(has_red, "缺红点角标");
-        let has_white = f
-            .rgba
-            .chunks(4)
-            .any(|p| p[0] == WHITE[0] && p[1] == WHITE[1] && p[2] == WHITE[2] && p[3] == 255);
-        assert!(has_white, "错误帧柱体应为白色");
+        let expected = if cfg!(target_os = "macos") {
+            WHITE
+        } else {
+            BLACK
+        };
+        let has_foreground = f.rgba.chunks(4).any(|p| {
+            p[0] == expected[0] && p[1] == expected[1] && p[2] == expected[2] && p[3] == 255
+        });
+        assert!(has_foreground, "错误帧应包含高对比柱体");
     }
 
     #[test]
     fn paused_frame_dimmed_with_slash() {
         let v = TrayVisual::default();
         v.set_paused(true);
-        let f = render(&v, 0);
-        assert!(f.template);
+        let f = render(&v, 0, false);
+        assert_eq!(f.template, cfg!(target_os = "macos"));
         // 斜杠是满 alpha，柱体 40%——两种 alpha 都存在
         let alphas: std::collections::HashSet<u8> =
             f.rgba.chunks(4).map(|p| p[3]).filter(|a| *a > 0).collect();
@@ -244,9 +267,9 @@ mod tests {
         let v = TrayVisual::default();
         v.mode.store(1, Ordering::Relaxed);
         v.on_levels(&[0.0, 0.0, 0.0, 0.0, 0.0]);
-        let quiet = alpha_sum(&render(&v, 0).rgba);
+        let quiet = alpha_sum(&render(&v, 0, false).rgba);
         v.on_levels(&[1.0, 1.0, 1.0, 1.0, 1.0]);
-        let loud = alpha_sum(&render(&v, 0).rgba);
+        let loud = alpha_sum(&render(&v, 0, false).rgba);
         assert!(loud > quiet, "电平应影响柱高");
     }
 
@@ -254,8 +277,8 @@ mod tests {
     fn processing_breathes_over_ticks() {
         let v = TrayVisual::default();
         v.mode.store(2, Ordering::Relaxed);
-        let a = render(&v, 0).rgba;
-        let b = render(&v, 5).rgba;
+        let a = render(&v, 0, false).rgba;
+        let b = render(&v, 5, false).rgba;
         assert_ne!(a, b, "呼吸动画应随 tick 变化");
     }
 }

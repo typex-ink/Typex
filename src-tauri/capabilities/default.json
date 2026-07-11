@@ -15,6 +15,7 @@
     "core:window:allow-close",
     "core:webview:allow-internal-toggle-devtools",
     "dialog:allow-open",
+    "os:default",
     "opener:default"
   ]
 }

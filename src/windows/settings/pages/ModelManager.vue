@@ -90,13 +90,15 @@ function usedBySlots(modelId: string): string[] {
   return out;
 }
 
-/** 行内硬件要求 + 本机检测结果（05 §5.1：「需 GPU 加速（本机 ✓ Metal）」） */
+/** 行内硬件要求 + 本机检测结果（05 §5.1：Metal / Vulkan）。 */
 function hardwareLine(m: LocalModelInfo): string {
   const parts: string[] = [];
   if (m.requires_gpu) {
     parts.push(
       t("settings.models.req_gpu", {
-        check: hw.value?.gpu ? t("settings.models.check_ok_gpu") : t("settings.models.check_fail"),
+        check: hw.value?.gpu
+          ? t("settings.models.check_ok_gpu", { backend: hw.value.gpu_backend })
+          : t("settings.models.check_fail"),
       }),
     );
   }

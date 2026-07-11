@@ -12,6 +12,8 @@ pub enum ChimeKind {
 }
 
 const RATE: u32 = 44_100;
+// 为错误音的 1.2 倍瞬态保留削波余量，同时让 100% 档位有足够响度。
+const MASTER_GAIN: f32 = 0.9;
 
 /// 木琴系音色：正弦基波 + 三次谐波少量 + 指数衰减包络。
 fn strike(freq: f32, dur_ms: u32, gain: f32) -> Vec<f32> {
@@ -28,7 +30,7 @@ fn strike(freq: f32, dur_ms: u32, gain: f32) -> Vec<f32> {
 }
 
 fn samples_of(kind: ChimeKind, volume: f32) -> Vec<f32> {
-    let g = volume.clamp(0.0, 1.0) * 0.5;
+    let g = volume.clamp(0.0, 1.0) * MASTER_GAIN;
     match kind {
         ChimeKind::Start => {
             // 上行双音：G5 → C6，各 70ms
@@ -74,5 +76,17 @@ mod tests {
             assert!(s.iter().all(|v| v.abs() <= 1.0));
             assert!(s.iter().any(|v| v.abs() > 0.05), "{kind:?} 无声");
         }
+    }
+
+    #[test]
+    fn configured_volume_controls_amplitude() {
+        let muted = samples_of(ChimeKind::Success, 0.0);
+        let quiet = samples_of(ChimeKind::Success, 0.25);
+        let loud = samples_of(ChimeKind::Success, 1.0);
+        let peak = |samples: &[f32]| samples.iter().fold(0.0_f32, |p, v| p.max(v.abs()));
+
+        assert!(muted.iter().all(|v| *v == 0.0));
+        assert!(peak(&loud) > peak(&quiet) * 3.9);
+        assert!(peak(&loud) > 0.7, "100% 档位仍然过轻");
     }
 }

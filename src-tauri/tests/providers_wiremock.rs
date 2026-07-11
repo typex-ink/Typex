@@ -17,7 +17,7 @@ use typex_lib::providers::stt::{
     AudioInput, SttOptions, SttProvider, openai_compat::OpenAiCompatStt,
 };
 use typex_lib::settings::SettingsService;
-use typex_lib::settings::schema::{Settings, SlotConfig};
+use typex_lib::settings::schema::{ProxyMode, Settings, SlotConfig};
 use typex_lib::types::{ProviderCapability, ProviderKind, ProviderProfile, SessionMode, SlotKind};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -43,6 +43,7 @@ fn llm_req() -> LlmRequest {
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap()
@@ -178,6 +179,7 @@ async fn stt_timeout_classified() {
         .mount(&server)
         .await;
     let fast_client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_millis(300))
         .build()
         .unwrap();
@@ -260,6 +262,7 @@ async fn dictation_polish_receives_target_app_context() {
         .await;
 
     let mut settings = Settings::default();
+    settings.general.proxy_mode = ProxyMode::Direct;
     settings.dictation.polish_enabled = true;
     settings.dictionary.terms = vec!["Typex".into(), "OpenAI".into()];
     settings.profiles = vec![test_llm_profile("polish", &server.uri())];
@@ -322,6 +325,7 @@ async fn translation_uses_polished_transcript_when_enabled() {
         .await;
 
     let mut settings = Settings::default();
+    settings.general.proxy_mode = ProxyMode::Direct;
     settings.dictation.polish_enabled = true;
     settings.profiles = vec![
         test_llm_profile("polish", &server.uri()),
@@ -381,6 +385,7 @@ async fn translation_skips_polish_when_disabled() {
         .await;
 
     let mut settings = Settings::default();
+    settings.general.proxy_mode = ProxyMode::Direct;
     settings.dictation.polish_enabled = false;
     settings.profiles = vec![test_llm_profile("translate", &server.uri())];
     settings.slots.insert(
@@ -443,6 +448,7 @@ async fn assistant_uses_polished_instruction_when_enabled() {
         .await;
 
     let mut settings = Settings::default();
+    settings.general.proxy_mode = ProxyMode::Direct;
     settings.dictation.polish_enabled = true;
     settings.profiles = vec![
         test_llm_profile("polish", &server.uri()),
