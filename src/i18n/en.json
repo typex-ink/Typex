@@ -108,6 +108,7 @@
       "autostart": "Launch at login",
       "chimes": "Sound cues",
       "chimes_hint": "Start / success / error chimes; can be turned off",
+      "chimes_volume": "Sound cue volume",
       "proxy": "Network proxy",
       "proxy_system": "System",
       "proxy_manual": "Manual",

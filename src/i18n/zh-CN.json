@@ -108,6 +108,7 @@
       "autostart": "开机自启",
       "chimes": "提示音",
       "chimes_hint": "开始 / 成功 / 错误 三枚，可关",
+      "chimes_volume": "提示音音量",
       "proxy": "网络代理",
       "proxy_system": "跟随系统",
       "proxy_manual": "手动",
