@@ -550,6 +550,17 @@ pub fn run() {
                 {
                     crate::app::windows::refresh_native_chrome(app);
                 }
+                #[cfg(target_os = "windows")]
+                if let tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::ThemeChanged(_),
+                    ..
+                } = &event
+                    && matches!(label.as_str(), "home" | "settings" | "onboarding")
+                    && let Some(window) = app.get_webview_window(label)
+                {
+                    crate::app::windows::refresh_windows_window_icons(&window);
+                }
                 #[cfg(not(target_os = "macos"))]
                 let _ = (app, event, launched_at);
             }

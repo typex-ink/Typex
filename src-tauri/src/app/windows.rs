@@ -12,10 +12,26 @@ static HUD_GEN: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_os = "windows")]
 pub fn refresh_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let theme = current_theme_mode(window.app_handle());
+    set_windows_window_icons(window, windows_window_icon_uses_ink(&theme));
+}
+
+#[cfg(target_os = "windows")]
+fn windows_window_icon_uses_ink(theme: &ThemeMode) -> bool {
+    match theme {
+        ThemeMode::Light => true,
+        ThemeMode::Dark => false,
+        ThemeMode::System => !crate::platform::windows::apps_use_dark_theme(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>, use_ink: bool) {
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    if let Err(classification) = crate::platform::windows::configure_app_window_icons(hwnd) {
+    if let Err(classification) = crate::platform::windows::configure_app_window_icons(hwnd, use_ink)
+    {
         tracing::warn!(classification, "Windows 窗口图标设置失败");
     }
 }
@@ -112,6 +128,8 @@ fn current_system_theme() -> Option<tauri::Theme> {
 
 /// 同步系统原生窗口外观；macOS 的标题栏/红绿灯区域不会跟随 WebView CSS 自动切换。
 pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
+    #[cfg(target_os = "windows")]
+    let use_ink_icon = windows_window_icon_uses_ink(theme);
     let theme = native_theme(theme);
     app.set_theme(theme);
     for label in ["hud", "home", "settings", "onboarding", "assistant"] {
@@ -122,6 +140,7 @@ pub fn apply_native_theme<R: Runtime>(app: &AppHandle<R>, theme: &ThemeMode) {
             }
             #[cfg(target_os = "windows")]
             if matches!(label, "home" | "settings" | "onboarding") {
+                set_windows_window_icons(&window, use_ink_icon);
                 // Tauri/Tao updates the DWM flag asynchronously; queue the frame repaint after it.
                 queue_windows_frame_redraw(&window);
             }

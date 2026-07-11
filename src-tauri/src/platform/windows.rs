@@ -1,9 +1,11 @@
 //! Windows platform glue. Unsafe Win32 calls stay in this module.
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::mem::size_of;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, HINSTANCE, HWND, LPARAM, RECT, SetLastError,
@@ -31,12 +33,12 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GUITHREADINFO, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo,
-    GetWindowLongPtrW, GetWindowThreadProcessId, HWND_TOPMOST, ICON_BIG, ICON_SMALL,
-    IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON,
-    SM_CYSMICON, SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-    SWP_NOSIZE, SendMessageW, SetWindowLongPtrW, SetWindowPos, WM_NCACTIVATE, WM_SETICON,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    CreateIconFromResourceEx, DestroyIcon, GUITHREADINFO, GWL_EXSTYLE, GWL_STYLE, GetClassNameW,
+    GetForegroundWindow, GetGUIThreadInfo, GetWindowLongPtrW, GetWindowThreadProcessId, HICON,
+    HWND_TOPMOST, ICON_BIG, ICON_SMALL, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED,
+    LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SW_SHOWNORMAL, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SendMessageW, SetWindowLongPtrW,
+    SetWindowPos, WM_NCACTIVATE, WM_SETICON, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -44,6 +46,8 @@ use super::PlatformCapabilityStatus;
 
 const BASE_DPI: f64 = 96.0;
 const PROCESS_IMAGE_BUFFER_U16: usize = 32_768;
+const INK_ICON_ICO: &[u8] = include_bytes!("../../icons/icon-ink.ico");
+static CUSTOM_APP_ICONS: OnceLock<Mutex<HashMap<isize, isize>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalScreenPoint {
@@ -323,6 +327,23 @@ pub fn taskbar_uses_dark_theme() -> bool {
     status == ERROR_SUCCESS && bytes == size_of::<u32>() as u32 && value == 0
 }
 
+pub fn apps_use_dark_theme() -> bool {
+    let mut value = 1u32;
+    let mut bytes = size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("AppsUseLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&mut value as *mut u32).cast()),
+            Some(&mut bytes),
+        )
+    };
+    status == ERROR_SUCCESS && bytes == size_of::<u32>() as u32 && value == 0
+}
+
 fn process_image_path(process_id: u32) -> Option<PathBuf> {
     let handle =
         unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }.ok()?;
@@ -486,7 +507,7 @@ pub fn can_inject_foreground() -> Result<bool, String> {
 /// Load both native icon sizes from the executable's multi-size ICO resource for this window's
 /// current DPI. Tauri 2.11 decodes only the first ICO frame (16px) for its default window icon,
 /// which Windows otherwise scales up for both the title bar and taskbar.
-pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
+pub fn configure_app_window_icons(hwnd: HWND, use_ink: bool) -> Result<(), String> {
     if hwnd.is_invalid() {
         return Err("invalid_app_window".into());
     }
@@ -506,18 +527,26 @@ pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
     let module =
         unsafe { GetModuleHandleW(None) }.map_err(|_| "app_icon_module_unavailable".to_string())?;
     let instance = HINSTANCE(module.0);
-    let small = unsafe {
-        LoadImageW(
-            Some(instance),
-            IDI_APPLICATION,
-            IMAGE_ICON,
-            small_width,
-            small_height,
-            LR_SHARED,
+    let small = if use_ink {
+        create_icon_from_ico(INK_ICON_ICO, small_width, small_height)
+            .map_err(|_| "app_icon_small_load_failed".to_string())?
+    } else {
+        HICON(
+            unsafe {
+                LoadImageW(
+                    Some(instance),
+                    IDI_APPLICATION,
+                    IMAGE_ICON,
+                    small_width,
+                    small_height,
+                    LR_SHARED,
+                )
+            }
+            .map_err(|_| "app_icon_small_load_failed".to_string())?
+            .0,
         )
-    }
-    .map_err(|_| "app_icon_small_load_failed".to_string())?;
-    let big = unsafe {
+    };
+    let big = match unsafe {
         LoadImageW(
             Some(instance),
             IDI_APPLICATION,
@@ -526,8 +555,15 @@ pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
             big_height,
             LR_SHARED,
         )
-    }
-    .map_err(|_| "app_icon_big_load_failed".to_string())?;
+    } {
+        Ok(icon) => HICON(icon.0),
+        Err(_) => {
+            if use_ink {
+                let _ = unsafe { DestroyIcon(small) };
+            }
+            return Err("app_icon_big_load_failed".into());
+        }
+    };
 
     unsafe {
         SendMessageW(
@@ -543,7 +579,63 @@ pub fn configure_app_window_icons(hwnd: HWND) -> Result<(), String> {
             Some(LPARAM(big.0 as isize)),
         );
     }
+
+    let icons = CUSTOM_APP_ICONS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut icons) = icons.lock() {
+        if let Some(old_small) = icons.remove(&(hwnd.0 as isize)) {
+            let _ = unsafe { DestroyIcon(HICON(old_small as *mut _)) };
+        }
+        if use_ink {
+            icons.insert(hwnd.0 as isize, small.0 as isize);
+        }
+    }
     Ok(())
+}
+
+fn create_icon_from_ico(
+    ico: &[u8],
+    desired_width: i32,
+    desired_height: i32,
+) -> windows::core::Result<HICON> {
+    let image = ico_image_for_size(ico, desired_width as u16, desired_height as u16)
+        .ok_or_else(windows::core::Error::from_win32)?;
+    unsafe {
+        CreateIconFromResourceEx(
+            image,
+            true,
+            0x0003_0000,
+            desired_width,
+            desired_height,
+            LR_DEFAULTCOLOR,
+        )
+    }
+}
+
+fn ico_image_for_size(ico: &[u8], width: u16, height: u16) -> Option<&[u8]> {
+    if ico.get(0..4)? != [0, 0, 1, 0] {
+        return None;
+    }
+    let count = u16::from_le_bytes(ico.get(4..6)?.try_into().ok()?) as usize;
+    let (_, offset, length) = (0..count)
+        .filter_map(|index| {
+            let entry = ico.get(6 + index * 16..6 + (index + 1) * 16)?;
+            let entry_width = if entry[0] == 0 {
+                256
+            } else {
+                u16::from(entry[0])
+            };
+            let entry_height = if entry[1] == 0 {
+                256
+            } else {
+                u16::from(entry[1])
+            };
+            let length = u32::from_le_bytes(entry.get(8..12)?.try_into().ok()?) as usize;
+            let offset = u32::from_le_bytes(entry.get(12..16)?.try_into().ok()?) as usize;
+            let score = entry_width.abs_diff(width) + entry_height.abs_diff(height);
+            Some((score, offset, length))
+        })
+        .min_by_key(|(score, _, _)| *score)?;
+    ico.get(offset..offset.checked_add(length)?)
 }
 
 /// Repaint the non-client frame after changing a Tauri window theme. DWM can apply the new
@@ -839,5 +931,24 @@ mod tests {
         assert!(microphone_registry_value_allows("Allow"));
         assert!(microphone_registry_value_allows("Prompt"));
         assert!(!microphone_registry_value_allows("Deny"));
+    }
+
+    #[test]
+    fn ink_icon_contains_every_windows_dpi_frame() {
+        for size in [16, 24, 32, 48, 64, 256] {
+            let image = ico_image_for_size(INK_ICON_ICO, size, size).unwrap();
+            assert_eq!(&image[..8], b"\x89PNG\r\n\x1a\n");
+        }
+        assert_eq!(
+            &ico_image_for_size(INK_ICON_ICO, 20, 20).unwrap()[..8],
+            b"\x89PNG\r\n\x1a\n"
+        );
+        assert!(ico_image_for_size(b"not an ico", 24, 24).is_none());
+    }
+
+    #[test]
+    fn windows_can_decode_ink_icon_resource() {
+        let icon = create_icon_from_ico(INK_ICON_ICO, 24, 24).unwrap();
+        unsafe { DestroyIcon(icon) }.unwrap();
     }
 }
