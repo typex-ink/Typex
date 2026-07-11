@@ -230,6 +230,7 @@ impl HotkeyDetector {
         self.current_mode = None;
     }
 
+    #[cfg(target_os = "windows")]
     pub(super) fn has_active_gesture(&self) -> bool {
         self.current_mode.is_some() && !self.yielded
     }
