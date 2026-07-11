@@ -55,10 +55,11 @@
 | 对象 | 重点用例 |
 |---|---|
 | hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；多键 chord 的 partial/完整/乱序/共享非子集/翻译并集，相同、空或任一子集配置在前后端均拒绝；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；普通键让路；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
+| Windows 候选录音 adapter | 原始触发键立即发候选 token；75 ms 确认携带同 token 提升；Ctrl+C/物理 RAlt+普通键/AltGr 匹配取消且无可见副作用；双键翻译复用候选；快速释放保留原始 held_ms；暂停、配置更新、hook 失败/意外终止与退出清理未决 token |
 | Windows hook health monitor | Healthy/Starting 与暂停态不误取消；运行期 Failed/意外 Stopped 对 push-to-talk/toggle 统一发一次 `Cancel`；重复终态不重复；启动失败使用同一可订阅状态；主动 Shutdown 静默 |
 | Windows 音频转换与设备解析 | WASAPI 常见 `f32/i16/u16` → mono f32 的边界值、声道混合、重采样长度；有界缓冲溢出计数；endpoint ID 精确选择；旧 display name 唯一匹配迁移；同名歧义/固定设备缺失；设备拔出/stream error 脱敏分类与主动通知 |
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
-| VAD 切片（`audio/pipeline.rs`） | 构造合成 PCM（静音/正弦波拼接）：切点落在静音段、短音频不切、超长无静音音频的强制切片 |
+| VAD 与切片（`audio/vad.rs` / `audio/pipeline.rs`） | schema v7 迁移与门限校验；能量/神经网络两条路径；Silero 初始化/推理失败降级；弱声连续 90 ms 保底与纯静音拒绝；首部 300 ms/尾部 150 ms 非对称 padding；长录音切片沿用录音快照；短音频不切、超长无静音音频强制切片 |
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
 | `settings/migrate.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak` |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
@@ -85,6 +86,7 @@
 ### 4.2 服务级集成
 
 - `SettingsService`：临时目录读写全流程、并发写、变更广播（watch 收到且仅收到一次）。
+- `AudioService`：候选 `prepare/promote/cancel` 的 token 隔离；打开中取消、确认先于 stream ready、启动失败延迟到确认、运行时失败与取消竞态；候选期间无电平输出且取消立即释放。
 - `ProviderRegistry`：配置变更 → 只重建受影响的 profile 实例；缺少密钥或旧版 `keyring://` 引用 → 明确 `not_configured` 错误而非 panic。
 - `history`：CRUD、保留期清理（注入 Clock 拨快 91 天）、并发写（WAL）。
 - `InjectorChain`：用 mock Injector 断言后备链顺序、首个成功即停、全失败 → 剪贴板兜底 Effect。
@@ -117,10 +119,12 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 |---|---|
 | HUD（`Hud.vue`） | 表驱动：每种 `SessionSnapshot`（各 phase × 各 mode × 各错误码）→ 断言渲染的文案/按钮/徽标。这是把 [05 §3](05-ux-spec.md) 的状态表固化成测试 |
 | 错误码 → 文案 | 遍历 Rust 导出的全部 ErrorCode（从 bindings 类型取）：zh-CN 与 en 均有对应 i18n key（防「Rust 加了错误码忘了文案」——**这条是编译期抓不到的契约缝隙，必须测**） |
-| HotkeyRecorder | 录制态进出、浏览器 code→稳定 `KeyId` 表、完整组合键保存/渲染、历史别名展示、平台化标签与冲突警告 |
+| HotkeyRecorder | 录制态只切换按钮文案且不展开提示块、浏览器 code→稳定 `KeyId` 表、Windows WebView2 误报 `ShiftLeft` 但 `location=RIGHT` 时仍保存 `ShiftRight`、完整组合键保存/渲染、Esc 静默取消、历史别名展示、平台化标签与冲突警告 |
+| 首次启动引导 | 第 4 步可直接录制听写/助手快捷键；修改立即持久化并同步派生翻译组合与练习提示；相同、空或任一包含另一组合时阻止保存并显示校验提示 |
 | ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误） |
 | 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**） |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |
+| 听写设置 | VAD 分段控件键盘切换；只渲染当前模式门限；两组范围/步长/显示精度；切换模式保留两组独立值并持久化 |
 | shared/ 工具 | 常规单测 |
 
 ### 5.3 视觉与主题
@@ -147,6 +151,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 5. 深浅主题走查 + reduced-motion
 6. 更新：从上一版本升级、设置迁移
 7. 资源：空闲内存/CPU 实测对照 [06 §12 预算](06-code-architecture.md)
+8. 起音与让路：Windows 按下后立即发音、轻声起音、Ctrl+C、AltGr、纯静音和长录音；确认普通组合键无 HUD/提示音/电平/历史/Provider 副作用
 
 本清单长期维护，发版时人工参考执行，不要求逐版本复制归档。
 

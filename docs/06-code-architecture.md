@@ -28,7 +28,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 全局按键监听（push-to-talk） | `rdev`（mac/X11）+ 原生 Win32 `WH_KEYBOARD_LL` + `ashpd`（Wayland Portal）| Windows 需要选择性吞右 Alt keyup、识别 AltGr 与注入事件，因此不用 rdev 监听后端 |
 | 录音 | `cpal` | 事实标准 |
 | 重采样 | `rubato` | 设备原生采样率 → 16 kHz mono |
-| VAD | `vad-rs`（Silero） | 静音裁剪 + 长录音切片边界 |
+| VAD | `silero-vad-crs 0.4`（Silero，内嵌权重）+ 能量门限 | 双路径静音裁剪 + 长录音切片边界 |
 | WAV 编码 | `hound` | 上传用 |
 | 提示音 | `rodio` | 开始/结束/错误音 |
 | 文本注入 | `enigo`（模拟 Cmd/Ctrl+V）+ `arboard`（剪贴板存取恢复） | Wayland 另有外部工具后端，见 §8 |
@@ -212,7 +212,7 @@ pub enum SessionPhase {
 | hotkey 线程 | `std::thread`（mac/X11 为 rdev；Windows 为 Win32 消息循环） | 键盘事件 → 判定逻辑 → `mpsc` 发给 orchestrator；Windows 安装/卸载 `WH_KEYBOARD_LL` |
 | UIA 线程（Windows） | 专用 COM STA/MTA worker | 初始化 COM、执行 `TextPattern.GetSelection` 与 bounds 查询；请求有超时且不阻塞 Tauri 主线程 |
 | cpal 回调线程 | 音频驱动回调 | **只做** ring buffer 写入（实时线程禁止分配/锁/日志） |
-| audio worker 线程 | `std::thread` | 从 ring buffer 取样 → 重采样/电平/VAD → 电平事件节流 50ms 发前端 |
+| audio worker 线程 | `std::thread` | 从 ring buffer 取样 → 重采样/电平/VAD；候选阶段只积累内存，提升为正式录音后才以 50ms 节流发电平事件 |
 | 本地推理 worker | LLM 使用专属 `std::thread`；ASR 使用 `spawn_blocking` | 每个模型缓存用独占 inference lease 串行推理；条目携带 GPU/CPU load mode 与代际；GPU runtime fallback 先释放失败代际，再在缓存锁外以无设备、无 context/mtmd offload 的严格 CPU 参数加载，LLM 在首个可见 delta 前、ASR 在非流式返回前最多从头重试一次 |
 
 跨线程通信统一 `tokio::sync::mpsc`（service → orchestrator）与 `watch`（配置广播）；hotkey/audio 线程持有的发送端是它们与外界的唯一接口。
@@ -243,6 +243,7 @@ pub enum SessionPhase {
 
 - **除用户自己配置的端点外，无任何网络请求**（更新检查除外，可关）。无遥测（见 [ADR-5](08-decisions.md)）。
 - 音频不落盘；仅当转写失败等待重试时写入临时目录（内存优先，超大切片才落盘），成功或放弃后立即删除。
+- Windows 快捷键确认期间的候选音频严格只驻内存：只有匹配 token 被确认后才能成为会话音频；取消后立即释放，禁止写磁盘、历史、日志、Provider 或前端电平事件。Typex 不常驻占用麦克风，候选只从物理触发键按下开始，因此设备实际回调前的硬件启动时间无法追溯。
 - 剪贴板注入前保存原内容、注入后恢复；文档中明示「恢复仅支持文本/图片格式」的已知妥协。
 
 ## 7. 关键系统能力实现方案
@@ -277,17 +278,17 @@ pub enum SessionPhase {
 
 - 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug）。macOS/X11 用 **rdev 独立线程**，Windows 用 `WH_KEYBOARD_LL` + 消息循环；两者都把归一化事件送入同一个纯判定器维护 down/up 状态——默认键位为全修饰键三角方案（见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
 - **稳定 `KeyId` 契约**：持久化名称以物理 `KeyboardEvent.code` 为主，至少包括 `Enter`、`Digit0..9`、`ArrowLeft/Right/Up/Down`、`AltLeft/AltRight`、`MetaLeft/MetaRight`、`Menu`、`F1..F19`、`KeyA..Z`、`Semicolon`/`Period`/`Backquote`/`BracketLeft`/`BracketRight`/`Backslash` 与 `Numpad*`。`Menu` 是对浏览器 `ContextMenu` 的稳定例外。前端 code、rdev `Key` 与 Win32 VK/scan 必须在各自 adapter 显式映射，禁止把 crate `Debug` 文本当持久化协议。`Return`→`Enter`、`Num1`→`Digit1`、`LeftArrow`→`ArrowLeft`、`AltGr`→`AltRight`、`Alt`→`AltLeft`、`ContextMenu`→`Menu`、`SemiColon`→`Semicolon`、`Dot`→`Period`、`Kp*`→`Numpad*` 等旧名仅作读取/迁移别名。
-- 字母、数字行与标点是**物理位置语义**：浏览器读取 `KeyboardEvent.code`，Windows 普通键优先按低级 hook 的 set-1 scan code 解码（VK 只作 scan 缺失时的后备），rdev 使用其物理 `Key` variant。不得用 `KeyboardEvent.key`、当前布局产生的字符或输入法结果作为绑定 ID。
+- 字母、数字行与标点是**物理位置语义**：浏览器读取 `KeyboardEvent.code`；左右修饰键额外用标准 `KeyboardEvent.location` 校正侧别，以兼容 Windows WebView2 将物理右 Shift 的 `code` 误报为 `ShiftLeft` 的情况。`location` 只修正 `Shift` / `Control` / `Alt` / `Meta` 的左右侧，不参与普通键映射。Windows 普通键优先按低级 hook 的 set-1 scan code 解码（VK 只作 scan 缺失时的后备），rdev 使用其物理 `Key` variant。不得用 `KeyboardEvent.key`、当前布局产生的字符或输入法结果作为绑定 ID。
 - 听写与助手的 `Vec<KeyId>` 各表示一个完整 chord；判定器持有全局 physical-held 集合，只有某 chord 全部 held 才发 `TriggerDown`。翻译 chord 是两功能 chord 的有序去重并集；已启动的听写/助手手势在该并集完整时发 `ModeUpgraded(Translation)`。partial chord 从未启动时，全释放不得误发 `TriggerUp`；手势已启动后仍等本次 tracked 触发键全部释放才发一次 `TriggerUp`。
 - 听写与助手 chord 必须非空且互不为子集；相同 chord 也按不可达配置处理。前端在 IPC 前阻止，`SettingsService::update` 再以 `InvalidRequest` 拒绝；启动读取到历史非法值时只恢复 `HotkeySettings::default()` 并写无键值 warning，其他设置不得丢失。
-- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，但立即把物理 down 送入纯判定器维护 held/yielded：窗口内普通键会同时丢弃候选 `TriggerDown` 与对应 `Yielded`，因此 orchestrator 从未启动录音；双触发键则立即提交候选并发送模式升级。原始 down 时间戳必须保留用于 350 ms 长短按判定。
+- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，同时立即发出带唯一 token 的内部 `CaptureCandidateStarted`；AudioService 异步开流并只在内存积累样本。窗口内普通键/AltGr 发匹配取消，双触发键或超时确认让 `TriggerDown` 携带同 token 并提升现有流。暂停、配置更新、hook 失败/终止与退出也必须取消未决 token；原始 down 时间戳必须保留用于 350 ms 长短按判定。
 - **漏 release 自恢复**：rdev/CGEventTap 偶发漏掉触发键 release 时，`HotkeyDetector` 会残留 held 状态。修饰键正常不会自动连发，因此同一触发键在 250 ms 抖动窗口后再次 down 视为上一轮 release 丢失：旧 held 状态重置，必要时向状态机发 `Yielded` 取消卡住的录音，再发新的 `TriggerDown`，保证下一次按键恢复响应。
-- **配置热更新边界**：settings 桥接只广播归一化后确实变化的 `HotkeyConfig`，判定器和 Windows adapter 仍须对相同配置幂等。听写/助手 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未提交的候选必须成对提交 `TriggerDown + TriggerUp` 或成对丢弃，禁止只发一侧。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；AltGr、让路和未配置路径不得设置该 tombstone。
+- **配置热更新边界**：settings 桥接只广播归一化后确实变化的 `HotkeyConfig`，判定器和 Windows adapter 仍须对相同配置幂等。听写/助手 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未确认的候选必须发送匹配 token 的取消事件，禁止把未确认手势提交给会话状态机。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；未确认候选、AltGr、让路和未配置路径不得设置该 tombstone。
 - **唯一需要事件拦截的点**：Windows 上单击 Alt 会聚焦菜单栏——助手键（右 Alt）短按时用低级钩子 `WH_KEYBOARD_LL` 吞掉对应 keyup。macOS/Linux 的修饰键单按无系统副作用，无需拦截。启动时自检钩子可用性，失败降级为「监听不拦截」+ UI 提示改键。
 - Windows 事件解码必须区分 `VK_RCONTROL`、`VK_RMENU`、扩展键与 `LLKHF_INJECTED`；Typex 自己的 SendInput 事件不得反向触发会话。右 Ctrl / Ctrl+C、物理右 Alt / 普通键和 AltGr 常见的伪 `Left Ctrl` + `Right Alt` 序列必须经过同一 75 ms 副作用确认边界；只有已确认的右 Alt 助手/翻译手势可以吞对应 keyup。
 - Windows hook 的 health watch 是运行期安全信号而不只是诊断查询：从 Healthy 进入 `Failed` 或意外 `Stopped` 时，runner 必须只发送一次会话 `Cancel` 并刷新托盘为「快捷键不可用」，防止漏掉 TriggerUp 后持续占用麦克风。callback panic 或事件通道关闭进入 `Failed` 时，hook state 必须原子禁止后续 raw event、退出消息循环并卸钩，且该 `Failed` 不得在 `WM_QUIT` 收尾时被覆盖为 `Stopped`。启动失败走同一个可订阅 health 状态；应用主动退出使用独立的正常 `Shutdown` 终态，不取消、不报错。
 - rdev backend 必须观察暂停 watch 的版本变化而不只读取最终布尔值；任一暂停/恢复 transition 都先清空 detector held 状态，暂停期间到达的 release 不得在恢复后留下 stale gesture。
-- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：非 Windows 默认修饰键在触发键按下即开始录音；Windows 默认右侧修饰键在 75 ms 内确认，判定窗口内组合出第二触发键则立即开始并无缝切换为翻译模式，音频保留。
+- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：非 Windows 默认修饰键在触发键按下即开始录音；Windows 默认右侧修饰键在 75 ms 内确认，但麦克风候选流从原始 keydown 即开始，确认时原位提升且不重开设备。普通组合键路径取消候选并保持完全静默。
 - Wayland：探测 `XDG_SESSION_TYPE`；优先 `ashpd` 走 `org.freedesktop.portal.GlobalShortcuts`（KDE/GNOME≥48/Hyprland 支持，Activated/Deactivated 信号天然支持按住；注意 Portal 快捷键由 compositor 分配，未必能绑到「单独的右⌥」，此时默认键退化为 compositor 允许的组合键）；不可用时提示 evdev 方案（用户加入 `input` 组）或 compositor 绑定 `typex toggle` CLI 命令（经 single-instance 转发）。
 
 ### 7.4 录音
@@ -295,7 +296,8 @@ pub enum SessionPhase {
 - cpal 以设备原生采样率（44.1/48 kHz）开流；callback 内只做 ring buffer 拷贝，重采样（rubato → 16 kHz mono f32）与电平计算在 worker 线程。
 - 输入流按 `cpal::SampleFormat` 分派并统一归一化为 mono f32；Windows WASAPI 至少覆盖 `f32`、`i16`、`u16`，不假定默认设备一定输出 f32。callback 使用有界缓冲，溢出只累计丢弃计数，不阻塞、不分配、不记录音频内容。
 - HUD 波形数据：每 50 ms 推一次 RMS 电平数组（Tauri event），前端 Canvas 渲染。
-- VAD（Silero）用于：① 结束时裁剪首尾静音（省上传/省钱/提速）；② 长录音在静音处切片（F-1 无上限要求）。
+- VAD 有两条配置路径：能量模式按 30 ms 帧计算 RMS，严格使用 `RMS > energy_threshold`；神经网络模式使用 `silero-vad-crs 0.4` 的完整 f32 内嵌权重与兼容 SSE/NEON 自动加速，无 ONNX Runtime、外部 DLL 或运行时下载，每 512 个 16 kHz 样本推理。神经网络进入门限使用用户值，退出门限 `max(threshold - 0.15, 0.01)`，最短语音 90 ms、结束静音 100 ms；初始化或推理失败降级到同一快照中的能量门限。
+- 两条 VAD 都用于结束裁剪和长录音静音切片：首个语音区间前保留 300 ms，最后语音区间后保留 150 ms。未检出语音但存在连续至少 90 ms 弱信号时提交未裁剪 16 kHz 音频，真正静音返回 `NoSpeech`。录音开始时快照 VAD 配置并随 `Recording` 保存，失败重试与长录音切片不得重读实时设置。
 - 设备选择：空配置使用系统默认输入设备并在下次开流时跟随系统切换；设置中固定设备时，Windows 保存 WASAPI `IMMDevice` endpoint ID、界面只显示 friendly label。固定 ID 缺失必须返回 `AudioDevice`，禁止静默回退默认设备。历史版本保存的 display name 仅在当前枚举结果中唯一匹配时迁移为 ID；无匹配或同名歧义均明确失败。
 - 录音启动失败与运行时 stream error/设备拔出通过独立 `RecordingFailed` 事件主动通知 orchestrator；`Recording` 立即转 `Failed(Recording)` 并执行 `CancelRecording` 释放 active stream，不等待下一次 stop。该失败态的重试语义是重新打开麦克风并开始录音，不进入注入或 STT 阶段。
 
@@ -337,6 +339,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 - **网络代理**：所有 Provider 请求经统一的 reqwest 客户端工厂，默认**跟随系统代理**；设置-通用可改为「手动代理」（HTTP/SOCKS5，host:port + 可选认证）或「直连」。目标用户中访问国际端点需代理者众多；代理凭据若有同样按敏感配置字段处理，导出与日志必须脱敏。
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
 - `hotkeys.dictation` / `hotkeys.assistant` 保存规范化完整 chord；`hotkeys.translation` 是二者的派生有序并集。schema v6 将历史后端/浏览器别名迁移为 §7.3 的稳定 `KeyId`，每次保存仍执行同一归一化以兼容外部编辑的配置。
+- schema v7 增加 `dictation.vad.{mode,energy_threshold,neural_threshold}`；旧配置迁移为神经网络模式。门限保存前必须为有限值且在规格范围内；加载时 VAD 子树无效只恢复该子树，不得丢弃其他设置。
 - `dictation.microphone`：空字符串表示系统默认；非空值表示平台稳定设备 ID（Windows 为 WASAPI endpoint ID）。旧版设备名称在运行时唯一匹配后写回稳定 ID。
 - 密钥：随 profile 的 `credentials` 字段存入 `settings.json`，与其他配置项同路径；诊断包导出清空 `credentials`，日志 redact 层拦截 Authorization/密钥文本。旧版 `keyring://` 引用在迁移时清除，运行时也视为未配置。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。

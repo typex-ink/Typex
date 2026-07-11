@@ -127,6 +127,14 @@
       "ph_help_dictionary": "个人词典（可选，F-10）",
       "ph_help_target_app": "目标应用（可选）",
       "ph_missing": "缺少必需占位符 {ph}，无法保存",
+      "vad_mode": "语音活动检测",
+      "vad_mode_hint": "神经网络适合多数环境；能量门限仅按输入音量判断",
+      "vad_neural": "神经网络",
+      "vad_energy": "能量门限",
+      "vad_neural_threshold": "神经网络门限",
+      "vad_neural_threshold_hint": "语音置信度。越低越灵敏，越高越能过滤噪声；通常保持默认即可",
+      "vad_energy_threshold": "能量门限",
+      "vad_energy_threshold_hint": "输入音量。越低越灵敏，越高越能过滤底噪；通常保持默认即可",
       "inject_method": "注入方式",
       "inject_auto": "自动（推荐）",
       "inject_paste": "剪贴板粘贴",
@@ -136,8 +144,7 @@
       "microphone": "麦克风",
       "mic_default": "系统默认",
       "mic_unavailable": "已选麦克风不可用",
-      "mic_load_failed": "无法读取麦克风列表",
-      "level_preview": "电平预览"
+      "mic_load_failed": "无法读取麦克风列表"
     },
     "translation": {
       "source": "源语言",
@@ -419,8 +426,6 @@
     "hotkey": {
       "press": "按下键位…",
       "change": "更改",
-      "recording": "正在录制…",
-      "recording_hint": "按下想要的键位（支持单个修饰键）；Esc 取消。",
       "conflict_capslock": "CapsLock 与 macOS 中文输入法的中英切换冲突，不推荐。",
       "conflict_meta_left": "左 ⌘ 参与大量系统组合键，误触发风险高。",
       "conflict_alt": "左 ⌥ 常用于输入特殊字符，可能干扰日常输入。",

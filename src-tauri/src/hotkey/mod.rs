@@ -99,6 +99,12 @@ const STALE_DUPLICATE_DOWN_MS: u64 = 250;
 pub enum HotkeyEvent {
     /// 已确认的触发键按下（Windows 默认右侧修饰键由 adapter 确认后发出）
     TriggerDown { mode: SessionMode },
+    /// Windows raw modifier down immediately starts an invisible audio candidate.
+    CaptureCandidateStarted { token: u64 },
+    /// The delayed TriggerDown confirms and promotes the matching candidate.
+    CaptureCandidatePromoted { token: u64, mode: SessionMode },
+    /// A normal chord or runtime reset discards the matching candidate silently.
+    CaptureCandidateCancelled { token: u64 },
     /// 按住期间组合出另一触发键 → 升级为翻译（音频保留）
     ModeUpgraded { mode: SessionMode },
     /// 全部触发键松开；held_ms 自首个触发键按下起算
@@ -222,6 +228,10 @@ impl HotkeyDetector {
         self.gesture_started_at_ms = None;
         self.yielded = false;
         self.current_mode = None;
+    }
+
+    pub(super) fn has_active_gesture(&self) -> bool {
+        self.current_mode.is_some() && !self.yielded
     }
 
     fn activate_completed_chord(&mut self, t_ms: u64) -> Vec<HotkeyEvent> {

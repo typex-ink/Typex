@@ -486,7 +486,10 @@ impl HookThreadState {
         let paused = *self.paused_rx.borrow_and_update();
         if paused != self.paused {
             self.paused = paused;
-            self.adapter.reset();
+            let events = self.adapter.reset();
+            if !self.emit_events(events) {
+                return false;
+            }
             self.reschedule_pending_timer();
         }
         self.accepting_events.load(Ordering::Acquire)
@@ -503,7 +506,7 @@ impl HookThreadState {
         self.reschedule_pending_timer();
     }
 
-    fn emit_events(&self, events: Vec<HotkeyEvent>) -> bool {
+    fn emit_events(&mut self, events: Vec<HotkeyEvent>) -> bool {
         if !self.accepting_events.load(Ordering::Acquire) {
             return false;
         }
@@ -516,8 +519,11 @@ impl HookThreadState {
         true
     }
 
-    fn transition_terminal(&self, error: WindowsHookError) -> bool {
+    fn transition_terminal(&mut self, error: WindowsHookError) -> bool {
         if self.accepting_events.swap(false, Ordering::AcqRel) {
+            for event in self.adapter.reset() {
+                let _ = self.event_tx.send(event);
+            }
             self.health_tx
                 .send_replace(WindowsHookHealth::Failed(error));
             true
@@ -526,7 +532,7 @@ impl HookThreadState {
         }
     }
 
-    fn fail_terminal(&self, error: WindowsHookError) {
+    fn fail_terminal(&mut self, error: WindowsHookError) {
         if self.transition_terminal(error) {
             unsafe { PostQuitMessage(1) };
         }
@@ -561,6 +567,9 @@ impl Drop for HookThreadState {
             unsafe {
                 let _ = KillTimer(None, timer_id);
             }
+        }
+        for event in self.adapter.reset() {
+            let _ = self.event_tx.send(event);
         }
     }
 }
@@ -627,6 +636,7 @@ struct PendingRawEvent {
 #[derive(Debug, Clone)]
 struct PendingSemanticEvent {
     event: HotkeyEvent,
+    token: u64,
     deadline_ms: u64,
 }
 
@@ -638,10 +648,12 @@ struct WindowsEventAdapter {
     detector: HotkeyDetector,
     pending_left_ctrl: Option<PendingRawEvent>,
     pending_altgr: Option<PendingRawEvent>,
+    prestarted_altgr_candidate: Option<u64>,
     pending_modifier: Option<PendingSemanticEvent>,
     synthetic_left_ctrl_down: bool,
     right_alt: RightAltDisposition,
     swallow_next_right_alt_up: bool,
+    next_candidate_token: u64,
 }
 
 impl WindowsEventAdapter {
@@ -652,10 +664,12 @@ impl WindowsEventAdapter {
             config,
             pending_left_ctrl: None,
             pending_altgr: None,
+            prestarted_altgr_candidate: None,
             pending_modifier: None,
             synthetic_left_ctrl_down: false,
             right_alt: RightAltDisposition::None,
             swallow_next_right_alt_up: false,
+            next_candidate_token: 1,
         }
     }
 
@@ -668,11 +682,19 @@ impl WindowsEventAdapter {
             self.swallow_next_right_alt_up = true;
         }
         let pending_trigger = self.pending_modifier.take();
+        let prestarted_altgr = self.prestarted_altgr_candidate.take();
         let mut events = self.detector.set_config(config.clone(), t_ms);
-        if !events.is_empty()
-            && let Some(pending) = pending_trigger
-        {
-            events.insert(0, pending.event);
+        if let Some(pending) = pending_trigger {
+            events.retain(|event| !matches!(event, HotkeyEvent::TriggerUp { .. }));
+            events.insert(
+                0,
+                HotkeyEvent::CaptureCandidateCancelled {
+                    token: pending.token,
+                },
+            );
+        }
+        if let Some(token) = prestarted_altgr {
+            events.insert(0, HotkeyEvent::CaptureCandidateCancelled { token });
         }
         self.config = config.clone();
         self.pending_left_ctrl = None;
@@ -685,14 +707,27 @@ impl WindowsEventAdapter {
         }
     }
 
-    fn reset(&mut self) {
+    fn reset(&mut self) -> Vec<HotkeyEvent> {
+        let events = self
+            .pending_modifier
+            .take()
+            .map(|pending| HotkeyEvent::CaptureCandidateCancelled {
+                token: pending.token,
+            })
+            .into_iter()
+            .chain(
+                self.prestarted_altgr_candidate
+                    .take()
+                    .map(|token| HotkeyEvent::CaptureCandidateCancelled { token }),
+            )
+            .collect();
         self.detector = HotkeyDetector::new(self.config.clone());
         self.pending_left_ctrl = None;
         self.pending_altgr = None;
-        self.pending_modifier = None;
         self.synthetic_left_ctrl_down = false;
         self.right_alt = RightAltDisposition::None;
         self.swallow_next_right_alt_up = false;
+        events
     }
 
     fn process(&mut self, raw: RawKeyboardEvent) -> HookDecision {
@@ -716,6 +751,19 @@ impl WindowsEventAdapter {
                 deadline_ms: raw.t_ms.saturating_add(MODIFIER_CONFIRMATION_MS),
             });
             self.right_alt = RightAltDisposition::PendingAltGr;
+            if self.pending_modifier.is_none()
+                && !self.detector.has_active_gesture()
+                && (self.config.dictation.as_slice() == ["AltRight"]
+                    || self.config.assistant.as_slice() == ["AltRight"])
+            {
+                let token = self.allocate_candidate_token();
+                self.prestarted_altgr_candidate = Some(token);
+                tracing::debug!(raw_event_to_candidate_ms = 0_u64);
+                return HookDecision {
+                    events: vec![HotkeyEvent::CaptureCandidateStarted { token }],
+                    swallow: false,
+                };
+            }
             return HookDecision::default();
         }
 
@@ -753,6 +801,11 @@ impl WindowsEventAdapter {
             } else if raw.is_down() {
                 self.pending_altgr = None;
                 self.right_alt = RightAltDisposition::AltGrBypass;
+                if let Some(token) = self.prestarted_altgr_candidate.take() {
+                    decision
+                        .events
+                        .push(HotkeyEvent::CaptureCandidateCancelled { token });
+                }
                 decision.extend(self.process_key(raw, &key));
                 return decision;
             }
@@ -821,29 +874,54 @@ impl WindowsEventAdapter {
             {
                 // The candidate never reached the orchestrator, so its matching yield must also
                 // stay silent. HotkeyDetector retains yielded state until the modifier is released.
-                self.pending_modifier = None;
-                events.remove(yielded);
+                let pending = self.pending_modifier.take().expect("checked above");
+                events[yielded] = HotkeyEvent::CaptureCandidateCancelled {
+                    token: pending.token,
+                };
             }
         }
 
-        if let Some(event) = deferred_trigger {
+        if let Some(HotkeyEvent::TriggerDown { mode }) = deferred_trigger {
             // This also covers stale-release recovery, where the detector emits Yielded followed
             // by a fresh TriggerDown. The old session is cancelled now; the new one is confirmed
             // independently so Ctrl+C cannot bypass the silent window on the recovery path.
+            let prestarted = self.prestarted_altgr_candidate.take();
+            let token = prestarted.unwrap_or_else(|| self.allocate_candidate_token());
             self.pending_modifier = Some(PendingSemanticEvent {
-                event,
+                event: HotkeyEvent::CaptureCandidatePromoted { token, mode },
+                token,
                 deadline_ms: raw.t_ms.saturating_add(MODIFIER_CONFIRMATION_MS),
             });
+            if prestarted.is_none() {
+                tracing::debug!(raw_event_to_candidate_ms = 0_u64);
+                events.push(HotkeyEvent::CaptureCandidateStarted { token });
+            }
         }
         events
+    }
+
+    fn allocate_candidate_token(&mut self) -> u64 {
+        let token = self.next_candidate_token;
+        self.next_candidate_token = self.next_candidate_token.wrapping_add(1).max(1);
+        token
     }
 
     fn flush_pending_modifier(&mut self) -> HookDecision {
         self.pending_modifier
             .take()
-            .map_or_else(HookDecision::default, |pending| HookDecision {
-                events: vec![pending.event],
-                swallow: false,
+            .map_or_else(HookDecision::default, |pending| {
+                if matches!(&pending.event, HotkeyEvent::CaptureCandidatePromoted { .. })
+                    && matches!(
+                        self.right_alt,
+                        RightAltDisposition::ChordCandidate | RightAltDisposition::PendingAltGr
+                    )
+                {
+                    self.right_alt = RightAltDisposition::TypexGesture;
+                }
+                HookDecision {
+                    events: vec![pending.event],
+                    swallow: false,
+                }
             })
     }
 
@@ -939,24 +1017,36 @@ impl WindowsEventAdapter {
             return HookDecision::default();
         }
 
-        let swallow = !raw.is_down() && self.right_alt == RightAltDisposition::TypexGesture;
-        let events = self.detector.on_key("AltRight", raw.is_down(), raw.t_ms);
-        for event in &events {
-            match event {
-                HotkeyEvent::TriggerDown { .. } | HotkeyEvent::ModeUpgraded { .. } => {
-                    self.right_alt = RightAltDisposition::TypexGesture;
-                }
-                HotkeyEvent::Yielded => self.right_alt = RightAltDisposition::Yielded,
-                HotkeyEvent::TriggerUp { .. } | HotkeyEvent::EscPressed => {}
-            }
-        }
+        let was_typex = self.right_alt == RightAltDisposition::TypexGesture;
+        let detector_events = self.detector.on_key("AltRight", raw.is_down(), raw.t_ms);
+        let yielded = detector_events
+            .iter()
+            .any(|event| matches!(event, HotkeyEvent::Yielded));
         if raw.is_down()
-            && events.is_empty()
             && self.config.is_trigger_key("AltRight")
             && self.right_alt == RightAltDisposition::None
         {
             self.right_alt = RightAltDisposition::ChordCandidate;
         }
+        let events = self.sequence_modifier_events(raw, "AltRight", detector_events);
+        let confirmed_now = events.iter().any(|event| {
+            matches!(
+                event,
+                HotkeyEvent::TriggerDown { .. }
+                    | HotkeyEvent::ModeUpgraded { .. }
+                    | HotkeyEvent::CaptureCandidatePromoted { .. }
+            )
+        });
+        if yielded
+            || events
+                .iter()
+                .any(|event| matches!(event, HotkeyEvent::CaptureCandidateCancelled { .. }))
+        {
+            self.right_alt = RightAltDisposition::Yielded;
+        } else if confirmed_now {
+            self.right_alt = RightAltDisposition::TypexGesture;
+        }
+        let swallow = !raw.is_down() && (was_typex || confirmed_now);
         if !raw.is_down() {
             self.right_alt = RightAltDisposition::None;
         }
@@ -1254,6 +1344,18 @@ mod tests {
         }
     }
 
+    fn candidate_started(token: u64) -> HotkeyEvent {
+        HotkeyEvent::CaptureCandidateStarted { token }
+    }
+
+    fn candidate_promoted(token: u64, mode: SessionMode) -> HotkeyEvent {
+        HotkeyEvent::CaptureCandidatePromoted { token, mode }
+    }
+
+    fn candidate_cancelled(token: u64) -> HotkeyEvent {
+        HotkeyEvent::CaptureCandidateCancelled { token }
+    }
+
     fn raw(vk_code: u32, down: bool, t_ms: u64) -> RawKeyboardEvent {
         RawKeyboardEvent {
             vk_code,
@@ -1382,12 +1484,13 @@ mod tests {
     #[test]
     fn config_update_ends_confirmed_single_chord_before_replacing_it() {
         let mut adapter = WindowsEventAdapter::new(config());
-        adapter.process(raw(0xA3, true, 100));
+        assert_eq!(
+            adapter.process(raw(0xA3, true, 100)).events,
+            vec![candidate_started(1)]
+        );
         assert_eq!(
             adapter.flush_due(100 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Dictation
-            }]
+            vec![candidate_promoted(1, SessionMode::Dictation)]
         );
 
         let replacement = HotkeyConfig {
@@ -1440,11 +1543,11 @@ mod tests {
     }
 
     #[test]
-    fn config_update_preserves_down_up_pair_for_unflushed_modifier_candidate() {
+    fn config_update_cancels_unflushed_modifier_candidate() {
         let mut adapter = WindowsEventAdapter::new(config());
         assert_eq!(
-            adapter.process(raw(0xA3, true, 100)),
-            HookDecision::default()
+            adapter.process(raw(0xA3, true, 100)).events,
+            vec![candidate_started(1)]
         );
 
         let replacement = HotkeyConfig {
@@ -1454,14 +1557,30 @@ mod tests {
         };
         assert_eq!(
             adapter.set_config(replacement, 140).events,
-            vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Dictation
-                },
-                HotkeyEvent::TriggerUp { held_ms: 40 }
-            ]
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(adapter.next_deadline(), None);
+    }
+
+    #[test]
+    fn config_update_does_not_swallow_unconfirmed_right_alt_release() {
+        let mut adapter = WindowsEventAdapter::new(config());
+        assert_eq!(
+            adapter.process(raw(0xA5, true, 100)).events,
+            vec![candidate_started(1)]
+        );
+        let replacement = HotkeyConfig {
+            dictation: vec!["F13".into()],
+            assistant: vec!["F14".into()],
+            translation: Vec::new(),
+        };
+        assert_eq!(
+            adapter.set_config(replacement, 120).events,
+            vec![candidate_cancelled(1)]
+        );
+        let release = adapter.process(raw(0xA5, false, 130));
+        assert!(!release.swallow);
+        assert!(release.events.is_empty());
     }
 
     #[test]
@@ -1470,9 +1589,7 @@ mod tests {
         confirmed.process(raw(0xA3, true, 100));
         assert_eq!(
             confirmed.flush_due(100 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Dictation
-            }]
+            vec![candidate_promoted(1, SessionMode::Dictation)]
         );
         assert_eq!(confirmed.set_config(config(), 200), HookDecision::default());
         assert_eq!(
@@ -1486,8 +1603,8 @@ mod tests {
         assert_eq!(pending.set_config(config(), 10), HookDecision::default());
         assert_eq!(pending.next_deadline(), Some(MODIFIER_CONFIRMATION_MS));
         assert_eq!(
-            pending.process(raw(0x43, true, 20)),
-            HookDecision::default()
+            pending.process(raw(0x43, true, 20)).events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(pending.next_deadline(), None);
     }
@@ -1498,9 +1615,7 @@ mod tests {
         adapter.process(raw(0xA5, true, 0));
         assert_eq!(
             adapter.flush_due(MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Assistant
-            }]
+            vec![candidate_promoted(1, SessionMode::Assistant)]
         );
 
         let replacement = HotkeyConfig {
@@ -1545,8 +1660,8 @@ mod tests {
         let mut yielded = WindowsEventAdapter::new(config());
         yielded.process(raw(0xA5, true, 0));
         assert_eq!(
-            yielded.process(raw(0x45, true, 20)),
-            HookDecision::default()
+            yielded.process(raw(0x45, true, 20)).events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(
             yielded.set_config(replacement.clone(), 30),
@@ -1556,8 +1671,16 @@ mod tests {
 
         let mut altgr = WindowsEventAdapter::new(config());
         altgr.process(synthetic_altgr_left_ctrl(true, 0, 100));
-        altgr.process(synthetic_altgr_right_alt(true, 1, 100));
-        assert_eq!(altgr.process(raw(0x45, true, 20)), HookDecision::default());
+        assert_eq!(
+            altgr
+                .process(synthetic_altgr_right_alt(true, 1, 100))
+                .events,
+            vec![candidate_started(1)]
+        );
+        assert_eq!(
+            altgr.process(raw(0x45, true, 20)).events,
+            vec![candidate_cancelled(1)]
+        );
         assert_eq!(altgr.set_config(replacement, 30), HookDecision::default());
         assert!(
             !altgr
@@ -1599,8 +1722,8 @@ mod tests {
         );
 
         assert_eq!(
-            adapter.process(raw(0xA5, true, 20)),
-            HookDecision::default()
+            adapter.process(raw(0xA5, true, 20)).events,
+            vec![candidate_started(1)]
         );
         let mut injected_key = raw(0x45, true, 30);
         injected_key.flags = INJECTED;
@@ -1610,9 +1733,7 @@ mod tests {
         assert_eq!(
             release.events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Assistant
-                },
+                candidate_promoted(1, SessionMode::Assistant),
                 HotkeyEvent::TriggerUp { held_ms: 80 }
             ]
         );
@@ -1626,12 +1747,14 @@ mod tests {
             HookDecision::default()
         );
         assert_eq!(
-            adapter.process(synthetic_altgr_right_alt(true, 1, 100)),
-            HookDecision::default()
+            adapter
+                .process(synthetic_altgr_right_alt(true, 1, 100))
+                .events,
+            vec![candidate_started(1)]
         );
         assert_eq!(
-            adapter.process(raw(0x45, true, 30)),
-            HookDecision::default()
+            adapter.process(raw(0x45, true, 30)).events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(
             adapter.process(raw(0x45, false, 40)),
@@ -1650,7 +1773,12 @@ mod tests {
     fn standalone_synthetic_altgr_activates_assistant_after_grace_period() {
         let mut adapter = WindowsEventAdapter::new(config());
         adapter.process(synthetic_altgr_left_ctrl(true, 100, 500));
-        adapter.process(synthetic_altgr_right_alt(true, 101, 500));
+        assert_eq!(
+            adapter
+                .process(synthetic_altgr_right_alt(true, 101, 500))
+                .events,
+            vec![candidate_started(1)]
+        );
 
         assert_eq!(
             adapter.next_deadline(),
@@ -1658,9 +1786,7 @@ mod tests {
         );
         assert_eq!(
             adapter.flush_due(101 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Assistant
-            }]
+            vec![candidate_promoted(1, SessionMode::Assistant)]
         );
 
         let up = adapter.process(synthetic_altgr_right_alt(false, 500, 900));
@@ -1676,16 +1802,19 @@ mod tests {
     fn quick_standalone_synthetic_altgr_preserves_toggle_timing() {
         let mut adapter = WindowsEventAdapter::new(config());
         adapter.process(synthetic_altgr_left_ctrl(true, 100, 500));
-        adapter.process(synthetic_altgr_right_alt(true, 101, 500));
+        assert_eq!(
+            adapter
+                .process(synthetic_altgr_right_alt(true, 101, 500))
+                .events,
+            vec![candidate_started(1)]
+        );
 
         let up = adapter.process(synthetic_altgr_right_alt(false, 140, 540));
         assert!(up.swallow);
         assert_eq!(
             up.events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Assistant
-                },
+                candidate_promoted(1, SessionMode::Assistant),
                 HotkeyEvent::TriggerUp { held_ms: 39 }
             ]
         );
@@ -1694,7 +1823,10 @@ mod tests {
     #[test]
     fn right_ctrl_plus_synthetic_altgr_upgrades_to_translation_without_yield() {
         let mut adapter = WindowsEventAdapter::new(config());
-        assert_eq!(adapter.process(raw(0xA3, true, 0)), HookDecision::default());
+        assert_eq!(
+            adapter.process(raw(0xA3, true, 0)).events,
+            vec![candidate_started(1)]
+        );
         assert_eq!(
             adapter.process(synthetic_altgr_left_ctrl(true, 10, 700)),
             HookDecision::default()
@@ -1706,9 +1838,7 @@ mod tests {
         assert_eq!(
             adapter.flush_due(11 + MODIFIER_CONFIRMATION_MS).events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Dictation
-                },
+                candidate_promoted(1, SessionMode::Dictation),
                 HotkeyEvent::ModeUpgraded {
                     mode: SessionMode::Translation
                 }
@@ -1720,14 +1850,17 @@ mod tests {
     fn synthetic_altgr_then_right_ctrl_upgrades_in_the_other_order() {
         let mut adapter = WindowsEventAdapter::new(config());
         adapter.process(synthetic_altgr_left_ctrl(true, 0, 800));
-        adapter.process(synthetic_altgr_right_alt(true, 1, 800));
+        assert_eq!(
+            adapter
+                .process(synthetic_altgr_right_alt(true, 1, 800))
+                .events,
+            vec![candidate_started(1)]
+        );
 
         assert_eq!(
             adapter.process(raw(0xA3, true, 20)).events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Assistant
-                },
+                candidate_promoted(1, SessionMode::Assistant),
                 HotkeyEvent::ModeUpgraded {
                     mode: SessionMode::Translation
                 }
@@ -1741,12 +1874,11 @@ mod tests {
         assert_eq!(adapter.process(raw(0xA2, true, 0)), HookDecision::default());
 
         let right_alt = adapter.process(extended(0xA5, true, 20));
-        assert_eq!(right_alt, HookDecision::default());
+        assert_eq!(right_alt.events, vec![candidate_started(1)]);
+        assert!(!right_alt.swallow);
         assert_eq!(
             adapter.flush_due(20 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Assistant
-            }]
+            vec![candidate_promoted(1, SessionMode::Assistant)]
         );
     }
 
@@ -1778,12 +1910,10 @@ mod tests {
         let mut adapter = WindowsEventAdapter::new(config());
         let down = adapter.process(raw(0xA5, true, 100));
         assert!(!down.swallow);
-        assert!(down.events.is_empty());
+        assert_eq!(down.events, vec![candidate_started(1)]);
         assert_eq!(
             adapter.flush_due(100 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Assistant
-            }]
+            vec![candidate_promoted(1, SessionMode::Assistant)]
         );
 
         let up = adapter.process(raw(0xA5, false, 449));
@@ -1796,8 +1926,8 @@ mod tests {
         let mut adapter = WindowsEventAdapter::new(config());
         adapter.process(raw(0xA5, true, 0));
         assert_eq!(
-            adapter.process(raw(0x45, true, 20)),
-            HookDecision::default()
+            adapter.process(raw(0x45, true, 20)).events,
+            vec![candidate_cancelled(1)]
         );
         adapter.process(raw(0x45, false, 40));
         let release = adapter.process(raw(0xA5, false, 50));
@@ -1823,13 +1953,14 @@ mod tests {
     #[test]
     fn right_ctrl_right_alt_upgrades_translation_in_either_order() {
         let mut first = WindowsEventAdapter::new(config());
-        assert_eq!(first.process(raw(0xA3, true, 0)), HookDecision::default());
+        assert_eq!(
+            first.process(raw(0xA3, true, 0)).events,
+            vec![candidate_started(1)]
+        );
         assert_eq!(
             first.process(raw(0xA5, true, 10)).events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Dictation
-                },
+                candidate_promoted(1, SessionMode::Dictation),
                 HotkeyEvent::ModeUpgraded {
                     mode: SessionMode::Translation
                 }
@@ -1837,13 +1968,14 @@ mod tests {
         );
 
         let mut second = WindowsEventAdapter::new(config());
-        assert_eq!(second.process(raw(0xA5, true, 0)), HookDecision::default());
+        assert_eq!(
+            second.process(raw(0xA5, true, 0)).events,
+            vec![candidate_started(1)]
+        );
         assert_eq!(
             second.process(raw(0xA3, true, 10)).events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Assistant
-                },
+                candidate_promoted(1, SessionMode::Assistant),
                 HotkeyEvent::ModeUpgraded {
                     mode: SessionMode::Translation
                 }
@@ -1854,12 +1986,15 @@ mod tests {
     #[test]
     fn right_ctrl_ctrl_c_inside_confirmation_window_has_no_semantic_events() {
         let mut adapter = WindowsEventAdapter::new(config());
-        assert_eq!(adapter.process(raw(0xA3, true, 0)), HookDecision::default());
+        assert_eq!(
+            adapter.process(raw(0xA3, true, 0)).events,
+            vec![candidate_started(1)]
+        );
         assert_eq!(adapter.next_deadline(), Some(MODIFIER_CONFIRMATION_MS));
 
         assert_eq!(
-            adapter.process(raw(0x43, true, 20)),
-            HookDecision::default()
+            adapter.process(raw(0x43, true, 20)).events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(adapter.next_deadline(), None);
         assert_eq!(
@@ -1878,8 +2013,10 @@ mod tests {
         adapter.process(raw(0xA3, true, 0));
 
         assert_eq!(
-            adapter.process(raw(0x43, true, MODIFIER_CONFIRMATION_MS)),
-            HookDecision::default()
+            adapter
+                .process(raw(0x43, true, MODIFIER_CONFIRMATION_MS))
+                .events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(adapter.next_deadline(), None);
     }
@@ -1890,8 +2027,10 @@ mod tests {
         adapter.process(raw(0xA5, true, 0));
 
         assert_eq!(
-            adapter.process(raw(0x45, true, MODIFIER_CONFIRMATION_MS)),
-            HookDecision::default()
+            adapter
+                .process(raw(0x45, true, MODIFIER_CONFIRMATION_MS))
+                .events,
+            vec![candidate_cancelled(1)]
         );
         let release = adapter.process(raw(0xA5, false, MODIFIER_CONFIRMATION_MS + 10));
         assert_eq!(release, HookDecision::default());
@@ -1901,11 +2040,18 @@ mod tests {
     fn synthetic_altgr_typing_at_confirmation_boundary_has_no_side_effects() {
         let mut adapter = WindowsEventAdapter::new(config());
         adapter.process(synthetic_altgr_left_ctrl(true, 0, 100));
-        adapter.process(synthetic_altgr_right_alt(true, 1, 100));
+        assert_eq!(
+            adapter
+                .process(synthetic_altgr_right_alt(true, 1, 100))
+                .events,
+            vec![candidate_started(1)]
+        );
 
         assert_eq!(
-            adapter.process(raw(0x45, true, 1 + MODIFIER_CONFIRMATION_MS)),
-            HookDecision::default()
+            adapter
+                .process(raw(0x45, true, 1 + MODIFIER_CONFIRMATION_MS))
+                .events,
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(adapter.next_deadline(), None);
     }
@@ -1924,9 +2070,7 @@ mod tests {
         assert!(std::hint::black_box(MODIFIER_CONFIRMATION_MS) <= 100);
         assert_eq!(
             adapter.flush_due(100 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Dictation
-            }]
+            vec![candidate_promoted(1, SessionMode::Dictation)]
         );
     }
 
@@ -1938,9 +2082,7 @@ mod tests {
         assert_eq!(
             adapter.process(raw(0xA3, false, 140)).events,
             vec![
-                HotkeyEvent::TriggerDown {
-                    mode: SessionMode::Dictation
-                },
+                candidate_promoted(1, SessionMode::Dictation),
                 HotkeyEvent::TriggerUp { held_ms: 40 }
             ]
         );
@@ -1952,14 +2094,12 @@ mod tests {
         adapter.process(raw(0xA3, true, 0));
         assert_eq!(
             adapter.flush_due(MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Dictation
-            }]
+            vec![candidate_promoted(1, SessionMode::Dictation)]
         );
 
         assert_eq!(
             adapter.process(raw(0xA3, true, 500)).events,
-            vec![HotkeyEvent::Yielded]
+            vec![HotkeyEvent::Yielded, candidate_started(2)]
         );
         assert_eq!(
             adapter.next_deadline(),
@@ -1967,9 +2107,7 @@ mod tests {
         );
         assert_eq!(
             adapter.flush_due(500 + MODIFIER_CONFIRMATION_MS).events,
-            vec![HotkeyEvent::TriggerDown {
-                mode: SessionMode::Dictation
-            }]
+            vec![candidate_promoted(2, SessionMode::Dictation)]
         );
         assert_eq!(
             adapter.process(raw(0xA3, false, 900)).events,
@@ -2031,6 +2169,37 @@ mod tests {
 
         assert!(!state.process(raw(0x7C, false, 100)));
         assert!(!state.process(raw(0x7D, true, 110)));
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn pause_transition_cancels_an_unconfirmed_candidate() {
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state = HookThreadState::new(config(), config_rx, paused_rx, event_tx, health_tx);
+
+        assert!(!state.process(raw(0xA3, true, 0)));
+        assert_eq!(event_rx.try_recv().unwrap(), candidate_started(1));
+        paused_tx.send_replace(true);
+        assert!(!state.process(raw(0x43, true, 10)));
+        assert_eq!(event_rx.try_recv().unwrap(), candidate_cancelled(1));
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn hook_terminal_failure_cancels_an_unconfirmed_candidate() {
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state = HookThreadState::new(config(), config_rx, paused_rx, event_tx, health_tx);
+
+        assert!(!state.process(raw(0xA3, true, 0)));
+        assert_eq!(event_rx.try_recv().unwrap(), candidate_started(1));
+        assert!(state.transition_terminal(WindowsHookError::CallbackPanicked));
+        assert_eq!(event_rx.try_recv().unwrap(), candidate_cancelled(1));
         assert!(event_rx.try_recv().is_err());
     }
 

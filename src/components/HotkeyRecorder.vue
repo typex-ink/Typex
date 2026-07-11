@@ -7,7 +7,7 @@ import Kbd from "@/components/Kbd.vue";
 import Button from "@/components/Button.vue";
 import Callout from "@/components/Callout.vue";
 import { usePlatform } from "@/composables/usePlatform";
-import { keyIdFromKeyboardCode, normalizeHotkeyChord } from "@/shared/hotkeys";
+import { keyIdFromKeyboardEvent, normalizeHotkeyChord } from "@/shared/hotkeys";
 
 const { t, te } = useI18n();
 const { keyLabel, hotkeyConflictKey } = usePlatform();
@@ -28,7 +28,7 @@ function onKeyDown(e: KeyboardEvent) {
     stop();
     return;
   }
-  const keyId = keyIdFromKeyboardCode(e.code);
+  const keyId = keyIdFromKeyboardEvent(e);
   if (!keyId) return;
   pressed.value = new Set([...pressed.value, keyId]);
 }
@@ -36,7 +36,7 @@ function onKeyDown(e: KeyboardEvent) {
 function onKeyUp(e: KeyboardEvent) {
   e.preventDefault();
   e.stopPropagation();
-  const released = keyIdFromKeyboardCode(e.code);
+  const released = keyIdFromKeyboardEvent(e);
   if (!released || !pressed.value.has(released)) return;
   // 任一已录制键开始释放 = chord 录制完成。
   if (pressed.value.size > 0) {
@@ -74,9 +74,6 @@ onUnmounted(stop);
       {{ recording ? t("components.hotkey.press") : t("components.hotkey.change") }}
     </Button>
   </span>
-  <Callout v-if="recording" icon="⌨" class="rec-hint">
-    <b>{{ t("components.hotkey.recording") }}</b> {{ t("components.hotkey.recording_hint") }}
-  </Callout>
   <Callout v-if="warningKey" variant="warn" class="rec-hint">{{ t(warningKey) }}</Callout>
 </template>
 

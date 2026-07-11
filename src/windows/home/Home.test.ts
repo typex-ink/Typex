@@ -29,7 +29,7 @@ vi.mock("@/ipc/bindings", () => ({
 
 function makeSettings(): Settings {
   return {
-    schema_version: 6,
+    schema_version: 7,
     general: {
       theme: "system",
       language: "zh_cn",
@@ -50,6 +50,11 @@ function makeSettings(): Settings {
       language: "auto",
       microphone: "",
       esc_cancels: true,
+      vad: {
+        mode: "neural",
+        energy_threshold: 0.01,
+        neural_threshold: 0.5,
+      },
     },
     translation: {
       source_language: "中文",

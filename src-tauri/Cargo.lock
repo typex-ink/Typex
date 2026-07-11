@@ -4689,6 +4689,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "silero-vad-crs"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b06646d849c282653d0e317cb066d22d14c51793f81067586f414ae9688a6fad"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6016,6 +6025,7 @@ dependencies = [
  "sha2",
  "sherpa-rs",
  "sherpa-rs-sys",
+ "silero-vad-crs",
  "specta",
  "specta-typescript",
  "sysinfo",

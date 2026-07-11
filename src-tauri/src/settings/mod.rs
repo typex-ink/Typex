@@ -62,6 +62,12 @@ impl SettingsService {
                 "听写与助手快捷键必须非空且互不包含",
             ));
         }
+        if !new.dictation.vad.is_valid() {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                "VAD 门限必须是有限值且位于允许范围内",
+            ));
+        }
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| {
                 TypexError::new(ErrorCode::Internal, format!("创建配置目录失败: {e}"))
@@ -92,7 +98,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 6);
+        assert_eq!(svc.get().schema_version, 7);
 
         svc.mutate(|s| s.general.autostart = false).unwrap();
         let svc2 = SettingsService::load(dir.clone());
@@ -106,7 +112,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 6);
+        assert_eq!(svc.get().schema_version, 7);
         assert!(dir.join("settings.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -139,7 +145,7 @@ mod tests {
 
         let svc = SettingsService::load(dir.clone());
         let s = svc.get();
-        assert_eq!(s.schema_version, 6);
+        assert_eq!(s.schema_version, 7);
         assert_eq!(
             s.profiles[0].capability,
             crate::types::ProviderCapability::Llm
@@ -170,7 +176,7 @@ mod tests {
         .unwrap();
 
         let settings = SettingsService::load(dir.clone()).get();
-        assert_eq!(settings.schema_version, 6);
+        assert_eq!(settings.schema_version, 7);
         assert_eq!(settings.hotkeys.dictation, ["ControlRight", "Digit1"]);
         assert_eq!(settings.hotkeys.assistant, ["AltRight", "KeyA"]);
         assert_eq!(
@@ -232,6 +238,58 @@ mod tests {
         assert_eq!(error.code, ErrorCode::InvalidRequest);
         assert_eq!(service.get(), before);
         assert!(!dir.join("settings.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_rejects_invalid_vad_without_changing_current_settings() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-invalid-vad-update-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let service = SettingsService::load(dir.clone());
+        let before = service.get();
+        let mut invalid = before.clone();
+        invalid.general.autostart = !before.general.autostart;
+        invalid.dictation.vad.neural_threshold = f32::NAN;
+
+        let error = service.update(invalid).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert_eq!(service.get(), before);
+        assert!(!dir.join("settings.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_invalid_vad_preserves_other_settings() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-invalid-vad-load-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{
+                "schema_version": 7,
+                "general": { "autostart": false },
+                "dictation": {
+                    "polish_enabled": false,
+                    "vad": {
+                        "mode": "energy",
+                        "energy_threshold": 0.2,
+                        "neural_threshold": 0.5
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let settings = SettingsService::load(dir.clone()).get();
+        assert!(!settings.general.autostart);
+        assert!(!settings.dictation.polish_enabled);
+        assert_eq!(settings.dictation.vad, schema::VadSettings::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

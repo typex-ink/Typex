@@ -28,7 +28,7 @@ function makeSettings(
   assistant: string[] = ["AltRight"],
 ): Settings {
   return {
-    schema_version: 6,
+    schema_version: 7,
     hotkeys: {
       dictation,
       assistant,

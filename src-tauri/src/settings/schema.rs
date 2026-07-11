@@ -8,7 +8,12 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+
+pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
+pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
+pub const VAD_NEURAL_THRESHOLD_MIN: f32 = 0.10;
+pub const VAD_NEURAL_THRESHOLD_MAX: f32 = 0.90;
 
 pub const DICTIONARY_MAX_TERMS: usize = 100;
 pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
@@ -161,6 +166,8 @@ pub struct DictationSettings {
     pub microphone: String,
     /// Esc 取消录音（05 §3.3 可关）
     pub esc_cancels: bool,
+    /// 录音开始时快照；失败重试与长录音切片沿用同一份配置。
+    pub vad: VadSettings,
 }
 
 impl Default for DictationSettings {
@@ -173,7 +180,45 @@ impl Default for DictationSettings {
             language: "auto".into(),
             microphone: String::new(),
             esc_cancels: true,
+            vad: VadSettings::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum VadMode {
+    Energy,
+    #[default]
+    Neural,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(default)]
+pub struct VadSettings {
+    pub mode: VadMode,
+    pub energy_threshold: f32,
+    pub neural_threshold: f32,
+}
+
+impl Default for VadSettings {
+    fn default() -> Self {
+        Self {
+            mode: VadMode::Neural,
+            energy_threshold: 0.010,
+            neural_threshold: 0.50,
+        }
+    }
+}
+
+impl VadSettings {
+    pub fn is_valid(self) -> bool {
+        self.energy_threshold.is_finite()
+            && (VAD_ENERGY_THRESHOLD_MIN..=VAD_ENERGY_THRESHOLD_MAX)
+                .contains(&self.energy_threshold)
+            && self.neural_threshold.is_finite()
+            && (VAD_NEURAL_THRESHOLD_MIN..=VAD_NEURAL_THRESHOLD_MAX)
+                .contains(&self.neural_threshold)
     }
 }
 
@@ -372,9 +417,9 @@ mod tests {
 
     #[test]
     fn unknown_fields_do_not_break_parsing() {
-        let json = r#"{ "schema_version": 6, "future_field": {"x": 1} }"#;
+        let json = r#"{ "schema_version": 7, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
-        assert_eq!(s.schema_version, 6);
+        assert_eq!(s.schema_version, 7);
         assert_eq!(s.general.update_channel, UpdateChannel::Stable);
     }
 
@@ -463,5 +508,38 @@ mod tests {
         let llm = dictionary.llm_context().unwrap();
         assert!(llm.contains("- Typex"));
         assert!(llm.contains("A&amp;B &lt;tag&gt;"));
+    }
+
+    #[test]
+    fn vad_defaults_to_neural_with_independent_thresholds() {
+        let vad = VadSettings::default();
+        assert_eq!(vad.mode, VadMode::Neural);
+        assert_eq!(vad.energy_threshold, 0.010);
+        assert_eq!(vad.neural_threshold, 0.50);
+        assert!(vad.is_valid());
+    }
+
+    #[test]
+    fn vad_validation_rejects_non_finite_and_out_of_range_thresholds() {
+        for vad in [
+            VadSettings {
+                energy_threshold: f32::NAN,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                energy_threshold: 0.0009,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                neural_threshold: f32::INFINITY,
+                ..VadSettings::default()
+            },
+            VadSettings {
+                neural_threshold: 0.95,
+                ..VadSettings::default()
+            },
+        ] {
+            assert!(!vad.is_valid());
+        }
     }
 }

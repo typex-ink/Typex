@@ -51,6 +51,7 @@ tracing-appender = "0.2"
 cpal = "0.16"
 rubato = "0.16"
 hound = "3.5"
+silero-vad-crs = { version = "0.4", features = ["auto"] }
 arboard = "3"
 enigo = "0.6"
 

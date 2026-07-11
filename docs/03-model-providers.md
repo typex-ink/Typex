@@ -331,7 +331,7 @@ F-3 不引入新的 Provider 类型：
 
 ```jsonc
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
@@ -339,6 +339,13 @@ F-3 不引入新的 Provider 类型：
     "model_download_source": "auto", // auto | huggingface | modelscope；仅影响本地模型下载
     "check_updates": true,
     "update_channel": "stable" // stable = 正式版 release；nightly = 最新 nightly build
+  },
+  "dictation": {
+    "vad": {
+      "mode": "neural",              // neural | energy；v7 默认 neural
+      "energy_threshold": 0.010,      // 0.001..0.050，步长 0.001
+      "neural_threshold": 0.50        // 0.10..0.90，步长 0.05
+    }
   },
   "hotkeys": {
     "dictation": ["ControlRight"],       // 一个完整 chord，稳定物理 KeyId
@@ -405,6 +412,7 @@ F-3 不引入新的 Provider 类型：
 要点：
 
 - `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值随 profile 存在 `settings.json`，与其他配置项一致。诊断包、导出配置与日志必须剔除或脱敏 credentials；旧版 `keyring://` 引用会在迁移时清除，运行时也视为未配置，用户需重新保存密钥。
+- schema v7 为 `dictation.vad` 增加双路径配置。所有旧版本统一迁移为 `mode: neural`，两个门限独立保存；后端拒绝非有限值或越界值。磁盘中只有 VAD 子配置无效时，仅恢复 `dictation.vad` 默认值，其他设置必须保留。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。

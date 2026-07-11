@@ -14,9 +14,6 @@ vi.mock("@/ipc/bindings", () => ({
     listAudioDevices,
     updateSettings,
   },
-  events: {
-    audioLevelEvent: { listen: vi.fn(async () => () => {}) },
-  },
 }));
 
 function makeSettings(microphone: string): Settings {
@@ -29,6 +26,11 @@ function makeSettings(microphone: string): Settings {
       language: "auto",
       microphone,
       esc_cancels: true,
+      vad: {
+        mode: "neural",
+        energy_threshold: 0.01,
+        neural_threshold: 0.5,
+      },
     },
   } as Settings;
 }
@@ -81,5 +83,57 @@ describe("DictationPage microphone selection", () => {
 
     expect(wrapper.text()).toContain("Selected microphone unavailable");
     expect(commands.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("DictationPage VAD settings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listAudioDevices.mockResolvedValue({ status: "ok", data: [] });
+    updateSettings.mockImplementation(async (settings: Settings) => ({
+      status: "ok",
+      data: settings,
+    }));
+  });
+
+  it("shows only the active mode threshold with the specified range", async () => {
+    const wrapper = mountPage("");
+    await flushPromises();
+
+    const neural = wrapper.get('[data-testid="vad-neural-threshold"]');
+    expect(neural.attributes()).toMatchObject({ min: "0.10", max: "0.90", step: "0.05" });
+    expect(wrapper.find('[data-testid="vad-energy-threshold"]').exists()).toBe(false);
+    expect(wrapper.get('[role="radio"][aria-checked="true"]').text()).toBe("Neural network");
+    expect(wrapper.text()).toContain("Neural works best in most environments");
+    expect(wrapper.text()).toContain("Speech confidence. Lower is more sensitive");
+    expect(wrapper.text()).not.toContain("Input volume. Lower is more sensitive");
+  });
+
+  it("switches by keyboard and preserves the independent thresholds", async () => {
+    const wrapper = mountPage("");
+    await flushPromises();
+
+    await wrapper.get('[role="radio"][aria-checked="true"]').trigger("keydown", {
+      key: "ArrowRight",
+    });
+    await flushPromises();
+
+    const savedMode = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(savedMode?.dictation.vad).toEqual({
+      mode: "energy",
+      energy_threshold: 0.01,
+      neural_threshold: 0.5,
+    });
+    const energy = wrapper.get('[data-testid="vad-energy-threshold"]');
+    expect(energy.attributes()).toMatchObject({ min: "0.001", max: "0.050", step: "0.001" });
+    expect(wrapper.find('[data-testid="vad-neural-threshold"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Input volume. Lower is more sensitive");
+    expect(wrapper.text()).not.toContain("Speech confidence. Lower is more sensitive");
+
+    await energy.setValue("0.025");
+    await flushPromises();
+    const savedThreshold = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(savedThreshold?.dictation.vad.energy_threshold).toBe(0.025);
+    expect(savedThreshold?.dictation.vad.neural_threshold).toBe(0.5);
   });
 });

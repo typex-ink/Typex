@@ -4,6 +4,7 @@ import {
   deriveTranslationChord,
   hotkeyChordsAreReachable,
   keyIdFromKeyboardCode,
+  keyIdFromKeyboardEvent,
   normalizeHotkeyChord,
 } from "./hotkeys";
 
@@ -56,6 +57,13 @@ describe("stable hotkey KeyId contract", () => {
     expect(keyIdFromKeyboardCode("")).toBeNull();
     expect(keyIdFromKeyboardCode("Unidentified")).toBeNull();
     expect(keyIdFromKeyboardCode("Process")).toBeNull();
+  });
+
+  it("uses DOM location to correct WebView sided-modifier misreports", () => {
+    expect(keyIdFromKeyboardEvent({ code: "ShiftLeft", location: 2 })).toBe("ShiftRight");
+    expect(keyIdFromKeyboardEvent({ code: "ShiftRight", location: 1 })).toBe("ShiftLeft");
+    expect(keyIdFromKeyboardEvent({ code: "Control", location: 2 })).toBe("ControlRight");
+    expect(keyIdFromKeyboardEvent({ code: "KeyA", location: 2 })).toBe("KeyA");
   });
 
   it("de-duplicates aliases and derives a multi-key translation union", () => {

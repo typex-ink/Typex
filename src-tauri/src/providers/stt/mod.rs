@@ -96,6 +96,7 @@ pub async fn transcribe_auto_chunk(
     provider: &dyn SttProvider,
     audio: AudioInput,
     opts: SttOptions,
+    vad: crate::settings::schema::VadSettings,
 ) -> Result<Transcript, ProviderError> {
     let max = provider.capabilities().max_bytes;
     let Some(max_bytes) = max else {
@@ -115,7 +116,7 @@ pub async fn transcribe_auto_chunk(
         .collect();
     // 16-bit PCM：每采样 2 字节 + 头部余量
     let max_samples = (max_bytes.saturating_sub(1024)) / 2;
-    let chunks = crate::audio::vad::split_at_silence(&samples, max_samples);
+    let chunks = crate::audio::vad::split_at_silence(&samples, max_samples, vad);
 
     let mut full_text = String::new();
     let mut detected = None;

@@ -4,7 +4,7 @@ pub mod assistant;
 pub mod pipeline;
 pub mod session;
 
-use crate::audio::{AudioService, Recording};
+use crate::audio::{AudioService, CandidatePromotion, Recording};
 use crate::error::{ErrorCode, TypexError};
 use crate::hotkey::HotkeyEvent;
 use crate::inject::InjectorChain;
@@ -70,6 +70,10 @@ struct Exec {
     target_app: Option<String>,
     /// Windows 前台 HWND/PID 的进程内身份；不进入日志、历史或 IPC。
     target_focus: Option<crate::platform::focus::FocusTarget>,
+    /// Windows raw-key candidate waiting for its delayed semantic confirmation.
+    pending_candidate_token: Option<u64>,
+    /// Candidate selected by the current TriggerDown's StartRecording effect.
+    promote_candidate_token: Option<u64>,
     tx: mpsc::UnboundedSender<Event>,
 }
 
@@ -88,12 +92,15 @@ impl Orchestrator {
             recording_started: None,
             target_app: None,
             target_focus: None,
+            pending_candidate_token: None,
+            promote_candidate_token: None,
             tx: tx.clone(),
         };
 
         // 电平转发 task（audio worker → 前端）
         let (level_tx, mut level_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let mut audio_failures = self.audio.subscribe_failures();
+        let mut audio_ready = self.audio.subscribe_ready();
         {
             let this = self.clone();
             tokio::spawn(async move {
@@ -111,14 +118,29 @@ impl Orchestrator {
                     session_id: failure.session_id,
                     error: failure.error,
                 }),
+                ready = audio_ready.recv() => {
+                    if let Ok(ready) = ready
+                        && let Some(device_id) = ready.migrated_device_id
+                    {
+                        self.persist_migrated_microphone(device_id);
+                    }
+                    None
+                },
                 Some(hk) = hotkeys.recv() => self.map_hotkey(hk, &mut exec),
-                Some(cmd) = commands.recv() => Some(match cmd {
+                Some(cmd) = commands.recv() => {
+                    if matches!(cmd, SessionCommand::Cancel) {
+                        self.audio.cancel_pending_candidate();
+                        exec.pending_candidate_token = None;
+                        exec.promote_candidate_token = None;
+                    }
+                    Some(match cmd {
                     SessionCommand::Cancel => Event::Esc,
                     SessionCommand::Retry => Event::Retry,
                     SessionCommand::Dismiss => Event::Dismiss,
                     SessionCommand::CopyTranscript => Event::CopyTranscriptRequested,
                     SessionCommand::InjectOriginal => Event::InjectOriginalRequested,
-                }),
+                    })
+                },
                 else => break,
             };
             let Some(event) = event else { continue };
@@ -149,6 +171,7 @@ impl Orchestrator {
                 self.dispatch(effect, &mut exec, &level_tx);
             }
         }
+        self.audio.cancel();
     }
 
     /// hotkey 语义事件 → 状态机事件。
@@ -165,6 +188,47 @@ impl Orchestrator {
                     mode,
                     next_session_id: id,
                 })
+            }
+            HotkeyEvent::CaptureCandidateStarted { token } => {
+                if matches!(exec.state, State::Idle | State::Failed { .. }) {
+                    let settings = self.settings.get();
+                    if self.audio.prepare_candidate(
+                        token,
+                        &settings.dictation.microphone,
+                        settings.dictation.vad,
+                    ) {
+                        exec.pending_candidate_token = Some(token);
+                    }
+                }
+                None
+            }
+            HotkeyEvent::CaptureCandidatePromoted { token, mode } => {
+                if exec.pending_candidate_token == Some(token)
+                    && matches!(exec.state, State::Idle | State::Failed { .. })
+                {
+                    exec.pending_candidate_token = None;
+                    exec.promote_candidate_token = Some(token);
+                } else {
+                    self.audio.cancel_candidate(token);
+                }
+                let id = exec.next_session_id;
+                if matches!(exec.state, State::Idle | State::Failed { .. }) {
+                    exec.next_session_id += 1;
+                }
+                Some(Event::TriggerDown {
+                    mode,
+                    next_session_id: id,
+                })
+            }
+            HotkeyEvent::CaptureCandidateCancelled { token } => {
+                self.audio.cancel_candidate(token);
+                if exec.pending_candidate_token == Some(token) {
+                    exec.pending_candidate_token = None;
+                }
+                if exec.promote_candidate_token == Some(token) {
+                    exec.promote_candidate_token = None;
+                }
+                None
             }
             HotkeyEvent::ModeUpgraded { mode } => Some(Event::ModeUpgraded { mode }),
             HotkeyEvent::TriggerUp { held_ms } => Some(Event::TriggerUp { held_ms }),
@@ -187,7 +251,9 @@ impl Orchestrator {
     ) {
         match effect {
             Effect::StartRecording => {
-                let mic = self.settings.get().dictation.microphone.clone();
+                let settings = self.settings.get();
+                let mic = settings.dictation.microphone.clone();
+                let vad = settings.dictation.vad;
                 let Some(session_id) = exec.state.session_id() else {
                     return;
                 };
@@ -203,16 +269,24 @@ impl Orchestrator {
                 if exec.state.mode() == Some(SessionMode::Assistant) {
                     *self.pending_selection.lock().unwrap() = None;
                 }
-                match self.audio.start(session_id, &mic, level_tx.clone()) {
-                    Ok(Some(migrated_device_id)) => {
-                        if let Err(error) = self.settings.mutate(|settings| {
-                            settings.dictation.microphone = migrated_device_id;
-                        }) {
-                            tracing::warn!(
-                                error_code = ?error.code,
-                                "failed to persist migrated microphone endpoint ID"
-                            );
+                let start_result = if let Some(token) = exec.promote_candidate_token.take() {
+                    match self
+                        .audio
+                        .promote_candidate(token, session_id, level_tx.clone())
+                    {
+                        Ok(CandidatePromotion::Opening) => Ok(None),
+                        Ok(CandidatePromotion::Ready(migrated)) => Ok(migrated),
+                        Ok(CandidatePromotion::NotFound) => {
+                            self.audio.start(session_id, &mic, level_tx.clone(), vad)
                         }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    self.audio.start(session_id, &mic, level_tx.clone(), vad)
+                };
+                match start_result {
+                    Ok(Some(migrated_device_id)) => {
+                        self.persist_migrated_microphone(migrated_device_id);
                     }
                     Ok(None) => {}
                     Err(error) => {
@@ -252,7 +326,7 @@ impl Orchestrator {
                     exec.audio_store.get(&session_id).cloned()
                 };
                 let Some(rec) = recording else { return };
-                if rec.duration_ms < 200 {
+                if rec.duration_ms < 90 {
                     let _ = exec.tx.send(Event::SttFailed {
                         session_id,
                         error: TypexError::new(ErrorCode::NoSpeech, "录音过短"),
@@ -313,6 +387,7 @@ impl Orchestrator {
                                 prompt: stt_prompt,
                                 temperature: None,
                             },
+                            rec.vad,
                         )
                         .await;
                         match result {
@@ -490,6 +565,17 @@ impl Orchestrator {
             *duration_ms as u32,
         ) {
             tracing::warn!("写历史失败: {}", e.message);
+        }
+    }
+
+    fn persist_migrated_microphone(&self, device_id: String) {
+        if let Err(error) = self.settings.mutate(|settings| {
+            settings.dictation.microphone = device_id;
+        }) {
+            tracing::warn!(
+                error_code = ?error.code,
+                "failed to persist migrated microphone endpoint ID"
+            );
         }
     }
 

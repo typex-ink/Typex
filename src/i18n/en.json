@@ -127,6 +127,14 @@
       "ph_help_dictionary": "personal dictionary (optional, F-10)",
       "ph_help_target_app": "target app (optional)",
       "ph_missing": "Missing required placeholder {ph} — cannot save",
+      "vad_mode": "Voice detection",
+      "vad_mode_hint": "Neural works best in most environments; energy threshold uses input volume only",
+      "vad_neural": "Neural network",
+      "vad_energy": "Energy threshold",
+      "vad_neural_threshold": "Neural threshold",
+      "vad_neural_threshold_hint": "Speech confidence. Lower is more sensitive; higher rejects more noise. The default suits most cases.",
+      "vad_energy_threshold": "Energy threshold",
+      "vad_energy_threshold_hint": "Input volume. Lower is more sensitive; higher filters more background noise. The default suits most cases.",
       "inject_method": "Typing method",
       "inject_auto": "Auto (recommended)",
       "inject_paste": "Clipboard paste",
@@ -136,8 +144,7 @@
       "microphone": "Microphone",
       "mic_default": "System default",
       "mic_unavailable": "Selected microphone unavailable",
-      "mic_load_failed": "Could not enumerate microphones",
-      "level_preview": "Level preview"
+      "mic_load_failed": "Could not enumerate microphones"
     },
     "translation": {
       "source": "Source language",
@@ -419,8 +426,6 @@
     "hotkey": {
       "press": "Press keys…",
       "change": "Change",
-      "recording": "Recording…",
-      "recording_hint": "Press the keys you want (a single modifier works); Esc to cancel.",
       "conflict_capslock": "CapsLock conflicts with the Chinese input method's language toggle on macOS — not recommended.",
       "conflict_meta_left": "Left ⌘ is part of many system shortcuts — high risk of accidental triggers.",
       "conflict_alt": "Left ⌥ is used to type special characters and may interfere with normal typing.",

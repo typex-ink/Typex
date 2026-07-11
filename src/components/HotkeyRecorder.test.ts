@@ -8,8 +8,8 @@ vi.mock("@tauri-apps/plugin-os", () => ({
   platform: () => "windows",
 }));
 
-function keyboard(type: "keydown" | "keyup", code: string) {
-  window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true }));
+function keyboard(type: "keydown" | "keyup", code: string, location = 0) {
+  window.dispatchEvent(new KeyboardEvent(type, { code, location, bubbles: true }));
 }
 
 describe("HotkeyRecorder", () => {
@@ -20,6 +20,8 @@ describe("HotkeyRecorder", () => {
     });
 
     await wrapper.get("button").trigger("click");
+    expect(wrapper.get("button").text()).toBe("Press keys…");
+    expect(wrapper.find(".callout").exists()).toBe(false);
     keyboard("keydown", "ControlRight");
     keyboard("keydown", "Digit1");
     keyboard("keyup", "Digit1");
@@ -29,6 +31,7 @@ describe("HotkeyRecorder", () => {
       "ControlRight",
       "Digit1",
     ]);
+    expect(wrapper.get("button").text()).toBe("Change");
     expect(wrapper.text()).not.toContain("Recording…");
   });
 
@@ -49,6 +52,20 @@ describe("HotkeyRecorder", () => {
     ]);
   });
 
+  it("records right Shift when WebView reports a left code with right location", async () => {
+    const wrapper = mount(HotkeyRecorder, {
+      props: { modelValue: ["F13"] },
+      global: { plugins: [makeI18n("en")] },
+    });
+
+    await wrapper.get("button").trigger("click");
+    keyboard("keydown", "ShiftLeft", 2);
+    keyboard("keyup", "ShiftLeft", 2);
+    await nextTick();
+
+    expect(wrapper.emitted("update:modelValue")?.at(-1)?.[0]).toEqual(["ShiftRight"]);
+  });
+
   it("renders historical aliases with current platform labels", () => {
     const wrapper = mount(HotkeyRecorder, {
       props: { modelValue: ["AltGr", "Return", "LeftArrow"] },
@@ -67,10 +84,13 @@ describe("HotkeyRecorder", () => {
     });
 
     await wrapper.get("button").trigger("click");
+    expect(wrapper.get("button").text()).toBe("Press keys…");
+    expect(wrapper.find(".callout").exists()).toBe(false);
     keyboard("keydown", "Escape");
     await nextTick();
 
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(wrapper.get("button").text()).toBe("Change");
     expect(wrapper.text()).not.toContain("Recording…");
   });
 });

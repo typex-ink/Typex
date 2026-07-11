@@ -4,10 +4,11 @@
 //! 格式转换、单声道混合、电平计算与重采样均留在 worker 线程。
 
 use super::{
-    AudioFailure, DeviceResolution, LevelSender, Recording, enumerate_input_devices, pipeline,
+    CaptureGate, DeviceResolution, Recording, enumerate_input_devices, pipeline,
     resolve_device_selection,
 };
 use crate::error::{ErrorCode, Result, TypexError};
+use crate::settings::schema::VadSettings;
 use crate::types::AudioInputDevice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, SizedSample};
@@ -15,14 +16,13 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::time::{Duration, Instant};
-use tokio::sync::broadcast;
 
 const BUFFER_MILLIS: usize = 1_000;
 const MIN_BUFFER_FRAMES: usize = 1_024;
 const MAX_BUFFER_SAMPLES: usize = 2_000_000;
 const WORKER_BATCH_FRAMES: usize = 4_096;
 
-pub struct ActiveRecording {
+pub(super) struct ActiveRecording {
     // Stream 不是 Send；持有 stop 信号，流本体活在专属线程。
     stop_tx: std_mpsc::Sender<StopSignal>,
     result_rx: std_mpsc::Receiver<Result<Recording>>,
@@ -36,21 +36,19 @@ enum StopSignal {
 }
 
 struct StreamControl {
-    session_id: u64,
     migrated_device_id: Option<String>,
-    levels: LevelSender,
-    failure_tx: broadcast::Sender<AudioFailure>,
+    gate: CaptureGate,
     stop_rx: std_mpsc::Receiver<StopSignal>,
     ready_tx: std_mpsc::Sender<Result<Option<String>>>,
     result_tx: std_mpsc::Sender<Result<Recording>>,
+    vad: VadSettings,
 }
 
 impl ActiveRecording {
-    pub fn start(
-        session_id: u64,
+    pub(super) fn start(
         device_selection: &str,
-        levels: LevelSender,
-        failure_tx: broadcast::Sender<AudioFailure>,
+        gate: CaptureGate,
+        vad: VadSettings,
     ) -> Result<(Self, Option<String>)> {
         let (stop_tx, stop_rx) = std_mpsc::channel::<StopSignal>();
         let (result_tx, result_rx) = std_mpsc::channel::<Result<Recording>>();
@@ -60,15 +58,7 @@ impl ActiveRecording {
         let worker = std::thread::Builder::new()
             .name("typex-audio".into())
             .spawn(move || {
-                run_stream(
-                    session_id,
-                    &device_selection,
-                    levels,
-                    failure_tx,
-                    stop_rx,
-                    ready_tx,
-                    result_tx,
-                );
+                run_stream(&device_selection, gate, stop_rx, ready_tx, result_tx, vad);
             })
             .map_err(|_| TypexError::new(ErrorCode::Internal, "音频线程启动失败"))?;
 
@@ -103,6 +93,18 @@ impl ActiveRecording {
             let _ = worker.join();
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn fake(result: Result<Recording>) -> Self {
+        let (stop_tx, _stop_rx) = std_mpsc::channel();
+        let (result_tx, result_rx) = std_mpsc::channel();
+        let _ = result_tx.send(result);
+        Self {
+            stop_tx,
+            result_rx,
+            worker: None,
+        }
+    }
 }
 
 impl Drop for ActiveRecording {
@@ -114,14 +116,17 @@ impl Drop for ActiveRecording {
 }
 
 fn run_stream(
-    session_id: u64,
     device_selection: &str,
-    levels: LevelSender,
-    failure_tx: broadcast::Sender<AudioFailure>,
+    gate: CaptureGate,
     stop_rx: std_mpsc::Receiver<StopSignal>,
     ready_tx: std_mpsc::Sender<Result<Option<String>>>,
     result_tx: std_mpsc::Sender<Result<Recording>>,
+    vad: VadSettings,
 ) {
+    if gate.is_cancelled() {
+        send_ready_error(&ready_tx, "候选录音已取消");
+        return;
+    }
     let host = cpal::default_host();
     let (device, migrated_device_id) = match select_input_device(&host, device_selection) {
         Ok(selected) => selected,
@@ -140,13 +145,12 @@ fn run_stream(
     let sample_format = supported_config.sample_format();
     let config = supported_config.config();
     let control = StreamControl {
-        session_id,
         migrated_device_id,
-        levels,
-        failure_tx,
+        gate,
         stop_rx,
         ready_tx,
         result_tx,
+        vad,
     };
 
     match sample_format {
@@ -166,13 +170,12 @@ where
     T: InputSample,
 {
     let StreamControl {
-        session_id,
         migrated_device_id,
-        levels,
-        failure_tx,
+        gate,
         stop_rx,
         ready_tx,
         result_tx,
+        vad,
     } = control;
     let sample_rate = config.sample_rate.0;
     let channels = usize::from(config.channels);
@@ -206,6 +209,7 @@ where
         send_ready_error(&ready_tx, "启动输入音频流失败");
         return;
     }
+    tracing::debug!(stream_ready_ms = gate.elapsed_ms());
     let _ = ready_tx.send(Ok(migrated_device_id));
 
     // worker：消费原始采样 → 格式归一化 → 混单声道 → 攒样本。
@@ -215,8 +219,13 @@ where
     let mut last_level = Instant::now();
     let mut stream_failure = None;
     let mut cancelled = false;
+    let mut first_callback_observed = false;
 
     loop {
+        if gate.is_cancelled() {
+            cancelled = true;
+            break;
+        }
         if let Ok(error) = stream_error_rx.try_recv() {
             stream_failure = Some(classify_stream_error(error));
             break;
@@ -242,10 +251,15 @@ where
             }
         }
 
+        if !first_callback_observed {
+            first_callback_observed = true;
+            tracing::debug!(first_audio_callback_ms = gate.elapsed_ms());
+        }
+
         append_mono(&raw, channels, &mut mono, &mut level_window);
         if last_level.elapsed() >= Duration::from_millis(50) {
             let levels_vec = pipeline::rms_levels(&level_window, 12);
-            let _ = levels.send(levels_vec);
+            gate.emit_levels(levels_vec);
             level_window.clear();
             last_level = Instant::now();
         }
@@ -260,7 +274,7 @@ where
         return;
     }
     if let Some(error) = stream_failure {
-        report_stream_failure(&failure_tx, session_id, error.clone());
+        gate.report_failure(error.clone());
         let _ = result_tx.send(Err(error));
         return;
     }
@@ -270,10 +284,11 @@ where
         append_mono(&raw, channels, &mut mono, &mut level_window);
     }
 
-    let result = pipeline::finalize_recording(&mono, sample_rate);
+    let result = pipeline::finalize_recording(&mono, sample_rate, vad);
     let _ = result_tx.send(result.map(|(wav, duration_ms)| Recording {
         wav_16k_mono: wav,
         duration_ms,
+        vad,
     }));
 }
 
@@ -310,14 +325,6 @@ fn select_input_device(
 
 fn send_ready_error(ready_tx: &std_mpsc::Sender<Result<Option<String>>>, message: &str) {
     let _ = ready_tx.send(Err(TypexError::new(ErrorCode::AudioDevice, message)));
-}
-
-fn report_stream_failure(
-    failure_tx: &broadcast::Sender<AudioFailure>,
-    session_id: u64,
-    error: TypexError,
-) {
-    let _ = failure_tx.send(AudioFailure { session_id, error });
 }
 
 fn classify_stream_error(error: cpal::StreamError) -> TypexError {
@@ -561,17 +568,5 @@ mod tests {
         });
         assert_eq!(backend.code, ErrorCode::AudioDevice);
         assert!(!backend.message.contains("sensitive sentinel"));
-    }
-
-    #[test]
-    fn stream_failure_notifies_orchestrator_with_session_identity() {
-        let (failure_tx, mut failure_rx) = broadcast::channel(1);
-        let error = TypexError::new(ErrorCode::AudioDevice, "stream interrupted");
-
-        report_stream_failure(&failure_tx, 42, error.clone());
-
-        let failure = failure_rx.try_recv().unwrap();
-        assert_eq!(failure.session_id, 42);
-        assert_eq!(failure.error, error);
     }
 }

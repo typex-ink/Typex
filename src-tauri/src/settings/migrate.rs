@@ -1,7 +1,10 @@
 //! settings.json schema 迁移（07 §3.1）。
 
 use crate::{
-    settings::schema::CURRENT_SCHEMA_VERSION,
+    settings::schema::{
+        CURRENT_SCHEMA_VERSION, VAD_ENERGY_THRESHOLD_MAX, VAD_ENERGY_THRESHOLD_MIN,
+        VAD_NEURAL_THRESHOLD_MAX, VAD_NEURAL_THRESHOLD_MIN,
+    },
     types::{derive_translation_chord, normalize_hotkey_chord},
 };
 use serde_json::Value;
@@ -14,6 +17,11 @@ pub fn migrate(mut value: Value) -> Value {
     if version < 2 {
         migrate_v1_to_v2(&mut value);
     }
+    if version < 7 {
+        migrate_v6_to_v7(&mut value);
+    } else {
+        sanitize_v7_vad(&mut value);
+    }
     normalize_hotkey_ids(&mut value);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
@@ -23,6 +31,64 @@ pub fn migrate(mut value: Value) -> Value {
         );
     }
     value
+}
+
+fn default_vad_value() -> Value {
+    serde_json::json!({
+        "mode": "neural",
+        "energy_threshold": 0.010,
+        "neural_threshold": 0.50
+    })
+}
+
+fn migrate_v6_to_v7(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let dictation = root
+        .entry("dictation")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(dictation) = dictation.as_object_mut() {
+        dictation.insert("vad".into(), default_vad_value());
+    }
+}
+
+fn sanitize_v7_vad(value: &mut Value) {
+    let Some(dictation) = value.get_mut("dictation").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let valid = dictation.get("vad").is_none_or(valid_vad_value);
+    if !valid {
+        tracing::warn!("检测到无效 VAD 配置，已仅恢复 VAD 默认值");
+        dictation.insert("vad".into(), default_vad_value());
+    }
+}
+
+fn valid_vad_value(value: &Value) -> bool {
+    let Some(vad) = value.as_object() else {
+        return false;
+    };
+    let mode_valid = matches!(
+        vad.get("mode").and_then(Value::as_str),
+        Some("energy" | "neural")
+    );
+    let energy_valid = vad
+        .get("energy_threshold")
+        .and_then(Value::as_f64)
+        .is_some_and(|threshold| {
+            threshold.is_finite()
+                && (f64::from(VAD_ENERGY_THRESHOLD_MIN)..=f64::from(VAD_ENERGY_THRESHOLD_MAX))
+                    .contains(&threshold)
+        });
+    let neural_valid = vad
+        .get("neural_threshold")
+        .and_then(Value::as_f64)
+        .is_some_and(|threshold| {
+            threshold.is_finite()
+                && (f64::from(VAD_NEURAL_THRESHOLD_MIN)..=f64::from(VAD_NEURAL_THRESHOLD_MAX))
+                    .contains(&threshold)
+        });
+    mode_valid && energy_valid && neural_valid
 }
 
 fn normalize_hotkey_ids(value: &mut Value) {
@@ -133,7 +199,7 @@ mod tests {
         });
 
         let migrated = migrate(value);
-        assert_eq!(migrated["schema_version"], 6);
+        assert_eq!(migrated["schema_version"], 7);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
         assert!(migrated["profiles"][0].get("slots").is_none());
@@ -192,7 +258,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 6);
+        assert_eq!(migrated["schema_version"], 7);
         assert_eq!(migrated["dictation"]["microphone"], "USB Microphone");
     }
 
@@ -209,7 +275,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 6);
+        assert_eq!(migrated["schema_version"], 7);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["ControlRight", "Digit1"])
@@ -227,7 +293,7 @@ mod tests {
     #[test]
     fn current_schema_still_normalizes_externally_edited_aliases() {
         let value = serde_json::json!({
-            "schema_version": 6,
+            "schema_version": 7,
             "hotkeys": {
                 "dictation": ["Return"],
                 "assistant": ["ContextMenu"]
@@ -248,5 +314,40 @@ mod tests {
             migrated["hotkeys"]["translation"],
             serde_json::json!(["Enter", "Menu"])
         );
+    }
+
+    #[test]
+    fn v6_migrates_to_neural_vad_defaults() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 6,
+            "dictation": { "polish_enabled": false }
+        }));
+
+        assert_eq!(migrated["schema_version"], 7);
+        assert_eq!(migrated["dictation"]["polish_enabled"], false);
+        assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
+        assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
+        assert_eq!(migrated["dictation"]["vad"]["neural_threshold"], 0.50);
+    }
+
+    #[test]
+    fn invalid_v7_vad_only_restores_vad_subtree() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 7,
+            "general": { "autostart": false },
+            "dictation": {
+                "polish_enabled": false,
+                "vad": {
+                    "mode": "neural",
+                    "energy_threshold": 0.0,
+                    "neural_threshold": 0.5
+                }
+            }
+        }));
+
+        assert_eq!(migrated["general"]["autostart"], false);
+        assert_eq!(migrated["dictation"]["polish_enabled"], false);
+        assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
+        assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
     }
 }

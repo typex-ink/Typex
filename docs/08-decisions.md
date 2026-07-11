@@ -146,3 +146,9 @@
 - **更新与密钥**：Windows 与 macOS 复用仓库现有 Tauri updater 密钥。Windows 采用 Tauri 2 原生 updater 产物，直接对作为安装器的 NSIS `.exe` 生成 `.exe.sig`，不保留 Tauri v1 legacy zip；各平台资产在上传前必须用配置公钥实际验签。各平台先上传唯一 manifest fragment，再聚合为单一 stable/nightly `latest.json`；平台键、资产名和通道不得互相覆盖。
 - **发布者签名**：Tauri updater `.sig` 负责更新完整性，Windows Authenticode 负责发布者身份，二者不能互相替代。SignPath Foundation 审批时间属于外部依赖，因此功能适配与 CI artifact 允许暂时 unsigned，但必须保留内层 EXE 与外层 NSIS 的稳定签名插入点；正式大范围公开分发前重新评估。自签名证书不作为公共信任替代方案。
 - **验收**：受控 Win32/UIA harness 是系统契约门槛；记事本、Edge、VS Code、Windows Terminal 是代表性应用矩阵。微信、Slack、Word、Chrome 等只作非阻塞兼容抽测，除非问题导致崩溃、数据/剪贴板损坏、隐私泄露、错窗口注入，或能在 harness 复现为 Windows 契约错误。
+
+### ADR-25 · VAD 双路径与 Windows 即时起音候选录音（2026-07-12）
+
+- **背景**：固定能量门限会漏掉轻声或噪声环境中的语音；Windows 为保护 `Ctrl+C`/AltGr 等普通组合键而延迟 75 ms 提交 `TriggerDown`，若确认后才打开麦克风，会形成固定起音缺口。
+- **决策**：schema v7 增加神经网络/能量双 VAD，升级后默认使用带完整内嵌权重的 `silero-vad-crs 0.4`，失败时降级到用户能量门限；首尾保护采用 300/150 ms，连续弱信号提供 90 ms 保底。Windows 在原始触发键按下时启动带 token 的内存候选流，确认后原位提升，普通组合键、暂停、配置更新、hook 终态与退出均匹配取消。
+- **隐私与边界**：候选阶段不可见、不落盘、不进历史、不发 Provider/电平事件，取消即释放；不采用常驻麦克风，因此设备真正开始回调前的硬件启动时间仍不可追溯。录音开始时快照 VAD 配置，失败重试与长录音切片保持同一判断口径。

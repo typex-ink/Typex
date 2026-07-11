@@ -75,6 +75,18 @@ export function keyIdFromKeyboardCode(code: string): string | null {
   return canonicalKeyId(code);
 }
 
+type BrowserKeyboardIdentity = Pick<KeyboardEvent, "code" | "location">;
+const DOM_KEY_LOCATION_LEFT = 1;
+const DOM_KEY_LOCATION_RIGHT = 2;
+
+/** Correct sided modifiers when WebView reports a left/generic code for the right key. */
+export function keyIdFromKeyboardEvent(event: BrowserKeyboardIdentity): string | null {
+  const modifier = /^(Shift|Control|Alt|Meta)(?:Left|Right)?$/.exec(event.code)?.[1];
+  if (modifier && event.location === DOM_KEY_LOCATION_LEFT) return `${modifier}Left`;
+  if (modifier && event.location === DOM_KEY_LOCATION_RIGHT) return `${modifier}Right`;
+  return keyIdFromKeyboardCode(event.code);
+}
+
 export function normalizeHotkeyChord(keys: readonly string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];

@@ -2,6 +2,7 @@
 //! VAD 静音裁剪与长录音切片在本模块完成。
 
 use crate::error::{ErrorCode, Result, TypexError};
+use crate::settings::schema::VadSettings;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
@@ -32,13 +33,17 @@ pub fn to_wav_16k_mono(samples: &[f32], src_rate: u32) -> Result<Vec<u8>> {
 
 /// 录音后处理：重采样 → VAD 首尾静音裁剪 → WAV（06 §7.4）。
 /// 返回 (wav, 有效时长 ms)；全静音时 wav 为空录音（0 采样）。
-pub fn finalize_recording(samples: &[f32], src_rate: u32) -> Result<(Vec<u8>, u64)> {
+pub fn finalize_recording(
+    samples: &[f32],
+    src_rate: u32,
+    vad: VadSettings,
+) -> Result<(Vec<u8>, u64)> {
     let resampled = if src_rate == TARGET_RATE {
         samples.to_vec()
     } else {
         resample(samples, src_rate, TARGET_RATE)?
     };
-    let (start, end) = super::vad::trim_silence(&resampled, 150);
+    let (start, end) = super::vad::trim_silence(&resampled, vad);
     let trimmed = &resampled[start..end];
     let duration_ms = (trimmed.len() as u64 * 1000) / TARGET_RATE as u64;
     Ok((encode_wav(trimmed, TARGET_RATE)?, duration_ms))
