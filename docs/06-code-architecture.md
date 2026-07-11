@@ -317,7 +317,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 1. macOS：`AXUIElement.kAXSelectedTextAttribute` → 失败：临时静音系统提示音 + CGEvent Cmd+C + 读剪贴板 + 恢复（禁止通过 enigo/rdev 查询输入法布局，避免 HIToolbox 主队列断言）；**AX 属性可读但为空 = 明确无选区，直接返回、不走剪贴板降级**（降级只给不支持 AX 的应用）；定位用 `AXSelectedTextRange` + `AXBoundsForRange`，不可得时回退居中。
 2. Windows：专用 COM worker 上执行 UIA `TextPattern.GetSelection()`；可读但为空表示明确无选区，不走剪贴板；不支持 TextPattern、COM 错误或超时才走 Ctrl+C 降级。bounds 使用 UIA range bounding rectangles，并统一转换到目标 monitor 坐标。
 3. Linux：X11 primary selection 直读；Wayland 下 primary selection 可用则用，否则明确降级提示。
-4. 降级链每步有 300 ms 超时。Windows Ctrl+C 降级先写 sentinel，再以 clipboard sequence 变化确认复制发生；文本与已知 metadata 必须在同一次打开剪贴板期间读取。VS Code/Monaco 的 `vscode-editor-data` 只有在大小受限、JSON 合法、`version=1` 且 `isFromEmptySelection` 为布尔 `true` 时才证明无选区；格式缺失、损坏、超大、字段缺失、未知版本或未知编辑器都保守保留文本，禁止按长度或换行猜测。原剪贴板的可恢复 HGLOBAL 格式统一快照，且仅当读取后的 sequence 未再变化时恢复，不能覆盖用户或剪贴板管理器的中途修改。无可信空选区 marker、又把无选区 Ctrl+C 定义为复制整行的第三方编辑器仍是已知残余边界。
+4. 降级链每步有 300 ms 超时。Windows Ctrl+C 降级先写 sentinel，再以 clipboard sequence 变化确认复制发生；文本与已知 metadata 必须在同一次打开剪贴板期间读取。部分应用（如 JetBrains IDE）会为同一次复制分批发布多个格式并连续推进 sequence：轮询与原子读取之间 sequence 不同时，只有二者的非空 clipboard owner HWND 相同才接受载荷，并以读取到的最终 sequence 作为恢复基线；owner 变化仍按用户或剪贴板管理器中途修改处理，禁止消费或覆盖。VS Code/Monaco 的 `vscode-editor-data` 只有在大小受限、JSON 合法、`version=1` 且 `isFromEmptySelection` 为布尔 `true` 时才证明无选区；格式缺失、损坏、超大、字段缺失、未知版本或未知编辑器都保守保留文本，禁止按长度或换行猜测。原剪贴板的可恢复 HGLOBAL 格式统一快照，且仅当读取后的 sequence 未再变化时恢复，不能覆盖用户或剪贴板管理器的中途修改。无可信空选区 marker、又把无选区 Ctrl+C 定义为复制整行的第三方编辑器仍是已知残余边界。
 5. **读取时机 = 触发键松开、调 STT 的同时（并发执行，不增加延迟）**——绝不能在触发键按住期间执行：剪贴板降级要模拟 Cmd/Ctrl+C，合成的普通键 down 会命中「组合键让路」规则、把当前会话静默取消。选区在录音期间不会变（HUD 不抢焦点），松开后读取语义等价。
 
 ## 8. Linux/Wayland 支持策略（明确的分级承诺）

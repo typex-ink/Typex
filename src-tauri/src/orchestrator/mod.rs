@@ -32,7 +32,7 @@ pub struct Orchestrator {
     pub last_result: Arc<std::sync::Mutex<Option<String>>>,
     /// 助手服务（F-3）；弹窗流式经自身 sink，呼出回调也在其内（ADR-23）
     pub assistant: Option<Arc<assistant::AssistantService>>,
-    /// 助手键按下时读到的选中文本（录音开始时读取，处理阶段消费）
+    /// 助手触发 chord 释放后读到的选中文本（与 STT 并发读取，处理阶段消费）
     pub pending_selection: Arc<std::sync::Mutex<Option<String>>>,
     /// 选区读取是否失败（读取报错 ≠ 无选区；弹窗降级提示用）
     pub selection_read_failed: Arc<std::sync::atomic::AtomicBool>,

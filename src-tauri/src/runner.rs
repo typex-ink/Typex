@@ -31,6 +31,10 @@ fn publish_hotkey_config_if_changed(
     })
 }
 
+fn required_autostart_update(current: bool, desired: bool) -> Option<bool> {
+    (current != desired).then_some(desired)
+}
+
 /// tauri-specta builder：commands + events 单一注册点（gen:ipc 也用它导出 TS）。
 pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new()
@@ -204,21 +208,35 @@ pub fn run() {
                 use tauri_plugin_autostart::ManagerExt;
                 let apply = |handle: &tauri::AppHandle, on: bool| {
                     let mgr = handle.autolaunch();
-                    let r = if on { mgr.enable() } else { mgr.disable() };
+                    let desired = match mgr.is_enabled() {
+                        Ok(current) => match required_autostart_update(current, on) {
+                            Some(desired) => desired,
+                            None => return true,
+                        },
+                        Err(error) => {
+                            tracing::debug!(
+                                %error,
+                                "开机自启状态读取失败，尝试按配置对齐"
+                            );
+                            on
+                        }
+                    };
+                    let r = if desired { mgr.enable() } else { mgr.disable() };
                     if let Err(e) = r {
                         tracing::warn!("开机自启设置失败: {e}");
+                        return false;
                     }
+                    true
                 };
-                apply(app.handle(), s.general.autostart);
+                let initial = s.general.autostart;
+                let mut applied = apply(app.handle(), initial).then_some(initial);
                 let handle = app.handle().clone();
                 let mut rx = settings.subscribe();
                 tauri::async_runtime::spawn(async move {
-                    let mut last = None;
                     while rx.changed().await.is_ok() {
                         let on = rx.borrow_and_update().general.autostart;
-                        if last != Some(on) {
-                            last = Some(on);
-                            apply(&handle, on);
+                        if applied != Some(on) && apply(&handle, on) {
+                            applied = Some(on);
                         }
                     }
                 });
@@ -585,6 +603,14 @@ mod hotkey_config_bridge_tests {
         assert!(publish_hotkey_config_if_changed(&tx, &settings.hotkeys));
         assert!(rx.has_changed().unwrap());
         assert_eq!(rx.borrow_and_update().dictation, ["F13"]);
+    }
+
+    #[test]
+    fn autostart_reconciliation_is_idempotent() {
+        assert_eq!(required_autostart_update(false, false), None);
+        assert_eq!(required_autostart_update(true, true), None);
+        assert_eq!(required_autostart_update(false, true), Some(true));
+        assert_eq!(required_autostart_update(true, false), Some(false));
     }
 }
 

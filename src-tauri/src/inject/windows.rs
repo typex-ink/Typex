@@ -81,6 +81,13 @@ fn clipboard_sequence(operation: &'static str) -> Result<u32> {
     require_clipboard_sequence(sequence, operation)
 }
 
+fn clipboard_owner_id() -> Option<isize> {
+    unsafe { GetClipboardOwner() }
+        .ok()
+        .filter(|owner| !owner.is_invalid())
+        .map(|owner| owner.0 as isize)
+}
+
 fn require_clipboard_sequence(sequence: u32, operation: &'static str) -> Result<u32> {
     if sequence == 0 {
         Err(clipboard_error(operation, "sequence number unavailable"))
@@ -478,15 +485,18 @@ fn selection_from_clipboard_payload(
 
 struct ClipboardSelectionObservation {
     sequence: u32,
+    owner_id: Option<isize>,
     text: Option<String>,
     vscode_editor_data: Option<Vec<u8>>,
 }
 
 fn resolve_clipboard_selection_observation(
     detected_sequence: u32,
+    detected_owner_id: Option<isize>,
     observation: ClipboardSelectionObservation,
 ) -> (u32, Option<String>) {
-    if observation.sequence != detected_sequence {
+    let same_copy_owner = detected_owner_id.is_some() && detected_owner_id == observation.owner_id;
+    if observation.sequence != detected_sequence && !same_copy_owner {
         // Something changed between polling and the atomic clipboard read. Keeping the earlier
         // sequence as the restore condition guarantees that this newer clipboard is not replaced.
         return (detected_sequence, None);
@@ -503,6 +513,7 @@ fn resolve_clipboard_selection_observation(
 fn read_detected_clipboard_selection(
     restore_sequence: &mut u32,
     detected_sequence: u32,
+    detected_owner_id: Option<isize>,
     read: impl FnOnce() -> Result<ClipboardSelectionObservation>,
 ) -> Result<Option<String>> {
     // Record the detected copy before opening or decoding its payload. If payload access fails,
@@ -510,7 +521,7 @@ fn read_detected_clipboard_selection(
     *restore_sequence = detected_sequence;
     let observation = read()?;
     let (observed_sequence, selection) =
-        resolve_clipboard_selection_observation(detected_sequence, observation);
+        resolve_clipboard_selection_observation(detected_sequence, detected_owner_id, observation);
     *restore_sequence = observed_sequence;
     Ok(selection)
 }
@@ -526,6 +537,7 @@ fn read_selection_clipboard(owner: HWND) -> Result<ClipboardSelectionObservation
     let sequence = clipboard_sequence("observe selection")?;
     Ok(ClipboardSelectionObservation {
         sequence,
+        owner_id: clipboard_owner_id(),
         text,
         vscode_editor_data,
     })
@@ -735,9 +747,11 @@ pub(crate) fn read_selected_text_to(
             if !clipboard_sequence_changed(written_sequence, current_sequence) {
                 continue;
             }
+            let detected_owner_id = clipboard_owner_id();
             return read_detected_clipboard_selection(
                 &mut restore_sequence,
                 current_sequence,
+                detected_owner_id,
                 || clipboard.read_selection(),
             );
         }
@@ -1429,8 +1443,10 @@ mod tests {
     fn stable_clipboard_observation_returns_selection_and_restore_sequence() {
         let (restore_sequence, selection) = resolve_clipboard_selection_observation(
             42,
+            Some(10),
             ClipboardSelectionObservation {
                 sequence: 42,
+                owner_id: Some(10),
                 text: Some("稳定选区 😀".into()),
                 vscode_editor_data: None,
             },
@@ -1441,13 +1457,32 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_change_between_poll_and_read_is_not_consumed_or_restored() {
+    fn same_owner_sequence_rollover_keeps_selection_and_updates_restore_sequence() {
+        let (restore_sequence, selection) = resolve_clipboard_selection_observation(
+            42,
+            Some(10),
+            ClipboardSelectionObservation {
+                sequence: 51,
+                owner_id: Some(10),
+                text: Some("JetBrains selection".into()),
+                vscode_editor_data: None,
+            },
+        );
+
+        assert_eq!(restore_sequence, 51);
+        assert_eq!(selection.as_deref(), Some("JetBrains selection"));
+    }
+
+    #[test]
+    fn clipboard_owner_change_between_poll_and_read_is_not_consumed_or_restored() {
         let detected_copy_sequence = 42;
         let user_change_sequence = 43;
         let (restore_sequence, selection) = resolve_clipboard_selection_observation(
             detected_copy_sequence,
+            Some(10),
             ClipboardSelectionObservation {
                 sequence: user_change_sequence,
+                owner_id: Some(11),
                 text: Some("unrelated clipboard text".into()),
                 vscode_editor_data: None,
             },
@@ -1464,7 +1499,7 @@ mod tests {
     #[test]
     fn payload_read_failure_keeps_detected_sequence_for_conditional_restore() {
         let mut restore_sequence = 41;
-        let error = read_detected_clipboard_selection(&mut restore_sequence, 42, || {
+        let error = read_detected_clipboard_selection(&mut restore_sequence, 42, Some(10), || {
             Err(TypexError::new(
                 ErrorCode::Internal,
                 "mock clipboard payload failure",

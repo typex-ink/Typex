@@ -197,12 +197,19 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (s @ State::Idle, _) => (s, vec![]),
 
         // ───────── Recording ─────────
-        (State::Recording { session_id, .. }, Event::ModeUpgraded { mode }) => (
+        (
+            State::Recording {
+                session_id,
+                toggled,
+                ..
+            },
+            Event::ModeUpgraded { mode },
+        ) => (
             // 模式升级（听写→翻译）：音频保留，仅换徽标
             State::Recording {
                 session_id,
                 mode,
-                toggled: false,
+                toggled,
             },
             vec![E::EmitUi],
         ),
@@ -225,12 +232,23 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                     vec![E::EmitUi],
                 )
             } else {
-                // push-to-talk 结束（或 toggle 后的松开——不可能路径，防御性同样结束）
+                // push-to-talk 结束，或 toggle 模式第二次触发 chord 已完整释放。
                 (
                     State::Transcribing { session_id, mode },
                     vec![E::CallStt { session_id }, E::EmitUi],
                 )
             }
+        }
+        (
+            s @ State::Recording {
+                mode: SessionMode::Assistant,
+                toggled: true,
+                ..
+            },
+            Event::TriggerDown { .. },
+        ) => {
+            // 助手要等 chord 完整释放，避免仍按住的触发修饰键污染 Ctrl+C 选区读取。
+            (s, vec![])
         }
         (
             State::Recording {
@@ -240,7 +258,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
             Event::TriggerDown { .. },
         ) => {
-            // toggle 模式下二次按下 = 结束录音
+            // 听写/翻译 toggle 模式下二次按下 = 结束录音。
             (
                 State::Transcribing { session_id, mode },
                 vec![E::CallStt { session_id }, E::EmitUi],
@@ -651,12 +669,54 @@ mod tests {
     }
 
     #[test]
-    fn toggle_second_press_ends_recording() {
-        let (s, _) = advance(recording(1), Event::TriggerUp { held_ms: 100 }, T);
-        let (s, fx) = advance(s, down(99), T);
-        assert_eq!(s.phase(), SessionPhase::Transcribing);
-        assert_eq!(s.session_id(), Some(1)); // 沿用原会话，不开新会话
-        assert!(fx.contains(&Effect::CallStt { session_id: 1 }));
+    fn dictation_and_translation_toggle_second_press_calls_stt_on_keydown() {
+        for mode in [SessionMode::Dictation, SessionMode::Translation] {
+            let initial = State::Recording {
+                session_id: 1,
+                mode,
+                toggled: false,
+            };
+            let (toggled, _) = advance(initial, Event::TriggerUp { held_ms: 100 }, T);
+            let (transcribing, down_fx) = advance(
+                toggled,
+                Event::TriggerDown {
+                    mode,
+                    next_session_id: 99,
+                },
+                T,
+            );
+
+            assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+            assert_eq!(transcribing.session_id(), Some(1));
+            assert!(down_fx.contains(&Effect::CallStt { session_id: 1 }));
+        }
+    }
+
+    #[test]
+    fn assistant_toggle_second_press_waits_for_keyup_before_calling_stt() {
+        let initial = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            toggled: false,
+        };
+        let (toggled, _) = advance(initial, Event::TriggerUp { held_ms: 100 }, T);
+        let (still_recording, down_fx) = advance(
+            toggled,
+            Event::TriggerDown {
+                mode: SessionMode::Assistant,
+                next_session_id: 99,
+            },
+            T,
+        );
+
+        assert_eq!(still_recording.phase(), SessionPhase::Recording);
+        assert_eq!(still_recording.session_id(), Some(1));
+        assert!(!down_fx.contains(&Effect::CallStt { session_id: 1 }));
+
+        let (transcribing, up_fx) = advance(still_recording, Event::TriggerUp { held_ms: 100 }, T);
+        assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+        assert_eq!(transcribing.session_id(), Some(1));
+        assert!(up_fx.contains(&Effect::CallStt { session_id: 1 }));
     }
 
     #[test]
@@ -744,6 +804,27 @@ mod tests {
         // 无 CancelRecording/StartRecording —— 音频保留
         assert!(!fx.contains(&Effect::CancelRecording));
         assert!(!fx.contains(&Effect::StartRecording));
+    }
+
+    #[test]
+    fn combo_upgrade_during_toggle_still_stops_after_release() {
+        let toggled = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Assistant,
+            toggled: true,
+        };
+        let (upgraded, _) = advance(
+            toggled,
+            Event::ModeUpgraded {
+                mode: SessionMode::Translation,
+            },
+            T,
+        );
+        let (transcribing, effects) = advance(upgraded, Event::TriggerUp { held_ms: 100 }, T);
+
+        assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
+        assert_eq!(transcribing.mode(), Some(SessionMode::Translation));
+        assert!(effects.contains(&Effect::CallStt { session_id: 1 }));
     }
 
     // ── 组合键让路（场景 3）──
