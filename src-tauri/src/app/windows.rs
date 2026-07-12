@@ -3,8 +3,10 @@
 use crate::selection::{SelectionBounds, SelectionReader};
 use crate::settings::{SettingsService, schema::ThemeMode};
 use crate::types::{SessionPhase, SessionSnapshot};
+use std::sync::Arc;
+#[cfg(target_os = "windows")]
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 /// HUD 显隐代际：每次快照 +1；延迟隐藏只在代际未变时执行（防止杀掉新会话的 HUD）。
@@ -14,17 +16,20 @@ const HUD_DEFAULT_HEIGHT: f64 = 76.0;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const HUD_FRAME_BOTTOM_GAP: f64 = 32.0;
 
+#[cfg(target_os = "windows")]
 #[derive(Clone, Copy)]
 struct HudLogicalSize {
     width: f64,
     height: f64,
 }
 
+#[cfg(target_os = "windows")]
 static HUD_LOGICAL_SIZE: Mutex<HudLogicalSize> = Mutex::new(HudLogicalSize {
     width: HUD_DEFAULT_WIDTH,
     height: HUD_DEFAULT_HEIGHT,
 });
 
+#[cfg(target_os = "windows")]
 fn hud_logical_size() -> HudLogicalSize {
     *HUD_LOGICAL_SIZE
         .lock()
@@ -260,9 +265,12 @@ pub fn setup_hud_panel(app: &AppHandle) -> tauri::Result<()> {
 
 /// Resize the transparent HUD window and keep it centered with one native frame update.
 pub fn set_hud_size<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) -> Result<(), String> {
-    *HUD_LOGICAL_SIZE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) = HudLogicalSize { width, height };
+    #[cfg(target_os = "windows")]
+    {
+        *HUD_LOGICAL_SIZE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = HudLogicalSize { width, height };
+    }
     let hud = app
         .get_webview_window("hud")
         .ok_or_else(|| "HUD window is unavailable".to_string())?;
