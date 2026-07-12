@@ -121,6 +121,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::open_permission_settings,
             commands::session_command,
             commands::assistant_window_ready,
+            commands::set_hud_size,
             commands::list_profiles,
             commands::upsert_profile,
             commands::delete_profile,

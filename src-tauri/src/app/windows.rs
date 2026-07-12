@@ -3,12 +3,33 @@
 use crate::selection::{SelectionBounds, SelectionReader};
 use crate::settings::{SettingsService, schema::ThemeMode};
 use crate::types::{SessionPhase, SessionSnapshot};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 /// HUD 显隐代际：每次快照 +1；延迟隐藏只在代际未变时执行（防止杀掉新会话的 HUD）。
 static HUD_GEN: AtomicU64 = AtomicU64::new(0);
+const HUD_DEFAULT_WIDTH: f64 = 352.0;
+const HUD_DEFAULT_HEIGHT: f64 = 76.0;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const HUD_FRAME_BOTTOM_GAP: f64 = 32.0;
+
+#[derive(Clone, Copy)]
+struct HudLogicalSize {
+    width: f64,
+    height: f64,
+}
+
+static HUD_LOGICAL_SIZE: Mutex<HudLogicalSize> = Mutex::new(HudLogicalSize {
+    width: HUD_DEFAULT_WIDTH,
+    height: HUD_DEFAULT_HEIGHT,
+});
+
+fn hud_logical_size() -> HudLogicalSize {
+    *HUD_LOGICAL_SIZE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[cfg(target_os = "windows")]
 pub fn refresh_windows_window_icons<R: Runtime>(window: &tauri::WebviewWindow<R>) {
@@ -237,6 +258,17 @@ pub fn setup_hud_panel(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Resize the transparent HUD window and keep it centered with one native frame update.
+pub fn set_hud_size<R: Runtime>(app: &AppHandle<R>, width: f64, height: f64) -> Result<(), String> {
+    *HUD_LOGICAL_SIZE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = HudLogicalSize { width, height };
+    let hud = app
+        .get_webview_window("hud")
+        .ok_or_else(|| "HUD window is unavailable".to_string())?;
+    set_hud_size_on_platform(&hud, width, height)
+}
+
 /// HUD 显隐随会话状态（05 §3.3）。Idle 延迟 700ms 隐藏——给前端 600ms 成功反馈留时间；
 /// 期间若新会话开始，show 会先到，隐藏检查会话仍为 Idle 才执行。
 pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapshot) {
@@ -259,11 +291,13 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
             });
         }
         _ => {
+            let visible = hud.is_visible().unwrap_or(false);
             // A failed HUD may still be visible when a new session starts in another app. Re-read
             // the foreground HWND so Windows follows the new target monitor without a hide/show.
+            // The cached logical size avoids resetting the visible HUD to its startup dimensions.
             #[cfg(target_os = "windows")]
             position_hud(&hud);
-            if !hud.is_visible().unwrap_or(false) {
+            if !visible {
                 #[cfg(not(target_os = "windows"))]
                 position_hud(&hud);
                 let _ = hud.show();
@@ -274,26 +308,19 @@ pub fn sync_hud_visibility<R: Runtime>(app: &AppHandle<R>, snap: &SessionSnapsho
 
 /// HUD 位置：屏幕底部居中，距底边 48px（05 §3.1）。
 #[cfg(target_os = "windows")]
-fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
+fn windows_hud_monitor<R: Runtime>(
+    hud: &tauri::WebviewWindow<R>,
+) -> Option<crate::platform::windows::MonitorWorkArea> {
     use crate::platform::windows::{
-        PhysicalScreenRect, configure_hud_window, foreground_monitor_work_area, hud_origin_px,
-        logical_size_to_physical, place_window_px,
+        MonitorWorkArea, PhysicalScreenRect, foreground_monitor_work_area,
     };
 
-    let hwnd = match hud.hwnd() {
-        Ok(hwnd) => hwnd,
-        Err(_) => return,
-    };
-    if let Err(classification) = configure_hud_window(hwnd) {
-        tracing::warn!(classification, "Windows HUD 原生样式设置失败");
-    }
-
-    let monitor = foreground_monitor_work_area().or_else(|| {
+    foreground_monitor_work_area().or_else(|| {
         let monitor = hud.current_monitor().ok().flatten()?;
         let pos = monitor.position();
         let size = monitor.size();
         let work = monitor.work_area();
-        Some(crate::platform::windows::MonitorWorkArea {
+        Some(MonitorWorkArea {
             monitor_px: PhysicalScreenRect {
                 left: pos.x,
                 top: pos.y,
@@ -314,18 +341,124 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
             },
             scale_factor: monitor.scale_factor(),
         })
-    });
-    let Some(monitor) = monitor else {
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn place_windows_hud<R: Runtime>(
+    hud: &tauri::WebviewWindow<R>,
+    monitor: crate::platform::windows::MonitorWorkArea,
+    mut size: crate::platform::windows::PhysicalPixelSize,
+) -> Result<(), String> {
+    use crate::platform::windows::{configure_hud_window, hud_origin_px, place_window_px};
+
+    let hwnd = hud.hwnd().map_err(|error| error.to_string())?;
+    if let Err(classification) = configure_hud_window(hwnd) {
+        tracing::warn!(classification, "Windows HUD 原生样式设置失败");
+    }
+    size.width = size.width.clamp(1, monitor.work_area_px.width().max(1));
+    size.height = size.height.clamp(1, monitor.work_area_px.height().max(1));
+    let origin = hud_origin_px(
+        monitor.work_area_px,
+        size,
+        monitor.scale_factor,
+        HUD_FRAME_BOTTOM_GAP,
+    );
+    place_window_px(hwnd, origin, size, true, true)
+}
+
+#[cfg(target_os = "windows")]
+fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
+    use crate::platform::windows::logical_size_to_physical;
+
+    let Some(monitor) = windows_hud_monitor(hud) else {
         return;
     };
 
-    // 352×76 is the Tauri logical outer window. The capsule has a 16 DIP transparent inset,
-    // so a 32 DIP outer gap preserves the specified 48 DIP visual distance from the work area.
-    let size = logical_size_to_physical(352.0, 76.0, monitor.scale_factor);
-    let origin = hud_origin_px(monitor.work_area_px, size, monitor.scale_factor, 32.0);
-    if let Err(classification) = place_window_px(hwnd, origin, size, true, true) {
+    // The capsule has a 16 DIP transparent inset, so a 32 DIP outer gap preserves the specified
+    // 48 DIP visual distance from the work area.
+    let logical_size = hud_logical_size();
+    let size = logical_size_to_physical(
+        logical_size.width,
+        logical_size.height,
+        monitor.scale_factor,
+    );
+    if let Err(classification) = place_windows_hud(hud, monitor, size) {
         tracing::warn!(classification, "Windows HUD 定位失败");
     }
+}
+
+#[cfg(target_os = "windows")]
+fn set_hud_size_on_platform<R: Runtime>(
+    hud: &tauri::WebviewWindow<R>,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let monitor =
+        windows_hud_monitor(hud).ok_or_else(|| "target monitor is unavailable".to_string())?;
+    let size =
+        crate::platform::windows::logical_size_to_physical(width, height, monitor.scale_factor);
+    place_windows_hud(hud, monitor, size)
+}
+
+#[cfg(target_os = "macos")]
+fn set_hud_size_on_platform<R: Runtime>(
+    hud: &tauri::WebviewWindow<R>,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let hud_for_frame = hud.clone();
+    hud.run_on_main_thread(move || {
+        use objc2_app_kit::NSWindow;
+        use tauri_nspanel::{NSPoint, NSRect, NSSize};
+
+        let Ok(raw_window) = hud_for_frame.ns_window() else {
+            tracing::warn!("macOS HUD NSWindow unavailable during resize");
+            return;
+        };
+        if raw_window.is_null() {
+            tracing::warn!("macOS HUD NSWindow was null during resize");
+            return;
+        }
+        unsafe {
+            let window = &*raw_window.cast::<NSWindow>();
+            let frame = if let Some(screen) = window.screen() {
+                let visible = screen.visibleFrame();
+                let width = width.min(visible.size.width.max(1.0));
+                let height = height.min((visible.size.height - HUD_FRAME_BOTTOM_GAP).max(1.0));
+                NSRect::new(
+                    NSPoint::new(
+                        visible.origin.x + (visible.size.width - width) / 2.0,
+                        visible.origin.y + HUD_FRAME_BOTTOM_GAP,
+                    ),
+                    NSSize::new(width, height),
+                )
+            } else {
+                let current = window.frame();
+                NSRect::new(
+                    NSPoint::new(
+                        current.origin.x + (current.size.width - width) / 2.0,
+                        current.origin.y,
+                    ),
+                    NSSize::new(width, height),
+                )
+            };
+            window.setFrame_display(frame, true);
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn set_hud_size_on_platform<R: Runtime>(
+    hud: &tauri::WebviewWindow<R>,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    hud.set_size(tauri::LogicalSize::new(width, height))
+        .map_err(|error| error.to_string())?;
+    position_hud(hud);
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -336,9 +469,10 @@ fn position_hud<R: Runtime>(hud: &tauri::WebviewWindow<R>) {
         // WebView 外层为 HUD 阴影/毛玻璃预留 16px 透明安全区；
         // 初始定位要扣掉这圈安全区，视觉胶囊底边才仍是 48px。
         let visual_gap = (48.0 - 16.0) * scale;
-        let hud_size = hud
-            .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(352, 76));
+        let hud_size = hud.outer_size().unwrap_or(tauri::PhysicalSize::new(
+            HUD_DEFAULT_WIDTH as u32,
+            HUD_DEFAULT_HEIGHT as u32,
+        ));
         let x = (screen.width as i32 - hud_size.width as i32) / 2;
         let y = screen.height as i32 - hud_size.height as i32 - visual_gap as i32;
         let _ = hud.set_position(tauri::PhysicalPosition::new(x, y));

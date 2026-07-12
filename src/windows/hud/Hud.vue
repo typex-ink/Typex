@@ -6,6 +6,7 @@ import {
   onSnapshot,
   onAudioLevel,
   sendCommand,
+  setHudSize,
   cycleTranslationTarget,
   toggleVerbatim,
   type SessionSnapshot,
@@ -13,19 +14,13 @@ import {
 } from "./ipc";
 import Waveform from "./Waveform.vue";
 import { hasVoiceActivity } from "./waveform-scale";
-import {
-  bottomCenteredRect,
-  type LogicalRect,
-  type LogicalSizeLike,
-} from "@/shared/floating-window";
-import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
-import { currentMonitor, getCurrentWindow, type Monitor } from "@tauri-apps/api/window";
+import type { LogicalSizeLike } from "@/shared/floating-window";
+import { currentMonitor, type Monitor } from "@tauri-apps/api/window";
 // HUD 纪律：不引 vue-i18n 运行时，静态 JSON 按语言直取（文案仍单一来源）
 import zhCN from "@/i18n/zh-CN.json";
 import en from "@/i18n/en.json";
 
 const L = navigator.language.toLowerCase().startsWith("zh") ? zhCN : en;
-const HUD_BOTTOM_GAP = 48;
 const HUD_SCREEN_MARGIN = 12;
 const HUD_WINDOW_PADDING = 16;
 
@@ -62,6 +57,9 @@ let unlistenSnap: (() => void) | null = null;
 let unlistenLevel: (() => void) | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let lastHudSize: LogicalSizeLike = { width: 0, height: 0 };
+let hudFrameSyncPending = false;
+let hudFrameSyncForce = false;
+let hudFrameSyncRunning = false;
 
 // 错误文案（05 §9）：单一来源 = i18n 资源，key 与 Rust ErrorCode 对齐
 const errorText: Record<ErrorCode, string> = L.error as Record<ErrorCode, string>;
@@ -153,9 +151,9 @@ watch(active, async (isActive) => {
   resizeObserver?.disconnect();
   resizeObserver = null;
   if (!isActive || !hudEl.value) return;
-  resizeObserver = new ResizeObserver(() => syncHudWindowFrame());
+  resizeObserver = new ResizeObserver(() => scheduleHudWindowFrame());
   resizeObserver.observe(hudEl.value);
-  syncHudWindowFrame(true);
+  scheduleHudWindowFrame(true);
 });
 
 onMounted(async () => {
@@ -201,22 +199,41 @@ function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") sendCommand(isRecording.value ? "cancel" : "dismiss");
 }
 
-function logicalWorkAreaOf(monitor: Monitor): LogicalRect {
+function logicalWorkAreaWidthOf(monitor: Monitor): number {
   const scale = monitor.scaleFactor;
-  const position = monitor.workArea.position.toLogical(scale);
-  const size = monitor.workArea.size.toLogical(scale);
-  return { x: position.x, y: position.y, width: size.width, height: size.height };
+  return monitor.workArea.size.toLogical(scale).width;
+}
+
+function scheduleHudWindowFrame(force = false) {
+  hudFrameSyncPending = true;
+  hudFrameSyncForce ||= force;
+  if (!hudFrameSyncRunning) void drainHudWindowFrames();
+}
+
+async function drainHudWindowFrames() {
+  hudFrameSyncRunning = true;
+  try {
+    while (hudFrameSyncPending) {
+      const force = hudFrameSyncForce;
+      hudFrameSyncPending = false;
+      hudFrameSyncForce = false;
+      await syncHudWindowFrame(force);
+    }
+  } finally {
+    hudFrameSyncRunning = false;
+  }
 }
 
 async function syncHudWindowFrame(force = false) {
   await nextTick();
   const hud = hudEl.value;
   if (!hud || !active.value) return;
-  const win = getCurrentWindow();
   const monitor = await currentMonitor();
-  const workArea = monitor ? logicalWorkAreaOf(monitor) : null;
+  const workAreaWidth = monitor ? logicalWorkAreaWidthOf(monitor) : null;
   const rect = hud.getBoundingClientRect();
-  const maxWidth = workArea ? Math.max(160, workArea.width - HUD_SCREEN_MARGIN * 2) : 520;
+  const maxWidth = workAreaWidth
+    ? Math.max(160, workAreaWidth - HUD_SCREEN_MARGIN * 2)
+    : 520;
   const size = {
     width: Math.min(Math.ceil(rect.width) + HUD_WINDOW_PADDING * 2, maxWidth),
     height: Math.ceil(rect.height) + HUD_WINDOW_PADDING * 2,
@@ -228,18 +245,8 @@ async function syncHudWindowFrame(force = false) {
       Math.abs(size.width - lastHudSize.width) >= 2 ||
       Math.abs(size.height - lastHudSize.height) >= 2
     ) {
+      await setHudSize(size.width, size.height);
       lastHudSize = size;
-      await win.setSize(new LogicalSize(size.width, size.height));
-    }
-    if (workArea) {
-      const position = bottomCenteredRect(
-        size,
-        workArea,
-        Math.max(0, HUD_BOTTOM_GAP - HUD_WINDOW_PADDING),
-      );
-      await win.setPosition(
-        new LogicalPosition(Math.round(position.x), Math.round(position.y)),
-      );
     }
   } catch {
     // 窗口隐藏/销毁时 resize 可能失败；下一次 active 会重新同步。

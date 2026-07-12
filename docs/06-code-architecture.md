@@ -374,7 +374,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 音频 | `list_audio_devices` | 返回 `Result<AudioInputDevice[]>`；每项为 `{ id, label }`，设置界面展示 label、保存 id，枚举失败不得伪装为空列表 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
-| 窗口 | `complete_onboarding` / `open_onboarding_window` | `complete_onboarding` 先创建/显示并聚焦主页，再关闭 onboarding；任一步失败返回错误并保留可重试的引导页 |
+| 窗口 | `complete_onboarding` / `open_onboarding_window` / `set_hud_size { width, height }` | `complete_onboarding` 先创建/显示并聚焦主页，再关闭 onboarding；任一步失败返回错误并保留可重试的引导页。HUD 仅上报内容逻辑尺寸，由 Rust 在目标屏工作区以单次原生 frame 更新原子缩放并重新居中 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
 | 历史 | `query_history { search, offset }` / `get_stats` / `delete_history_item` / `clear_history` | `get_stats` 返回主页统计（总时长/字数/节省时间/语速，本地聚合） |
@@ -421,6 +421,7 @@ src/
 要点：
 
 - **HUD 极简纪律**：hud 入口只允许依赖 `StatusPill`/`Waveform`/`useSession`，禁止引入 Pinia、路由、Markdown 渲染等重依赖——保证隐藏时零活动、显示时瞬时渲染（§12 性能预算）。打包时 hud chunk 单独产出并在 CI 里做体积断言（< 150 KB gzip 前端资产）。
+- **HUD frame 所有权**：前端 `ResizeObserver` 只合并、串行上报最新内容尺寸；屏幕选择、DPI 换算、缩放与重新居中统一由 `app/windows.rs` 完成。macOS 使用单次 `NSWindow.setFrame`，Windows 使用单次 `SetWindowPos`，不得由前端分别调用 `setSize` / `setPosition`。
 - 状态所有权：**业务状态（会话、配置）的真身在 Rust**，Pinia 只是订阅缓存 + 表单草稿；前端不自行推导会话状态。
 - Markdown 渲染（仅 assistant 窗口）：`markdown-it` + 白名单 sanitize；LLM 输出视为不可信内容，禁 raw HTML。
 - i18n：`vue-i18n`，key 与 Rust `ErrorCode` 对齐（`error.auth_error` …）。

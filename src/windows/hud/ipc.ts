@@ -60,6 +60,10 @@ export function sendCommand(command: SessionCommand) {
   return invoke("session_command", { command });
 }
 
+export function setHudSize(width: number, height: number): Promise<void> {
+  return invoke("set_hud_size", { width, height });
+}
+
 export function cycleTranslationTarget(): Promise<string> {
   return invoke("cycle_translation_target");
 }

@@ -118,7 +118,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 
 | 对象 | 用例 |
 |---|---|
-| HUD（`Hud.vue`） | 表驱动：每种 `SessionSnapshot`（各 phase × 各 mode × 各错误码）→ 断言渲染的文案/按钮/徽标。这是把 [05 §3](05-ux-spec.md) 的状态表固化成测试 |
+| HUD（`Hud.vue`） | 表驱动：每种 `SessionSnapshot`（各 phase × 各 mode × 各错误码）→ 断言渲染的文案/按钮/徽标。这是把 [05 §3](05-ux-spec.md) 的状态表固化成测试；尺寸变化只调用一次 Rust `set_hud_size`，连续 ResizeObserver 通知须串行合并且以最新尺寸为准，不得分别调用原生 size/position |
 | 错误码 → 文案 | 遍历 Rust 导出的全部 ErrorCode（从 bindings 类型取）：zh-CN 与 en 均有对应 i18n key（防「Rust 加了错误码忘了文案」——**这条是编译期抓不到的契约缝隙，必须测**） |
 | HotkeyRecorder | 录制态只切换按钮文案且不展开提示块、浏览器 code→稳定 `KeyId` 表、Windows WebView2 误报 `ShiftLeft` 但 `location=RIGHT` 时仍保存 `ShiftRight`、完整组合键保存/渲染、Esc 静默取消、历史别名展示、平台化标签与冲突警告 |
 | 首次启动引导 | 第 4 步可直接录制听写/助手快捷键；修改立即持久化并同步派生翻译组合与练习提示；相同、空或任一包含另一组合时阻止保存并显示校验提示 |

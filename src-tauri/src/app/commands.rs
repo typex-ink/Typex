@@ -350,6 +350,20 @@ pub fn open_log_dir(app: tauri::AppHandle) {
     }
 }
 
+/// HUD 内容尺寸变化：由原生层原子缩放并重新居中（05 §3.1）。
+#[tauri::command]
+#[specta::specta]
+pub fn set_hud_size(app: tauri::AppHandle, width: f64, height: f64) -> Result<(), TypexError> {
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            "HUD size must be finite and positive",
+        ));
+    }
+    crate::app::windows::set_hud_size(&app, width, height)
+        .map_err(|error| TypexError::new(ErrorCode::Internal, error))
+}
+
 /// 打开设置窗口（主页侧边栏 ⚙）。
 #[tauri::command]
 #[specta::specta]
