@@ -92,12 +92,16 @@ pub fn derive_translation_chord(dictation: &[KeyId], assistant: &[KeyId]) -> Vec
     normalize_hotkey_chord(&merged)
 }
 
-/// Both functional chords must remain independently reachable before their
-/// union can represent translation.
-pub fn hotkey_chords_are_reachable(dictation: &[KeyId], assistant: &[KeyId]) -> bool {
+/// All three functional chords must remain independently reachable.
+pub fn hotkey_chords_are_reachable(
+    dictation: &[KeyId],
+    assistant: &[KeyId],
+    translation: &[KeyId],
+) -> bool {
     let dictation = normalize_hotkey_chord(dictation);
     let assistant = normalize_hotkey_chord(assistant);
-    if dictation.is_empty() || assistant.is_empty() {
+    let translation = normalize_hotkey_chord(translation);
+    if dictation.is_empty() || assistant.is_empty() || translation.is_empty() {
         return false;
     }
 
@@ -105,7 +109,10 @@ pub fn hotkey_chords_are_reachable(dictation: &[KeyId], assistant: &[KeyId]) -> 
         left.iter()
             .all(|key| right.iter().any(|other| other == key))
     };
-    !is_subset(&dictation, &assistant) && !is_subset(&assistant, &dictation)
+    !is_subset(&dictation, &assistant)
+        && !is_subset(&assistant, &dictation)
+        && !is_subset(&translation, &dictation)
+        && !is_subset(&translation, &assistant)
 }
 
 /// Modifier keys do not auto-repeat and can use duplicate-down stale recovery.
@@ -182,19 +189,32 @@ mod tests {
     }
 
     #[test]
-    fn functional_chords_reject_empty_equal_and_subset_bindings() {
-        assert!(!hotkey_chords_are_reachable(&[], &["AltRight".into()]));
+    fn functional_chords_reject_empty_equal_and_shadowing_bindings() {
+        let translation = ["ControlRight".into(), "AltRight".into()];
         assert!(!hotkey_chords_are_reachable(
-            &["ControlRight".into()],
-            &["ControlRight".into()]
+            &[],
+            &["AltRight".into()],
+            &translation
         ));
         assert!(!hotkey_chords_are_reachable(
             &["ControlRight".into()],
-            &["ControlRight".into(), "KeyA".into()]
+            &["ControlRight".into()],
+            &translation
+        ));
+        assert!(!hotkey_chords_are_reachable(
+            &["ControlRight".into()],
+            &["ControlRight".into(), "KeyA".into()],
+            &translation
         ));
         assert!(!hotkey_chords_are_reachable(
             &["AltGr".into(), "KeyA".into()],
-            &["AltRight".into()]
+            &["AltRight".into()],
+            &translation
+        ));
+        assert!(!hotkey_chords_are_reachable(
+            &["ControlRight".into()],
+            &["AltRight".into()],
+            &["ControlRight".into()]
         ));
     }
 
@@ -202,7 +222,17 @@ mod tests {
     fn shared_non_subset_chords_remain_reachable() {
         assert!(hotkey_chords_are_reachable(
             &["ControlRight".into(), "KeyA".into()],
-            &["ControlRight".into(), "KeyB".into()]
+            &["ControlRight".into(), "KeyB".into()],
+            &["ControlRight".into(), "KeyA".into(), "KeyB".into()]
+        ));
+    }
+
+    #[test]
+    fn independent_translation_chord_can_be_disjoint() {
+        assert!(hotkey_chords_are_reachable(
+            &["ControlRight".into()],
+            &["AltRight".into()],
+            &["F13".into(), "Menu".into()]
         ));
     }
 }

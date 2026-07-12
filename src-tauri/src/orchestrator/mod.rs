@@ -6,7 +6,7 @@ pub mod session;
 
 use crate::audio::{AudioService, CandidatePromotion, Recording};
 use crate::error::{ErrorCode, TypexError};
-use crate::hotkey::HotkeyEvent;
+use crate::hotkey::{EscCancellationLatch, HotkeyEvent, InjectionCancel};
 use crate::inject::{InjectionLatch, InjectionOutcome, InjectorChain};
 use crate::providers::ProviderRegistry;
 use crate::providers::stt::{AudioInput, SttOptions};
@@ -40,6 +40,8 @@ pub struct Orchestrator {
     pub selection: Arc<dyn crate::selection::SelectionReader>,
     /// 历史记录服务（None = 未启用）
     pub history: Option<Arc<crate::history::HistoryService>>,
+    /// Shared with the platform keyboard backend for synchronous Escape ownership.
+    pub(crate) escape_latch: Arc<EscCancellationLatch>,
 }
 
 /// HUD/前端发来的会话控制命令（06 §10.1 会话组）。
@@ -151,6 +153,7 @@ impl Orchestrator {
             injection_latches: HashMap::new(),
             tx: tx.clone(),
         };
+        self.escape_latch.disarm();
 
         // 电平转发 task（audio worker → 前端）
         let (level_tx, mut level_rx) = mpsc::unbounded_channel::<Vec<f32>>();
@@ -215,7 +218,7 @@ impl Orchestrator {
             };
             let Some(event) = event else { continue };
 
-            let event = match event {
+            let mut event = match event {
                 Event::RecordingFinished { session_id } => {
                     let result = exec.finished_audio.lock().unwrap().remove(&session_id);
                     if matches!(
@@ -240,7 +243,30 @@ impl Orchestrator {
                 event => event,
             };
 
-            // 历史记录素材：转写稿 + 录音时长（成功注入时写库）
+            let threshold = self.settings.get().hotkeys.hold_threshold_ms;
+            let previous_state = exec.state.clone();
+            let (mut new_state, mut effects) =
+                advance(previous_state.clone(), event.clone(), threshold);
+            for effect in &effects {
+                if let Effect::Inject { session_id, .. } = effect {
+                    exec.injection_latches
+                        .insert(*session_id, Arc::new(InjectionLatch::new()));
+                }
+            }
+
+            if matches!(event, Event::Esc) {
+                self.escape_latch.disarm();
+            } else if !self.try_transition_escape_latch(
+                previous_state.session_id(),
+                &new_state,
+                &mut exec,
+            ) {
+                event = Event::Esc;
+                (new_state, effects) = advance(previous_state, event.clone(), threshold);
+                self.escape_latch.disarm();
+            }
+
+            // Persist side effects only after the state transition wins against Escape claiming.
             if let Event::SttResult {
                 session_id,
                 transcript,
@@ -282,8 +308,6 @@ impl Orchestrator {
                 self.record_history_result(*session_id, SessionMode::Assistant, answer, &exec);
             }
 
-            let threshold = self.settings.get().hotkeys.hold_threshold_ms;
-            let (new_state, effects) = advance(exec.state.clone(), event, threshold);
             exec.state = new_state;
             for effect in effects {
                 self.dispatch(effect, &mut exec, &level_tx);
@@ -351,13 +375,37 @@ impl Orchestrator {
             HotkeyEvent::ModeUpgraded { mode } => Some(Event::ModeUpgraded { mode }),
             HotkeyEvent::TriggerUp { held_ms } => Some(Event::TriggerUp { held_ms }),
             HotkeyEvent::Yielded => Some(Event::Yielded),
-            HotkeyEvent::EscPressed => {
-                if self.settings.get().dictation.esc_cancels {
-                    self.begin_cancel(exec)
-                } else {
-                    None
-                }
+            HotkeyEvent::EscPressed { session_id } => {
+                (exec.state.session_id() == Some(session_id)).then_some(Event::Esc)
             }
+        }
+    }
+
+    fn try_transition_escape_latch(
+        &self,
+        previous_session_id: Option<u64>,
+        next_state: &State,
+        exec: &mut Exec,
+    ) -> bool {
+        match next_state {
+            State::Idle => self.escape_latch.transition_to_idle(previous_session_id),
+            State::Injecting { session_id, .. } => {
+                let session_id = *session_id;
+                let injection_latch = exec
+                    .injection_latches
+                    .entry(session_id)
+                    .or_insert_with(|| Arc::new(InjectionLatch::new()))
+                    .clone();
+                let cancel: InjectionCancel = Arc::new(move || injection_latch.cancel());
+                self.escape_latch
+                    .transition_to_injecting(previous_session_id, session_id, cancel)
+            }
+            State::Recording { session_id, .. }
+            | State::Transcribing { session_id, .. }
+            | State::Processing { session_id, .. }
+            | State::Failed { session_id, .. } => self
+                .escape_latch
+                .transition_to_cancellable(previous_session_id, *session_id),
         }
     }
 
@@ -373,6 +421,7 @@ impl Orchestrator {
         {
             return None;
         }
+        self.escape_latch.disarm();
         Some(Event::Esc)
     }
 
@@ -612,8 +661,11 @@ impl Orchestrator {
                 let tx = exec.tx.clone();
                 let method = self.settings.get().dictation.inject_method;
                 let target = exec.target_focus.clone();
-                let latch = Arc::new(InjectionLatch::new());
-                exec.injection_latches.insert(session_id, latch.clone());
+                let latch = exec
+                    .injection_latches
+                    .entry(session_id)
+                    .or_insert_with(|| Arc::new(InjectionLatch::new()))
+                    .clone();
                 // enigo/剪贴板是阻塞调用 → blocking 线程
                 let handle = tokio::task::spawn_blocking(move || {
                     let result = injector.inject_with_target_cancellable(
@@ -850,6 +902,7 @@ mod tests {
             std::time::Duration::from_millis(250),
         ));
         let registry = Arc::new(ProviderRegistry::new(settings.get()));
+        let escape_latch = Arc::new(EscCancellationLatch::default());
         let (snapshot_tx, mut snapshot_rx) = mpsc::unbounded_channel();
         let orchestrator = Arc::new(Orchestrator {
             settings: settings.clone(),
@@ -866,9 +919,10 @@ mod tests {
             selection_read_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             selection: Arc::new(NoSelection),
             history: None,
+            escape_latch: escape_latch.clone(),
         });
         let (hotkey_tx, hotkey_rx) = mpsc::unbounded_channel();
-        let (commander, command_rx) = SessionCommander::channel();
+        let (_commander, command_rx) = SessionCommander::channel();
         let task = tokio::spawn(orchestrator.run(hotkey_rx, command_rx));
 
         hotkey_tx
@@ -896,7 +950,11 @@ mod tests {
         settings
             .mutate(|settings| settings.dictation.esc_cancels = false)
             .unwrap();
-        hotkey_tx.send(HotkeyEvent::EscPressed).unwrap();
+        escape_latch.set_enabled(false);
+        assert_eq!(escape_latch.try_claim(), None);
+        hotkey_tx
+            .send(HotkeyEvent::EscPressed { session_id: 999 })
+            .unwrap();
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(50), snapshot_rx.recv())
                 .await
@@ -904,8 +962,9 @@ mod tests {
             "disabled Escape must not cancel audio finalization"
         );
 
-        commander.send(SessionCommand::Cancel);
-        let idle = tokio::time::timeout(std::time::Duration::from_millis(100), async {
+        escape_latch.set_enabled(true);
+        assert_eq!(escape_latch.try_claim(), Some(1));
+        let idle = tokio::time::timeout(std::time::Duration::from_millis(500), async {
             loop {
                 if snapshot_rx.recv().await == Some(SessionPhase::Idle) {
                     break SessionPhase::Idle;

@@ -6,7 +6,6 @@ import Callout from "@/components/Callout.vue";
 import FormRow from "@/components/FormRow.vue";
 import HotkeyRecorder from "@/components/HotkeyRecorder.vue";
 import {
-  deriveTranslationChord,
   hotkeyChordsAreReachable,
   normalizeHotkeyChord,
 } from "@/shared/hotkeys";
@@ -16,7 +15,7 @@ const { t } = useI18n();
 const store = useSettingsStore();
 const validationError = ref(false);
 
-type FunctionalHotkey = "dictation" | "assistant";
+type FunctionalHotkey = "dictation" | "assistant" | "translation";
 
 function saveHotkey(slot: FunctionalHotkey, value: string[]) {
   const settings = store.settings;
@@ -25,7 +24,8 @@ function saveHotkey(slot: FunctionalHotkey, value: string[]) {
   const normalized = normalizeHotkeyChord(value);
   const dictation = slot === "dictation" ? normalized : settings.hotkeys.dictation;
   const assistant = slot === "assistant" ? normalized : settings.hotkeys.assistant;
-  if (!hotkeyChordsAreReachable(dictation, assistant)) {
+  const translation = slot === "translation" ? normalized : settings.hotkeys.translation;
+  if (!hotkeyChordsAreReachable(dictation, assistant, translation)) {
     validationError.value = true;
     return;
   }
@@ -33,7 +33,6 @@ function saveHotkey(slot: FunctionalHotkey, value: string[]) {
   validationError.value = false;
   void store.mutate((draft) => {
     draft.hotkeys[slot] = normalized;
-    draft.hotkeys.translation = deriveTranslationChord(dictation, assistant);
   });
 }
 
@@ -44,6 +43,10 @@ const dictation = computed({
 const assistant = computed({
   get: () => store.settings?.hotkeys.assistant ?? [],
   set: (value: string[]) => saveHotkey("assistant", value),
+});
+const translation = computed({
+  get: () => store.settings?.hotkeys.translation ?? [],
+  set: (value: string[]) => saveHotkey("translation", value),
 });
 </script>
 
@@ -60,12 +63,8 @@ const assistant = computed({
     <FormRow :label="t('settings.nav_assistant')">
       <HotkeyRecorder v-model="assistant" />
     </FormRow>
-    <FormRow :label="t('settings.nav_translation')" :hint="t('settings.hotkeys.translation_hint')">
-      <span class="combo">
-        <HotkeyRecorder :model-value="dictation" />
-        <span class="plus">+</span>
-        <HotkeyRecorder :model-value="assistant" />
-      </span>
+    <FormRow :label="t('settings.nav_translation')">
+      <HotkeyRecorder v-model="translation" />
     </FormRow>
   </div>
 </template>
@@ -83,16 +82,5 @@ const assistant = computed({
 }
 .validation-error {
   margin-bottom: 12px;
-}
-.combo {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.combo :deep(button) {
-  display: none;
-}
-.plus {
-  color: var(--text-3);
 }
 </style>

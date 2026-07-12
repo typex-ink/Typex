@@ -1,8 +1,7 @@
-//! rdev 独立线程监听（macOS/Windows/X11，06 §7.3）。
-//! listen-only：不拦截任何按键；判定在 HotkeyDetector 纯逻辑层。
+//! rdev 独立线程监听（macOS grab / X11 listen-only，06 §7.3）。
 
-use super::{HotkeyConfig, HotkeyDetector, HotkeyEvent};
-use std::sync::mpsc as std_mpsc;
+use super::{EscCancellationLatch, EscKeyFilter, HotkeyConfig, HotkeyDetector, HotkeyEvent};
+use std::sync::{Arc, Mutex, mpsc as std_mpsc};
 use std::time::Instant;
 use tokio::sync::{mpsc, watch};
 
@@ -13,6 +12,7 @@ pub fn spawn(
     initial: HotkeyConfig,
     mut config_rx: watch::Receiver<HotkeyConfig>,
     mut paused_rx: watch::Receiver<bool>,
+    escape_latch: Arc<EscCancellationLatch>,
 ) -> mpsc::UnboundedReceiver<HotkeyEvent> {
     let (tx, rx) = mpsc::unbounded_channel();
 
@@ -41,38 +41,84 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("typex-hotkey".into())
         .spawn(move || {
-            let mut detector = HotkeyDetector::new(initial);
-            let epoch = Instant::now();
-            let mut paused = *paused_rx.borrow_and_update();
+            let paused = *paused_rx.borrow_and_update();
+            let state = Mutex::new(RdevEventState {
+                detector: HotkeyDetector::new(initial),
+                config_rx: cfg_rx_std,
+                paused,
+                paused_rx,
+                escape_latch,
+                escape_filter: EscKeyFilter::default(),
+                tx,
+                epoch: Instant::now(),
+            });
+            #[cfg(target_os = "macos")]
+            let result = rdev::grab(move |event: rdev::Event| {
+                if state.lock().unwrap().process(&event) {
+                    None
+                } else {
+                    Some(event)
+                }
+            });
+            #[cfg(not(target_os = "macos"))]
             let result = rdev::listen(move |event: rdev::Event| {
-                let t_ms = epoch.elapsed().as_millis() as u64;
-                refresh_pause_state(&mut detector, &mut paused_rx, &mut paused);
-                // 应用热更新（非阻塞轮询）
-                while let Ok(cfg) = cfg_rx_std.try_recv() {
-                    for semantic in detector.set_config(cfg, t_ms) {
-                        let _ = tx.send(semantic);
-                    }
-                }
-                if paused {
-                    return;
-                }
-                let (key, down) = match event.event_type {
-                    rdev::EventType::KeyPress(k) => (k, true),
-                    rdev::EventType::KeyRelease(k) => (k, false),
-                    _ => return,
-                };
-                for ev in detector.on_key(&key_id(key), down, t_ms) {
-                    let _ = tx.send(ev);
-                }
+                let _ = state.lock().unwrap().process(&event);
             });
             if let Err(e) = result {
                 // macOS 未授权辅助功能时 rdev 静默无事件或直接失败（平台坑 7.2-1）
-                tracing::error!("rdev listen 失败（缺辅助功能权限？）: {e:?}");
+                tracing::error!("rdev hotkey backend 失败（缺辅助功能权限？）: {e:?}");
             }
         })
         .expect("spawn hotkey thread");
 
     rx
+}
+
+struct RdevEventState {
+    detector: HotkeyDetector,
+    config_rx: std_mpsc::Receiver<HotkeyConfig>,
+    paused_rx: watch::Receiver<bool>,
+    paused: bool,
+    escape_latch: Arc<EscCancellationLatch>,
+    escape_filter: EscKeyFilter,
+    tx: mpsc::UnboundedSender<HotkeyEvent>,
+    epoch: Instant,
+}
+
+impl RdevEventState {
+    /// Returns true only for an Escape event owned by the current Typex session.
+    fn process(&mut self, event: &rdev::Event) -> bool {
+        let t_ms = self.epoch.elapsed().as_millis() as u64;
+        refresh_pause_state(&mut self.detector, &mut self.paused_rx, &mut self.paused);
+        while let Ok(config) = self.config_rx.try_recv() {
+            for semantic in self.detector.set_config(config, t_ms) {
+                let _ = self.tx.send(semantic);
+            }
+        }
+
+        let (key, down) = match event.event_type {
+            rdev::EventType::KeyPress(key) => (key, true),
+            rdev::EventType::KeyRelease(key) => (key, false),
+            _ => return false,
+        };
+        let key = key_id(key);
+        if key == "Escape" {
+            let decision = self
+                .escape_filter
+                .on_key(down, !self.paused, &self.escape_latch);
+            if let Some(event) = decision.event {
+                let _ = self.tx.send(event);
+            }
+            return decision.swallow;
+        }
+        if self.paused {
+            return false;
+        }
+        for event in self.detector.on_key(&key, down, t_ms) {
+            let _ = self.tx.send(event);
+        }
+        false
+    }
 }
 
 fn refresh_pause_state(
@@ -235,8 +281,48 @@ fn unknown_key_id(code: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{HotkeyConfig, HotkeyDetector, HotkeyEvent, refresh_pause_state};
+    use super::{
+        EscCancellationLatch, HotkeyConfig, HotkeyDetector, HotkeyEvent, RdevEventState,
+        refresh_pause_state,
+    };
     use crate::types::SessionMode;
+    use std::sync::{Arc, mpsc as std_mpsc};
+    use std::time::{Instant, SystemTime};
+    use tokio::sync::{mpsc, watch};
+
+    fn event(event_type: rdev::EventType) -> rdev::Event {
+        rdev::Event {
+            time: SystemTime::now(),
+            name: None,
+            event_type,
+        }
+    }
+
+    fn event_state(
+        latch: Arc<EscCancellationLatch>,
+    ) -> (RdevEventState, mpsc::UnboundedReceiver<HotkeyEvent>) {
+        let (_config_tx, config_rx) = std_mpsc::channel();
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            RdevEventState {
+                detector: HotkeyDetector::new(HotkeyConfig {
+                    dictation: vec!["MetaRight".into()],
+                    assistant: vec!["AltRight".into()],
+                    translation: vec!["MetaRight".into(), "AltRight".into()],
+                    esc_cancels: true,
+                }),
+                config_rx,
+                paused_rx,
+                paused: false,
+                escape_latch: latch,
+                escape_filter: Default::default(),
+                tx,
+                epoch: Instant::now(),
+            },
+            rx,
+        )
+    }
 
     #[test]
     fn key_id_stable_names() {
@@ -280,5 +366,28 @@ mod tests {
                 mode: SessionMode::Dictation
             }]
         );
+    }
+
+    #[test]
+    fn adapter_consumes_only_an_owned_escape_sequence() {
+        let latch = Arc::new(EscCancellationLatch::default());
+        latch.arm_cancellable(7);
+        let (mut state, mut rx) = event_state(latch.clone());
+
+        assert!(state.process(&event(rdev::EventType::KeyPress(rdev::Key::Escape))));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            HotkeyEvent::EscPressed { session_id: 7 }
+        );
+        assert!(state.process(&event(rdev::EventType::KeyPress(rdev::Key::Escape))));
+        assert!(rx.try_recv().is_err());
+        assert!(!state.process(&event(rdev::EventType::MouseMove { x: 1.0, y: 2.0 })));
+        assert!(!state.process(&event(rdev::EventType::KeyPress(rdev::Key::KeyA))));
+        assert!(state.process(&event(rdev::EventType::KeyRelease(rdev::Key::Escape))));
+
+        latch.disarm();
+        assert!(!state.process(&event(rdev::EventType::KeyPress(rdev::Key::Escape))));
+        assert!(!state.process(&event(rdev::EventType::KeyRelease(rdev::Key::Escape))));
+        assert!(rx.try_recv().is_err());
     }
 }

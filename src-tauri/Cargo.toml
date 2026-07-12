@@ -77,11 +77,14 @@ encoding_rs = { version = "0.8", optional = true }
 # macOS/Linux 保持源码构建，避免改变现有本地模型产物。
 sherpa-rs = { version = "0.6.8", default-features = false, optional = true }
 sherpa-rs-sys = { version = "0.6.8", default-features = false, optional = true }
-# Windows uses the native WH_KEYBOARD_LL backend; rdev remains for macOS/Linux.
+[target.'cfg(target_os = "linux")'.dependencies]
+# Linux remains listen-only until its platform interception backend is adapted.
 rdev = "0.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
+# macOS grab selectively consumes only Escape sequences claimed by Typex.
+rdev = { version = "0.5", features = ["unstable_grab"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSColor", "NSAppearance", "objc2-core-foundation"] }
 objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }

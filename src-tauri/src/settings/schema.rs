@@ -8,7 +8,7 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
 pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
@@ -310,11 +310,11 @@ impl HotkeySettings {
     pub fn normalize(&mut self) {
         self.dictation = normalize_hotkey_chord(&self.dictation);
         self.assistant = normalize_hotkey_chord(&self.assistant);
-        self.translation = derive_translation_chord(&self.dictation, &self.assistant);
+        self.translation = normalize_hotkey_chord(&self.translation);
     }
 
     pub fn chords_are_reachable(&self) -> bool {
-        hotkey_chords_are_reachable(&self.dictation, &self.assistant)
+        hotkey_chords_are_reachable(&self.dictation, &self.assistant, &self.translation)
     }
 }
 
@@ -485,11 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn hotkeys_normalize_aliases_and_derive_multi_key_translation() {
+    fn hotkeys_normalize_all_three_chords_independently() {
         let mut h = HotkeySettings {
             dictation: vec!["ControlRight".into(), "Num1".into(), "Digit1".into()],
             assistant: vec!["AltGr".into(), "KeyA".into()],
-            translation: vec!["stale-value".into()],
+            translation: vec!["F13".into(), "ContextMenu".into(), "Menu".into()],
             hold_threshold_ms: 350,
         };
 
@@ -497,10 +497,7 @@ mod tests {
 
         assert_eq!(h.dictation, vec!["ControlRight", "Digit1"]);
         assert_eq!(h.assistant, vec!["AltRight", "KeyA"]);
-        assert_eq!(
-            h.translation,
-            vec!["ControlRight", "Digit1", "AltRight", "KeyA"]
-        );
+        assert_eq!(h.translation, vec!["F13", "Menu"]);
         assert!(h.chords_are_reachable());
     }
 
@@ -519,6 +516,14 @@ mod tests {
             ..HotkeySettings::default()
         };
         assert!(!subset.chords_are_reachable());
+
+        let translation_shadows_dictation = HotkeySettings {
+            dictation: vec!["ControlRight".into(), "KeyA".into()],
+            assistant: vec!["AltRight".into()],
+            translation: vec!["ControlRight".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!translation_shadows_dictation.chords_are_reachable());
     }
 
     #[test]

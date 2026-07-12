@@ -31,7 +31,7 @@ vi.mock("@/ipc/bindings", () => ({
 
 function makeSettings(): Settings {
   return {
-    schema_version: 7,
+    schema_version: 8,
     general: {
       theme: "system",
       language: "zh_cn",

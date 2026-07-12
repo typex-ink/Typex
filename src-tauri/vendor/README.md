@@ -14,12 +14,13 @@
 
 **上游基线：** crates.io `rdev` 0.5.3。
 
-**保留原因：** macOS 26 会要求 TSM 输入法 API 在主线程执行。上游在 event tap 监听回调中生成按键字符名，间接调用 `TSMGetInputSourceProperty`，会触发队列断言并以 `SIGTRAP` 崩溃。Typex 的热键逻辑只消费 `Key` 枚举，不需要 `Event.name`。此外，系统因超时或用户输入禁用 event tap 后，上游监听不会主动恢复。
+**保留原因：** macOS 26 会要求 TSM 输入法 API 在主线程执行。上游在 event tap 回调中生成按键字符名，间接调用 `TSMGetInputSourceProperty`，会触发队列断言并以 `SIGTRAP` 崩溃。Typex 的热键逻辑只消费 `Key` 枚举，不需要 `Event.name`。此外，系统因超时或用户输入禁用 event tap 后，上游 listen 与 grab 后端都不会主动恢复；Typex 使用 grab 仅选择性消费已认领会话的 Esc。
 
 **Typex 修改：**
 
 - [`rdev/src/macos/common.rs`](rdev/src/macos/common.rs)：监听回调不再调用 `create_string_for_key`，统一将 `Event.name` 设为 `None`，避免在监听线程访问 TSM 输入法 API。
 - [`rdev/src/macos/listen.rs`](rdev/src/macos/listen.rs)：保存 event tap 引用；收到 `TapDisabledByTimeout` 或 `TapDisabledByUserInput` 时重新启用 tap，避免全局热键监听静默失效。
+- [`rdev/src/macos/grab.rs`](rdev/src/macos/grab.rs)：为 grab 后端补上相同的 event tap 保存与超时/用户输入禁用恢复，确保选择性 Esc 拦截不会静默失效。
 
 ## `cpal` 0.16.0
 

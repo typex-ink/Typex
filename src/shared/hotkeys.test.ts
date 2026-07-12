@@ -80,12 +80,14 @@ describe("stable hotkey KeyId contract", () => {
   });
 
   it.each([
-    [[], ["AltRight"]],
-    [["ControlRight"], ["ControlRight"]],
-    [["ControlRight"], ["ControlRight", "KeyA"]],
-    [["AltGr", "KeyA"], ["AltRight"]],
-  ])("rejects empty, equal, or subset functional chords", (dictation, assistant) => {
-    expect(hotkeyChordsAreReachable(dictation, assistant)).toBe(false);
+    [[], ["AltRight"], ["ControlRight", "AltRight"]],
+    [["ControlRight"], ["ControlRight"], ["ControlRight", "AltRight"]],
+    [["ControlRight"], ["ControlRight", "KeyA"], ["ControlRight", "AltRight"]],
+    [["AltGr", "KeyA"], ["AltRight"], ["ControlRight", "AltRight"]],
+    [["ControlRight"], ["AltRight"], ["ControlRight"]],
+    [["ControlRight"], ["AltRight"], []],
+  ])("rejects empty or shadowing functional chords", (dictation, assistant, translation) => {
+    expect(hotkeyChordsAreReachable(dictation, assistant, translation)).toBe(false);
   });
 
   it("allows shared keys when neither functional chord contains the other", () => {
@@ -93,6 +95,17 @@ describe("stable hotkey KeyId contract", () => {
       hotkeyChordsAreReachable(
         ["ControlRight", "KeyA"],
         ["ControlRight", "KeyB"],
+        ["ControlRight", "KeyA", "KeyB"],
+      ),
+    ).toBe(true);
+  });
+
+  it("allows an independent disjoint translation chord", () => {
+    expect(
+      hotkeyChordsAreReachable(
+        ["ControlRight"],
+        ["AltRight"],
+        ["F13", "Menu"],
       ),
     ).toBe(true);
   });

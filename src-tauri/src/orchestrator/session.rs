@@ -96,7 +96,7 @@ pub enum Event {
     TriggerUp { held_ms: u64 },
     /// 组合键让路（普通键介入）
     Yielded,
-    /// Esc（listen-only；由执行器按设置与注入提交门闩过滤）
+    /// Esc（平台门闩已认领当前 session；状态机只处理取消转移）
     Esc,
     /// HUD ✕ / dismiss
     Dismiss,

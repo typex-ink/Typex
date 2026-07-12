@@ -4,7 +4,7 @@
 //! shared [`HotkeyDetector`], enqueue semantic events, and immediately return.
 //! Hook installation and removal live on a dedicated message-loop thread.
 
-use super::{HotkeyConfig, HotkeyDetector, HotkeyEvent};
+use super::{EscCancellationLatch, EscKeyFilter, HotkeyConfig, HotkeyDetector, HotkeyEvent};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex, mpsc as std_mpsc};
@@ -144,6 +144,7 @@ pub fn spawn(
     initial: HotkeyConfig,
     config_rx: watch::Receiver<HotkeyConfig>,
     paused_rx: watch::Receiver<bool>,
+    escape_latch: Arc<EscCancellationLatch>,
 ) -> Result<(mpsc::UnboundedReceiver<HotkeyEvent>, WindowsHotkeyHandle), WindowsHookError> {
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (health_tx, health_rx) = watch::channel(WindowsHookHealth::Starting);
@@ -161,10 +162,13 @@ pub fn spawn(
                     initial,
                     config_rx,
                     paused_rx,
-                    event_tx,
-                    health_tx,
-                    init_tx,
-                    thread_shutdown_requested,
+                    HookThreadContext {
+                        event_tx,
+                        health_tx,
+                        init_tx,
+                        shutdown_requested: thread_shutdown_requested,
+                        escape_latch,
+                    },
                 );
             }));
             if result.is_err() {
@@ -205,15 +209,27 @@ pub fn spawn(
 
 type Initialization = Result<u32, WindowsHookError>;
 
-fn run_hook_thread(
-    initial: HotkeyConfig,
-    config_rx: watch::Receiver<HotkeyConfig>,
-    paused_rx: watch::Receiver<bool>,
+struct HookThreadContext {
     event_tx: mpsc::UnboundedSender<HotkeyEvent>,
     health_tx: watch::Sender<WindowsHookHealth>,
     init_tx: std_mpsc::SyncSender<Initialization>,
     shutdown_requested: Arc<AtomicBool>,
+    escape_latch: Arc<EscCancellationLatch>,
+}
+
+fn run_hook_thread(
+    initial: HotkeyConfig,
+    config_rx: watch::Receiver<HotkeyConfig>,
+    paused_rx: watch::Receiver<bool>,
+    context: HookThreadContext,
 ) {
+    let HookThreadContext {
+        event_tx,
+        health_tx,
+        init_tx,
+        shutdown_requested,
+        escape_latch,
+    } = context;
     let thread_id = unsafe { GetCurrentThreadId() };
     let mut message = MSG::default();
 
@@ -229,6 +245,7 @@ fn run_hook_thread(
         paused_rx,
         event_tx,
         health_tx.clone(),
+        escape_latch,
     ));
     let state_ptr = ptr::from_mut(state.as_mut());
     if ACTIVE_HOOK_STATE
@@ -429,6 +446,8 @@ struct HookThreadState {
     accepting_events: AtomicBool,
     epoch: Instant,
     pending_timer_id: Option<usize>,
+    escape_latch: Arc<EscCancellationLatch>,
+    escape_filter: EscKeyFilter,
 }
 
 impl HookThreadState {
@@ -438,6 +457,7 @@ impl HookThreadState {
         paused_rx: watch::Receiver<bool>,
         event_tx: mpsc::UnboundedSender<HotkeyEvent>,
         health_tx: watch::Sender<WindowsHookHealth>,
+        escape_latch: Arc<EscCancellationLatch>,
     ) -> Self {
         let paused = *paused_rx.borrow();
         Self {
@@ -450,17 +470,37 @@ impl HookThreadState {
             accepting_events: AtomicBool::new(true),
             epoch: Instant::now(),
             pending_timer_id: None,
+            escape_latch,
+            escape_filter: EscKeyFilter::default(),
         }
     }
 
-    /// Returns whether this raw event is the one confirmed Typex RAlt keyup
-    /// that must be swallowed to avoid activating the foreground menu bar.
+    /// Returns whether this raw event is an owned Escape transition or the
+    /// confirmed Typex RAlt keyup that must not reach the foreground app.
     fn process(&mut self, raw: RawKeyboardEvent) -> bool {
-        if !self.refresh_runtime_state() || self.paused {
+        if !self.refresh_runtime_state() {
             return false;
         }
 
-        let decision = self.adapter.process(raw);
+        let is_physical_escape = !raw.is_injected() && decode_key_id(raw) == "Escape";
+        if self.paused {
+            return is_physical_escape
+                && self
+                    .escape_filter
+                    .on_key(raw.is_down(), false, &self.escape_latch)
+                    .swallow;
+        }
+
+        let mut decision = self.adapter.process(raw);
+        if is_physical_escape {
+            let escape = self
+                .escape_filter
+                .on_key(raw.is_down(), true, &self.escape_latch);
+            decision.swallow |= escape.swallow;
+            if let Some(event) = escape.event {
+                decision.events.push(event);
+            }
+        }
         let swallow = decision.swallow;
         if !self.emit_events(decision.events) {
             return false;
@@ -865,11 +905,7 @@ impl WindowsEventAdapter {
         };
 
         if self.pending_modifier.is_some() {
-            if self.config.esc_cancels
-                && events
-                    .iter()
-                    .any(|event| matches!(event, HotkeyEvent::EscPressed))
-            {
+            if self.config.esc_cancels && raw.is_down() && key == "Escape" {
                 let pending = self.pending_modifier.take().expect("checked above");
                 events.insert(
                     0,
@@ -1363,6 +1399,10 @@ mod tests {
             translation: vec!["ControlRight".into(), "AltRight".into()],
             esc_cancels: true,
         }
+    }
+
+    fn escape_latch() -> Arc<EscCancellationLatch> {
+        Arc::new(EscCancellationLatch::default())
     }
 
     fn candidate_started(token: u64) -> HotkeyEvent {
@@ -2041,7 +2081,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_pending_candidate_but_keeps_escape_semantics() {
+    fn escape_cancels_pending_candidate_before_session_claiming() {
         let mut adapter = WindowsEventAdapter::new(config());
         assert_eq!(
             adapter.process(raw(0xA3, true, 0)).events,
@@ -2050,7 +2090,7 @@ mod tests {
 
         assert_eq!(
             adapter.process(raw(0x1B, true, 20)).events,
-            vec![candidate_cancelled(1), HotkeyEvent::EscPressed]
+            vec![candidate_cancelled(1)]
         );
         assert_eq!(adapter.next_deadline(), None);
     }
@@ -2062,10 +2102,7 @@ mod tests {
         let mut adapter = WindowsEventAdapter::new(disabled);
         adapter.process(raw(0xA3, true, 0));
 
-        assert_eq!(
-            adapter.process(raw(0x1B, true, 20)).events,
-            vec![HotkeyEvent::EscPressed]
-        );
+        assert_eq!(adapter.process(raw(0x1B, true, 20)).events, vec![]);
         assert_eq!(adapter.next_deadline(), Some(MODIFIER_CONFIRMATION_MS));
         assert_eq!(
             adapter.flush_due(MODIFIER_CONFIRMATION_MS).events,
@@ -2216,6 +2253,126 @@ mod tests {
     }
 
     #[test]
+    fn owned_escape_swallows_down_repeat_and_paired_up_once() {
+        let latch = escape_latch();
+        latch.arm_cancellable(41);
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state = HookThreadState::new(
+            config(),
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            latch.clone(),
+        );
+
+        assert!(state.process(raw(0x1B, true, 0)));
+        assert_eq!(
+            event_rx.try_recv().unwrap(),
+            HotkeyEvent::EscPressed { session_id: 41 }
+        );
+        assert!(state.process(raw(0x1B, true, 10)));
+        assert!(event_rx.try_recv().is_err());
+        assert!(state.process(raw(0x1B, false, 20)));
+        assert!(event_rx.try_recv().is_err());
+
+        latch.disarm();
+        assert!(!state.process(raw(0x1B, true, 30)));
+        assert!(!state.process(raw(0x1B, false, 40)));
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn unowned_escape_sequence_never_claims_on_auto_repeat() {
+        let latch = escape_latch();
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state = HookThreadState::new(
+            config(),
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            latch.clone(),
+        );
+
+        assert!(!state.process(raw(0x1B, true, 0)));
+        latch.arm_cancellable(42);
+        assert!(!state.process(raw(0x1B, true, 10)));
+        assert!(!state.process(raw(0x1B, false, 20)));
+        assert!(event_rx.try_recv().is_err());
+
+        assert!(state.process(raw(0x1B, true, 30)));
+        assert_eq!(
+            event_rx.try_recv().unwrap(),
+            HotkeyEvent::EscPressed { session_id: 42 }
+        );
+    }
+
+    #[test]
+    fn disabled_or_committed_injection_escape_is_fully_passed_through() {
+        use crate::inject::{InjectionLatch, InjectionState};
+
+        let disabled = escape_latch();
+        disabled.arm_cancellable(1);
+        disabled.set_enabled(false);
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state = HookThreadState::new(
+            config(),
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            disabled,
+        );
+        assert!(!state.process(raw(0x1B, true, 0)));
+        assert!(!state.process(raw(0x1B, false, 10)));
+        assert!(event_rx.try_recv().is_err());
+
+        let gate = escape_latch();
+        let injection = Arc::new(InjectionLatch::new());
+        assert!(injection.commit());
+        let cancel_latch = injection.clone();
+        gate.arm_injecting(9, Arc::new(move || cancel_latch.cancel()));
+        state.escape_latch = gate;
+        assert!(!state.process(raw(0x1B, true, 20)));
+        assert!(!state.process(raw(0x1B, false, 30)));
+        assert_eq!(injection.state(), InjectionState::Committed);
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn escape_cancellation_wins_before_injection_commit() {
+        use crate::inject::{InjectionLatch, InjectionState};
+
+        let gate = escape_latch();
+        let injection = Arc::new(InjectionLatch::new());
+        let cancel_latch = injection.clone();
+        gate.arm_injecting(9, Arc::new(move || cancel_latch.cancel()));
+        let (_config_tx, config_rx) = watch::channel(config());
+        let (_paused_tx, paused_rx) = watch::channel(false);
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
+        let mut state =
+            HookThreadState::new(config(), config_rx, paused_rx, event_tx, health_tx, gate);
+
+        assert!(state.process(raw(0x1B, true, 0)));
+        assert_eq!(injection.state(), InjectionState::Cancelled);
+        assert_eq!(
+            event_rx.try_recv().unwrap(),
+            HotkeyEvent::EscPressed { session_id: 9 }
+        );
+    }
+
+    #[test]
     fn terminal_failure_atomically_blocks_all_followup_raw_events() {
         let terminal_config = HotkeyConfig {
             dictation: vec!["F13".into()],
@@ -2227,8 +2384,14 @@ mod tests {
         let (_paused_tx, paused_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (health_tx, health_rx) = watch::channel(WindowsHookHealth::Healthy);
-        let mut state =
-            HookThreadState::new(terminal_config, config_rx, paused_rx, event_tx, health_tx);
+        let mut state = HookThreadState::new(
+            terminal_config,
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            escape_latch(),
+        );
 
         assert!(!state.process(raw(0x7C, true, 0)));
         assert_eq!(
@@ -2256,7 +2419,14 @@ mod tests {
         let (paused_tx, paused_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
-        let mut state = HookThreadState::new(config(), config_rx, paused_rx, event_tx, health_tx);
+        let mut state = HookThreadState::new(
+            config(),
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            escape_latch(),
+        );
 
         assert!(!state.process(raw(0xA3, true, 0)));
         assert_eq!(event_rx.try_recv().unwrap(), candidate_started(1));
@@ -2272,7 +2442,14 @@ mod tests {
         let (_paused_tx, paused_rx) = watch::channel(false);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (health_tx, _health_rx) = watch::channel(WindowsHookHealth::Healthy);
-        let mut state = HookThreadState::new(config(), config_rx, paused_rx, event_tx, health_tx);
+        let mut state = HookThreadState::new(
+            config(),
+            config_rx,
+            paused_rx,
+            event_tx,
+            health_tx,
+            escape_latch(),
+        );
 
         assert!(!state.process(raw(0xA3, true, 0)));
         assert_eq!(event_rx.try_recv().unwrap(), candidate_started(1));

@@ -112,15 +112,23 @@ export function deriveTranslationChord(
 export function hotkeyChordsAreReachable(
   dictation: readonly string[],
   assistant: readonly string[],
+  translation: readonly string[],
 ): boolean {
   const normalizedDictation = normalizeHotkeyChord(dictation);
   const normalizedAssistant = normalizeHotkeyChord(assistant);
-  if (normalizedDictation.length === 0 || normalizedAssistant.length === 0) return false;
+  const normalizedTranslation = normalizeHotkeyChord(translation);
+  if (
+    normalizedDictation.length === 0 ||
+    normalizedAssistant.length === 0 ||
+    normalizedTranslation.length === 0
+  ) return false;
 
   const isSubset = (left: readonly string[], right: readonly string[]) =>
     left.every((key) => right.includes(key));
   return (
     !isSubset(normalizedDictation, normalizedAssistant) &&
-    !isSubset(normalizedAssistant, normalizedDictation)
+    !isSubset(normalizedAssistant, normalizedDictation) &&
+    !isSubset(normalizedTranslation, normalizedDictation) &&
+    !isSubset(normalizedTranslation, normalizedAssistant)
   );
 }

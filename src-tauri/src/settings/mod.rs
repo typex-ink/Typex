@@ -59,7 +59,7 @@ impl SettingsService {
         if !new.hotkeys.chords_are_reachable() {
             return Err(TypexError::new(
                 ErrorCode::InvalidRequest,
-                "听写与助手快捷键必须非空且互不包含",
+                "三组快捷键必须非空，且不能互相遮蔽",
             ));
         }
         if !new.dictation.vad.is_valid() {
@@ -98,7 +98,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 7);
+        assert_eq!(svc.get().schema_version, 8);
 
         svc.mutate(|s| s.general.autostart = false).unwrap();
         let svc2 = SettingsService::load(dir.clone());
@@ -112,7 +112,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 7);
+        assert_eq!(svc.get().schema_version, 8);
         assert!(dir.join("settings.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -145,7 +145,7 @@ mod tests {
 
         let svc = SettingsService::load(dir.clone());
         let s = svc.get();
-        assert_eq!(s.schema_version, 7);
+        assert_eq!(s.schema_version, 8);
         assert_eq!(
             s.profiles[0].capability,
             crate::types::ProviderCapability::Llm
@@ -176,13 +176,45 @@ mod tests {
         .unwrap();
 
         let settings = SettingsService::load(dir.clone()).get();
-        assert_eq!(settings.schema_version, 7);
+        assert_eq!(settings.schema_version, 8);
         assert_eq!(settings.hotkeys.dictation, ["ControlRight", "Digit1"]);
         assert_eq!(settings.hotkeys.assistant, ["AltRight", "KeyA"]);
         assert_eq!(
             settings.hotkeys.translation,
             ["ControlRight", "Digit1", "AltRight", "KeyA"]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_preserves_independent_v8_translation_chord() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-independent-hotkey-load-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"
+            {
+              "schema_version": 8,
+              "hotkeys": {
+                "dictation": ["ControlRight"],
+                "assistant": ["AltGr"],
+                "translation": ["F13", "ContextMenu"],
+                "hold_threshold_ms": 350
+              }
+            }
+            "#,
+        )
+        .unwrap();
+
+        let settings = SettingsService::load(dir.clone()).get();
+        assert_eq!(settings.schema_version, 8);
+        assert_eq!(settings.hotkeys.dictation, ["ControlRight"]);
+        assert_eq!(settings.hotkeys.assistant, ["AltRight"]);
+        assert_eq!(settings.hotkeys.translation, ["F13", "Menu"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -233,6 +265,25 @@ mod tests {
         let mut invalid = before.clone();
         invalid.general.autostart = !before.general.autostart;
         invalid.hotkeys.assistant = invalid.hotkeys.dictation.clone();
+
+        let error = service.update(invalid).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert_eq!(service.get(), before);
+        assert!(!dir.join("settings.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_rejects_translation_that_shadows_dictation() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-shadowing-translation-update-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let service = SettingsService::load(dir.clone());
+        let before = service.get();
+        let mut invalid = before.clone();
+        invalid.hotkeys.translation = invalid.hotkeys.dictation.clone();
 
         let error = service.update(invalid).unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidRequest);

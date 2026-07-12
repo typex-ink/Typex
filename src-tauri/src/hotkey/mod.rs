@@ -4,7 +4,7 @@
 //! 长按/短按与会话语义由 orchestrator 状态机处理，本层只负责：
 //! - 触发键识别（含右⌘+右⌥ 组合升级为翻译）
 //! - 组合键让路（触发键按住期间出现普通键 → Yield）
-//! - Esc 透传
+//! - Esc 会话认领与物理序列选择性吞键
 
 #[cfg(not(target_os = "windows"))]
 pub mod rdev_backend;
@@ -86,9 +86,10 @@ impl WindowsHookFailureLatch {
 }
 
 use crate::types::{
-    KeyId, SessionMode, canonical_key_id, derive_translation_chord, normalize_hotkey_chord,
-    supports_stale_release_recovery,
+    KeyId, SessionMode, canonical_key_id, normalize_hotkey_chord, supports_stale_release_recovery,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// 修饰键正常不会自动连发；同一触发键在这个窗口后再次 down，
 /// 视为上一轮 release 丢失，重置判定器以恢复下一次触发。
@@ -111,8 +112,205 @@ pub enum HotkeyEvent {
     TriggerUp { held_ms: u64 },
     /// 组合键让路：触发键按住期间出现普通键 → 静默取消
     Yielded,
-    /// Esc 按下（listen-only 不吞键；是否取消由 orchestrator 的实时设置决定）
-    EscPressed,
+    /// Esc 已同步认领指定会话；执行器仍须校验该 ID 是否新鲜。
+    EscPressed { session_id: u64 },
+}
+
+pub(crate) type InjectionCancel = Arc<dyn Fn() -> bool + Send + Sync>;
+
+enum EscCancellationState {
+    Idle,
+    Cancellable {
+        session_id: u64,
+    },
+    Injecting {
+        session_id: u64,
+        cancel_before_commit: InjectionCancel,
+    },
+    Claimed {
+        session_id: u64,
+    },
+}
+
+/// Thread-safe ownership gate used by platform hooks before consuming Escape.
+pub struct EscCancellationLatch {
+    enabled: AtomicBool,
+    state: Mutex<EscCancellationState>,
+}
+
+impl EscCancellationLatch {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled: AtomicBool::new(enabled),
+            state: Mutex::new(EscCancellationState::Idle),
+        }
+    }
+
+    pub(crate) fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn arm_cancellable(&self, session_id: u64) {
+        let mut state = self.state.lock().unwrap();
+        if matches!(
+            *state,
+            EscCancellationState::Claimed {
+                session_id: claimed
+            } if claimed == session_id
+        ) {
+            return;
+        }
+        *state = EscCancellationState::Cancellable { session_id };
+    }
+
+    #[cfg(test)]
+    pub(crate) fn arm_injecting(&self, session_id: u64, cancel_before_commit: InjectionCancel) {
+        let mut state = self.state.lock().unwrap();
+        if matches!(
+            *state,
+            EscCancellationState::Claimed {
+                session_id: claimed
+            } if claimed == session_id
+        ) {
+            let _ = cancel_before_commit();
+            return;
+        }
+        *state = EscCancellationState::Injecting {
+            session_id,
+            cancel_before_commit,
+        };
+    }
+
+    pub(crate) fn disarm(&self) {
+        *self.state.lock().unwrap() = EscCancellationState::Idle;
+    }
+
+    fn replace_if_unclaimed(
+        &self,
+        previous_session_id: Option<u64>,
+        next: EscCancellationState,
+    ) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if matches!(
+            *state,
+            EscCancellationState::Claimed { session_id }
+                if previous_session_id == Some(session_id)
+        ) {
+            return false;
+        }
+        *state = next;
+        true
+    }
+
+    pub(crate) fn transition_to_idle(&self, previous_session_id: Option<u64>) -> bool {
+        self.replace_if_unclaimed(previous_session_id, EscCancellationState::Idle)
+    }
+
+    pub(crate) fn transition_to_cancellable(
+        &self,
+        previous_session_id: Option<u64>,
+        session_id: u64,
+    ) -> bool {
+        self.replace_if_unclaimed(
+            previous_session_id,
+            EscCancellationState::Cancellable { session_id },
+        )
+    }
+
+    pub(crate) fn transition_to_injecting(
+        &self,
+        previous_session_id: Option<u64>,
+        session_id: u64,
+        cancel_before_commit: InjectionCancel,
+    ) -> bool {
+        self.replace_if_unclaimed(
+            previous_session_id,
+            EscCancellationState::Injecting {
+                session_id,
+                cancel_before_commit,
+            },
+        )
+    }
+
+    pub(crate) fn try_claim(&self) -> Option<u64> {
+        if !self.enabled.load(Ordering::Acquire) {
+            return None;
+        }
+        let mut state = self.state.lock().unwrap();
+        if !self.enabled.load(Ordering::Acquire) {
+            return None;
+        }
+        let session_id = match &*state {
+            EscCancellationState::Cancellable { session_id } => *session_id,
+            EscCancellationState::Injecting {
+                session_id,
+                cancel_before_commit,
+            } if cancel_before_commit() => *session_id,
+            EscCancellationState::Idle
+            | EscCancellationState::Injecting { .. }
+            | EscCancellationState::Claimed { .. } => return None,
+        };
+        *state = EscCancellationState::Claimed { session_id };
+        Some(session_id)
+    }
+}
+
+impl Default for EscCancellationLatch {
+    fn default() -> Self {
+        Self::new(true)
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct EscKeyDecision {
+    pub event: Option<HotkeyEvent>,
+    pub swallow: bool,
+}
+
+/// Tracks one physical Escape sequence so repeats never claim a later session
+/// and a consumed down always has a consumed paired up.
+#[derive(Debug, Default)]
+pub(crate) struct EscKeyFilter {
+    pressed: bool,
+    swallowing: bool,
+}
+
+impl EscKeyFilter {
+    pub(crate) fn on_key(
+        &mut self,
+        down: bool,
+        allow_claim: bool,
+        latch: &EscCancellationLatch,
+    ) -> EscKeyDecision {
+        if down {
+            if self.pressed {
+                return EscKeyDecision {
+                    event: None,
+                    swallow: self.swallowing,
+                };
+            }
+            self.pressed = true;
+            if allow_claim && let Some(session_id) = latch.try_claim() {
+                self.swallowing = true;
+                return EscKeyDecision {
+                    event: Some(HotkeyEvent::EscPressed { session_id }),
+                    swallow: true,
+                };
+            }
+            return EscKeyDecision::default();
+        }
+
+        if !self.pressed {
+            return EscKeyDecision::default();
+        }
+        self.pressed = false;
+        let swallow = std::mem::take(&mut self.swallowing);
+        EscKeyDecision {
+            event: None,
+            swallow,
+        }
+    }
 }
 
 /// 判定器配置：各功能的触发键组。
@@ -120,7 +318,7 @@ pub enum HotkeyEvent {
 pub struct HotkeyConfig {
     pub dictation: Vec<KeyId>,
     pub assistant: Vec<KeyId>,
-    /// 翻译 = 两触发键同按（默认 dictation + assistant 各一键）
+    /// 独立翻译 chord（默认仍为 dictation + assistant 各一键）
     pub translation: Vec<KeyId>,
     /// Escape participates in session cancellation instead of ordinary-key yielding.
     pub esc_cancels: bool,
@@ -141,13 +339,14 @@ impl HotkeyConfig {
     fn normalized(mut self) -> Self {
         self.dictation = normalize_hotkey_chord(&self.dictation);
         self.assistant = normalize_hotkey_chord(&self.assistant);
-        self.translation = derive_translation_chord(&self.dictation, &self.assistant);
+        self.translation = normalize_hotkey_chord(&self.translation);
         self
     }
 
     fn is_trigger_key(&self, key: &str) -> bool {
         self.dictation.iter().any(|candidate| candidate == key)
             || self.assistant.iter().any(|candidate| candidate == key)
+            || self.translation.iter().any(|candidate| candidate == key)
     }
 
     fn same_chords(&self, other: &Self) -> bool {
@@ -273,7 +472,7 @@ impl HotkeyDetector {
 
     fn on_down(&mut self, key: &str, t_ms: u64) -> Vec<HotkeyEvent> {
         if key == "Escape" {
-            return vec![HotkeyEvent::EscPressed];
+            return Vec::new();
         }
         if self.config.is_trigger_key(key) {
             if let Some(existing) = self.held.iter().find(|held| held.id == key) {
@@ -490,12 +689,11 @@ mod tests {
     }
 
     #[test]
-    fn esc_is_distinct_from_ordinary_key_yielding() {
+    fn esc_is_ignored_by_chord_detection_and_does_not_yield() {
         let mut d = det();
-        assert_eq!(d.on_key("Escape", true, 0), vec![HotkeyEvent::EscPressed]);
-        // 触发键按住期间仍保留 Esc 语义，由 orchestrator 按实时设置过滤。
+        assert_eq!(d.on_key("Escape", true, 0), vec![]);
         d.on_key("MetaRight", true, 100);
-        assert_eq!(d.on_key("Escape", true, 150), vec![HotkeyEvent::EscPressed]);
+        assert_eq!(d.on_key("Escape", true, 150), vec![]);
         assert_eq!(
             d.on_key("MetaRight", false, 500),
             vec![HotkeyEvent::TriggerUp { held_ms: 400 }]
@@ -507,13 +705,72 @@ mod tests {
         let mut config = cfg();
         config.esc_cancels = false;
         let mut d = HotkeyDetector::new(config);
-        assert_eq!(d.on_key("Escape", true, 0), vec![HotkeyEvent::EscPressed]);
+        assert_eq!(d.on_key("Escape", true, 0), vec![]);
         d.on_key("MetaRight", true, 100);
-        assert_eq!(d.on_key("Escape", true, 150), vec![HotkeyEvent::EscPressed]);
+        assert_eq!(d.on_key("Escape", true, 150), vec![]);
         assert_eq!(
             d.on_key("MetaRight", false, 500),
             vec![HotkeyEvent::TriggerUp { held_ms: 400 }]
         );
+    }
+
+    #[test]
+    fn escape_latch_rejects_idle_disabled_and_duplicate_claims() {
+        let latch = EscCancellationLatch::default();
+        assert_eq!(latch.try_claim(), None);
+
+        latch.arm_cancellable(3);
+        latch.set_enabled(false);
+        assert_eq!(latch.try_claim(), None);
+        latch.set_enabled(true);
+        assert_eq!(latch.try_claim(), Some(3));
+        assert_eq!(latch.try_claim(), None);
+
+        latch.arm_cancellable(3);
+        assert_eq!(latch.try_claim(), None);
+        latch.arm_cancellable(4);
+        assert_eq!(latch.try_claim(), Some(4));
+    }
+
+    #[test]
+    fn escape_filter_never_claims_a_repeat_from_an_unowned_sequence() {
+        let latch = EscCancellationLatch::default();
+        let mut filter = EscKeyFilter::default();
+
+        assert_eq!(filter.on_key(true, true, &latch), EscKeyDecision::default());
+        latch.arm_cancellable(5);
+        assert_eq!(filter.on_key(true, true, &latch), EscKeyDecision::default());
+        assert_eq!(
+            filter.on_key(false, true, &latch),
+            EscKeyDecision::default()
+        );
+        assert_eq!(
+            filter.on_key(true, true, &latch),
+            EscKeyDecision {
+                event: Some(HotkeyEvent::EscPressed { session_id: 5 }),
+                swallow: true,
+            }
+        );
+        assert_eq!(
+            filter.on_key(false, false, &latch),
+            EscKeyDecision {
+                event: None,
+                swallow: true,
+            }
+        );
+    }
+
+    #[test]
+    fn escape_claim_and_session_completion_have_one_winner() {
+        let latch = EscCancellationLatch::default();
+        latch.arm_cancellable(6);
+        assert_eq!(latch.try_claim(), Some(6));
+        assert!(!latch.transition_to_idle(Some(6)));
+
+        latch.disarm();
+        latch.arm_cancellable(7);
+        assert!(latch.transition_to_idle(Some(7)));
+        assert_eq!(latch.try_claim(), None);
     }
 
     #[test]
@@ -596,11 +853,16 @@ mod tests {
     }
 
     #[test]
-    fn custom_multi_key_chords_upgrade_when_the_derived_union_is_complete() {
+    fn custom_multi_key_chords_upgrade_when_translation_is_complete() {
         let mut d = HotkeyDetector::new(HotkeyConfig {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
-            translation: vec!["ignored-stale-value".into()],
+            translation: vec![
+                "ControlRight".into(),
+                "Digit1".into(),
+                "AltRight".into(),
+                "KeyA".into(),
+            ],
             esc_cancels: true,
         });
 
@@ -625,6 +887,29 @@ mod tests {
         assert_eq!(
             d.on_key("AltRight", false, 110),
             vec![HotkeyEvent::TriggerUp { held_ms: 100 }]
+        );
+    }
+
+    #[test]
+    fn independent_translation_chord_triggers_directly() {
+        let mut d = HotkeyDetector::new(HotkeyConfig {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["AltRight".into()],
+            translation: vec!["F13".into(), "Menu".into()],
+            esc_cancels: true,
+        });
+
+        assert_eq!(d.on_key("F13", true, 0), vec![]);
+        assert_eq!(
+            d.on_key("Menu", true, 25),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Translation
+            }]
+        );
+        assert_eq!(d.on_key("F13", false, 100), vec![]);
+        assert_eq!(
+            d.on_key("Menu", false, 225),
+            vec![HotkeyEvent::TriggerUp { held_ms: 200 }]
         );
     }
 

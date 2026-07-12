@@ -8,7 +8,7 @@
 ## 1. 安装与首启
 
 - [ ] 全新机器或清理平台配置目录后安装 → 首启弹出 onboarding；macOS 与 Windows 分别使用平台标准目录
-- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 平台权限（macOS：麦克风/辅助功能/输入监听；Windows：麦克风）状态正确 → 模型直填（STT + LLM）保存成功 → 练习框能收到听写文字 → 完成后主页自动打开并获得焦点，引导窗口随后关闭
+- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 平台权限（macOS：麦克风/辅助功能/输入监听；Windows：麦克风）状态正确 → 模型直填（STT + LLM）保存成功 → 听写/助手/翻译三个快捷键均可独立录制且练习框能收到听写文字 → 完成后主页自动打开并获得焦点，引导窗口随后关闭
 - [ ] 模拟主页打开失败：完成按钮解除提交状态、引导页保留且显示失败提示，可再次点击重试
 - [ ] Onboarding「跳过」路径：不配模型直接走完，主界面正常、听写时报「未配置」而非崩溃
 - [ ] 完成页「登录时自动启动」勾选生效（系统设置-登录项可见 Typex）
@@ -24,6 +24,7 @@
 - [ ] 15 分钟连续口述：不中断、不丢内容（长录音自动切片）
 - [ ] 中文输入法激活状态下注入无乱码
 - [ ] 长按（≥350ms）= 按住说话；短按 = toggle 开始/结束；Esc 与 HUD ✕ 取消不出字
+- [ ] 活动会话按 Esc 后目标应用收不到该次 down/repeat/up；空闲、关闭「Esc 取消」或注入已提交时目标应用收到完整 Esc down/up，退出动画期间的新 Esc 同样透传
 - [ ] 录音超 10 分钟 HUD 出现温和提示（不中断）
 - [ ] 处理中重按触发键 → HUD 轻晃 + 「正在处理上一条…」，会话不受影响
 
@@ -67,6 +68,7 @@
 - [ ] 慢网（系统级限速或代理延迟）：超时分类正确、HUD 显示耗时
 - [ ] 无麦克风权限：录音启动报权限错误 + 引导入口；诊断页 ✗ 显示
 - [ ] macOS 撤销辅助功能/输入监听权限：诊断页能看出 ✗；Windows 低级钩子安装失败时诊断页显示明确降级
+- [ ] macOS TextEdit 中验证：仅成功取消 Typex 会话的 Esc 被消费，空闲 Esc 与所有其他键盘/鼠标事件正常到达；event tap 超时恢复后快捷键继续可用
 - [ ] Windows 向管理员权限目标注入：不自动提权，结果进入剪贴板并显示 `InjectionBlocked` 提示
 
 ## 7. 界面与主题
@@ -110,7 +112,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 - [ ] Windows 10 22H2+ 与 Windows 11 x64 构建基线通过；Rust default / `--no-default-features` 均完成 check、clippy、test
 - [ ] debug/release 与安装器内 `typex.exe` 均为 Windows GUI subsystem；开发命令从已有终端启动时日志仍可见，直接启动与登录启动均不出现 CMD 窗口
 - [ ] 开机自启启用后 HKCU Run 值为带引号的当前 EXE 完整路径；从旧 debug 或旧安装路径启动时自动修复，关闭开关会删除残留条目，一致状态下不会重复改写
-- [ ] 右 Ctrl、右 Alt、两键乱序组合、349/351 ms、toggle、Esc、漏 release 恢复均符合规格
+- [ ] 右 Ctrl、右 Alt、独立翻译 chord、默认两键乱序升级、349/351 ms、toggle、Esc、漏 release 恢复均符合规格
 - [ ] 中文输入法与 AltGr 原始事件 fixture 不触发误录音、HUD 或提示音；Typex 自身 SendInput 不反向触发热键
 - [ ] WASAPI `f32/i16/u16` 转换与实际 USB 麦克风录音通过；设备拔出/切换可恢复且不崩溃
 - [ ] HUD fixture 通过 `WS_EX_NOACTIVATE` 与显示前后台 HWND 不变契约；100% DPI 本机位置正确，mixed-DPI/负坐标由坐标测试覆盖，额外实机条件可用时抽测

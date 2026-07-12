@@ -2,9 +2,9 @@
 
 use crate::app::{PausedState, commands, events};
 use crate::audio::AudioService;
-use crate::hotkey::HotkeyConfig;
 #[cfg(not(target_os = "windows"))]
 use crate::hotkey::rdev_backend;
+use crate::hotkey::{EscCancellationLatch, HotkeyConfig};
 #[cfg(target_os = "windows")]
 use crate::hotkey::{ManagedWindowsHotkey, WindowsHookFailureLatch, windows_backend};
 use crate::inject::InjectorChain;
@@ -330,20 +330,25 @@ pub fn run() {
 
             // hotkey 线程（配置热更新：settings watch → HotkeyConfig watch 桥接）
             let hotkey_cfg = HotkeyConfig::from_settings(&s);
+            let escape_latch = Arc::new(EscCancellationLatch::new(s.dictation.esc_cancels));
             let (cfg_tx, cfg_rx) = tokio::sync::watch::channel(hotkey_cfg.clone());
             {
                 let mut settings_rx = settings.subscribe();
+                let escape_latch = escape_latch.clone();
                 tauri::async_runtime::spawn(async move {
                     while settings_rx.changed().await.is_ok() {
-                        let _ = publish_hotkey_config_if_changed(&cfg_tx, &settings_rx.borrow());
+                        let settings = settings_rx.borrow_and_update();
+                        escape_latch.set_enabled(settings.dictation.esc_cancels);
+                        let _ = publish_hotkey_config_if_changed(&cfg_tx, &settings);
                     }
                 });
             }
             #[cfg(not(target_os = "windows"))]
-            let hotkey_rx = rdev_backend::spawn(hotkey_cfg, cfg_rx, paused_rx);
+            let hotkey_rx =
+                rdev_backend::spawn(hotkey_cfg, cfg_rx, paused_rx, escape_latch.clone());
             #[cfg(target_os = "windows")]
             let (hotkey_rx, hook_health_rx) =
-                match windows_backend::spawn(hotkey_cfg, cfg_rx, paused_rx) {
+                match windows_backend::spawn(hotkey_cfg, cfg_rx, paused_rx, escape_latch.clone()) {
                     Ok((receiver, handle)) => {
                         let runtime = ManagedWindowsHotkey::running(handle);
                         let health_rx = runtime.subscribe_health();
@@ -508,6 +513,7 @@ pub fn run() {
                 selection_read_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 selection: selection.clone(),
                 history: history.clone(),
+                escape_latch,
             });
             let (commander, cmd_rx) = crate::orchestrator::SessionCommander::channel();
             app.manage(commander.clone());

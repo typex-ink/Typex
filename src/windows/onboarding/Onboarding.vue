@@ -13,7 +13,6 @@ import Select from "@/components/Select.vue";
 import { commands, events, type HardwareTier, type LocalModelInfo, type PermissionStatus, type UiLanguage } from "@/ipc/bindings";
 import { formatBytes } from "@/shared/format";
 import {
-  deriveTranslationChord,
   hotkeyChordsAreReachable,
   normalizeHotkeyChord,
 } from "@/shared/hotkeys";
@@ -26,21 +25,21 @@ const { defaultHotkeys, keyLabel } = usePlatform();
 const step = ref(1);
 
 type HotkeySlot = "dictation" | "assistant" | "translation";
-type EditableHotkeySlot = Exclude<HotkeySlot, "translation">;
 function hotkeyText(slot: HotkeySlot): string {
   const keys = store.settings?.hotkeys?.[slot] ?? defaultHotkeys.value[slot];
   return keys.map((key) => keyLabel(key, t, te)).join(" + ");
 }
 
 const hotkeyValidationError = ref(false);
-function saveHotkey(slot: EditableHotkeySlot, value: string[]) {
+function saveHotkey(slot: HotkeySlot, value: string[]) {
   const settings = store.settings;
   if (!settings) return;
 
   const normalized = normalizeHotkeyChord(value);
   const dictation = slot === "dictation" ? normalized : settings.hotkeys.dictation;
   const assistant = slot === "assistant" ? normalized : settings.hotkeys.assistant;
-  if (!hotkeyChordsAreReachable(dictation, assistant)) {
+  const translation = slot === "translation" ? normalized : settings.hotkeys.translation;
+  if (!hotkeyChordsAreReachable(dictation, assistant, translation)) {
     hotkeyValidationError.value = true;
     return;
   }
@@ -48,7 +47,6 @@ function saveHotkey(slot: EditableHotkeySlot, value: string[]) {
   hotkeyValidationError.value = false;
   void store.mutate((draft) => {
     draft.hotkeys[slot] = normalized;
-    draft.hotkeys.translation = deriveTranslationChord(dictation, assistant);
   });
 }
 
@@ -59,6 +57,10 @@ const dictationHotkey = computed({
 const assistantHotkey = computed({
   get: () => store.settings?.hotkeys?.assistant ?? defaultHotkeys.value.assistant,
   set: (value: string[]) => saveHotkey("assistant", value),
+});
+const translationHotkey = computed({
+  get: () => store.settings?.hotkeys?.translation ?? defaultHotkeys.value.translation,
+  set: (value: string[]) => saveHotkey("translation", value),
 });
 // 第 1 步语言下拉：直接写 settings.general.language，全 UI 即时切换（syncLocale 订阅）
 const lang = computed<UiLanguage>({
@@ -429,7 +431,10 @@ onUnmounted(() => {
         <span>{{ t("modes.assistant") }}</span>
         <HotkeyRecorder v-model="assistantHotkey" />
       </div>
-      <div class="frow"><span>{{ t("modes.translation") }}</span><Kbd>{{ hotkeyText("translation") }}</Kbd></div>
+      <div class="frow">
+        <span>{{ t("modes.translation") }}</span>
+        <HotkeyRecorder v-model="translationHotkey" />
+      </div>
       <div class="practice">
         <p>
           <i18n-t keypath="onboarding.practice" scope="global">

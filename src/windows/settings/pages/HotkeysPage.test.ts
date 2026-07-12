@@ -26,13 +26,14 @@ vi.mock("@/ipc/bindings", () => ({
 function makeSettings(
   dictation: string[] = ["ControlRight"],
   assistant: string[] = ["AltRight"],
+  translation: string[] = [...new Set([...dictation, ...assistant])],
 ): Settings {
   return {
-    schema_version: 7,
+    schema_version: 8,
     hotkeys: {
       dictation,
       assistant,
-      translation: [...dictation, ...assistant],
+      translation,
       hold_threshold_ms: 350,
     },
   } as Settings;
@@ -64,14 +65,14 @@ describe("HotkeysPage chord validation", () => {
     recorders[0].vm.$emit("update:modelValue", ["AltRight"]);
     await nextTick();
     expect(commands.updateSettings).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("neither may contain the other");
+    expect(wrapper.text()).toContain("cannot contain each other");
 
     recorders[1].vm.$emit("update:modelValue", ["ControlRight", "KeyA"]);
     await nextTick();
     expect(commands.updateSettings).not.toHaveBeenCalled();
   });
 
-  it("saves shared non-subset chords and derives their ordered union", async () => {
+  it("saves one chord without recalculating independent translation", async () => {
     const wrapper = mountPage(
       makeSettings(
         ["ControlRight", "KeyA"],
@@ -86,7 +87,32 @@ describe("HotkeysPage chord validation", () => {
     expect(commands.updateSettings).toHaveBeenCalledOnce();
     const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
     expect(saved.hotkeys.dictation).toEqual(["ControlRight", "KeyC"]);
-    expect(saved.hotkeys.translation).toEqual(["ControlRight", "KeyC", "KeyB"]);
-    expect(wrapper.text()).not.toContain("neither may contain the other");
+    expect(saved.hotkeys.translation).toEqual(["ControlRight", "KeyA", "KeyB"]);
+    expect(wrapper.text()).not.toContain("cannot contain each other");
+  });
+
+  it("renders three recorders and persists an independent translation chord", async () => {
+    const wrapper = mountPage();
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+    expect(recorders).toHaveLength(3);
+
+    recorders[2].vm.$emit("update:modelValue", ["F13", "ContextMenu", "Menu"]);
+    await flushPromises();
+
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
+    expect(saved.hotkeys.dictation).toEqual(["ControlRight"]);
+    expect(saved.hotkeys.assistant).toEqual(["AltRight"]);
+    expect(saved.hotkeys.translation).toEqual(["F13", "Menu"]);
+  });
+
+  it("blocks a translation chord that would shadow dictation", async () => {
+    const wrapper = mountPage();
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+
+    recorders[2].vm.$emit("update:modelValue", ["ControlRight"]);
+    await nextTick();
+
+    expect(commands.updateSettings).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("translation cannot equal or be contained");
   });
 });

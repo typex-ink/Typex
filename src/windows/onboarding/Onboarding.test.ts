@@ -162,12 +162,12 @@ describe("Onboarding", () => {
     expect(commands.completeOnboarding).toHaveBeenCalledOnce();
   });
 
-  it("第 4 步可修改快捷键并同步保存翻译组合", async () => {
+  it("第 4 步显示三个录制器并独立保存完整组合", async () => {
     const wrapper = await mountOnboarding();
     await goToHotkeys(wrapper);
 
     const recorders = wrapper.findAllComponents(HotkeyRecorder);
-    expect(recorders).toHaveLength(2);
+    expect(recorders).toHaveLength(3);
     await recorders[0].get("button").trigger("click");
     keyboard("keydown", "ControlRight");
     keyboard("keydown", "Digit1");
@@ -177,9 +177,17 @@ describe("Onboarding", () => {
     const saved = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
     expect(saved?.hotkeys.dictation).toEqual(["ControlRight", "Digit1"]);
     expect(saved?.hotkeys.assistant).toEqual(["ShiftRight"]);
-    expect(saved?.hotkeys.translation).toEqual(["ControlRight", "Digit1", "ShiftRight"]);
-    expect(wrapper.text()).toContain("右 Ctrl + 1 + 右 Shift");
+    expect(saved?.hotkeys.translation).toEqual(["ControlRight", "ShiftRight"]);
     expect(wrapper.text()).toContain("按住 右 Ctrl + 1 说");
+
+    await recorders[2].get("button").trigger("click");
+    keyboard("keydown", "F13");
+    keyboard("keydown", "ContextMenu");
+    keyboard("keyup", "ContextMenu");
+    await flushPromises();
+
+    const translated = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(translated?.hotkeys.translation).toEqual(["F13", "Menu"]);
   });
 
   it("第 4 步拒绝与另一快捷键相同的组合", async () => {
@@ -193,7 +201,7 @@ describe("Onboarding", () => {
     await flushPromises();
 
     expect(commands.updateSettings).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("任一组合都不能包含另一组合");
+    expect(wrapper.text()).toContain("听写与助手不能相同或互相包含");
     expect(wrapper.text()).toContain("右 Ctrl");
   });
 });

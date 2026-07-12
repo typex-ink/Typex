@@ -160,3 +160,10 @@
 - **引导决策**：完成首次引导必须先保存 `onboarding_done` 与自启选择，再通过单一 IPC 创建/显示并聚焦主页，成功后关闭 onboarding。窗口切换失败时保持引导页可见、解除提交锁并允许重试，避免保存后静默消失或用户停留在无窗口状态。
 - **Windows 自启决策**：HKCU Run 的 Typex 值始终写成 `"当前 EXE 完整路径"`。启动与设置变更同时比较配置、系统启用状态、条目是否存在及命令是否精确匹配；启用时修复旧 debug/安装目录，关闭时删除残留，完全一致时不写。debug/release EXE 均为 GUI subsystem；debug 只附着已有父控制台，不创建控制台。
 - **Windows 安装决策**：继续使用免 UAC 的 NSIS `currentUser`。全新安装在没有历史卸载/产品登记、且未通过 `/D=` 改写 Tauri 原默认目录时，默认改为 `%LOCALAPPDATA%\Programs\Typex`；升级与自定义安装原位进行，不自动搬迁已有文件。installer hook 对 GUI、被动与静默安装使用同一判断，不识别或硬编码任何开发机测试路径。
+
+### ADR-27 · 三组快捷键独立持久化，Esc 仅消费已认领会话的物理序列（2026-07-13）
+
+- **背景**：翻译 chord 由听写与助手自动派生，限制了用户为三个功能分别选择完整组合；全局 Esc 只监听不拦截时，取消 Typex 的同时还会传给前台应用，可能关闭对话框或触发其自身取消。
+- **快捷键决策**：schema v8 保持 `hotkeys` 字段形状不变，但三组 chord 从此分别归一化和持久化。v7 及更旧配置升级时按旧规则重建翻译 chord，保持既有行为。三组必须非空；听写与助手不得相同或互含，翻译不得等于或成为听写/助手的子集；听写/助手成为翻译的严格子集合法，以保留默认三角方案和录音中升级语义。
+- **Esc 决策**：orchestrator 的线程安全门闩按当前 `session_id` 发布取消权；Injecting 与现有 `InjectionLatch` 共用提交竞争。只有首次 keydown 成功认领时才发送一次带会话 ID 的事件，并由 Windows 低级钩子或 macOS grab event tap 吞掉这一物理序列的 down/repeat/up；认领失败以及其他键鼠事件完整放行。Linux 暂维持 listen-only。
+- **平台义务**：Windows 保留 AltGr、75 ms 候选流、右 Alt keyup 与 `LLKHF_INJECTED` 规则；macOS vendored rdev 的 grab event tap 必须像 listen tap 一样在系统超时或用户输入禁用后自动恢复。

@@ -271,8 +271,7 @@
     },
     "hotkeys": {
       "desc": "Dictation and assistant keys are customizable; translation = both keys held together (follows automatically).",
-      "translation_hint": "Hold the dictation key + assistant key together",
-      "unreachable_chords": "Choose two non-empty shortcuts; neither may contain the other."
+      "unreachable_chords": "Choose three non-empty shortcuts. Dictation and assistant cannot contain each other, and translation cannot equal or be contained by either one."
     },
     "history": {
       "desc": "History is stored on this device only and contains no audio.",

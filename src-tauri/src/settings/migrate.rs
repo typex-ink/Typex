@@ -22,7 +22,7 @@ pub fn migrate(mut value: Value) -> Value {
     } else {
         sanitize_v7_vad(&mut value);
     }
-    normalize_hotkey_ids(&mut value);
+    normalize_hotkey_ids(&mut value, version < 8);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
         obj.insert(
@@ -91,12 +91,12 @@ fn valid_vad_value(value: &Value) -> bool {
     mode_valid && energy_valid && neural_valid
 }
 
-fn normalize_hotkey_ids(value: &mut Value) {
+fn normalize_hotkey_ids(value: &mut Value, derive_legacy_translation: bool) {
     let Some(hotkeys) = value.get_mut("hotkeys").and_then(Value::as_object_mut) else {
         return;
     };
 
-    for field in ["dictation", "assistant"] {
+    for field in ["dictation", "assistant", "translation"] {
         let Some(keys) = hotkeys.get(field).and_then(Value::as_array) else {
             continue;
         };
@@ -123,15 +123,17 @@ fn normalize_hotkey_ids(value: &mut Value) {
                 .collect(),
         )
     };
-    let (Some(dictation), Some(assistant)) = (read_chord("dictation"), read_chord("assistant"))
-    else {
-        return;
-    };
-    let translation = derive_translation_chord(&dictation, &assistant);
-    hotkeys.insert(
-        "translation".into(),
-        Value::Array(translation.into_iter().map(Value::String).collect()),
-    );
+    if derive_legacy_translation {
+        let (Some(dictation), Some(assistant)) = (read_chord("dictation"), read_chord("assistant"))
+        else {
+            return;
+        };
+        let translation = derive_translation_chord(&dictation, &assistant);
+        hotkeys.insert(
+            "translation".into(),
+            Value::Array(translation.into_iter().map(Value::String).collect()),
+        );
+    }
 }
 
 fn migrate_v1_to_v2(value: &mut Value) {
@@ -199,7 +201,7 @@ mod tests {
         });
 
         let migrated = migrate(value);
-        assert_eq!(migrated["schema_version"], 7);
+        assert_eq!(migrated["schema_version"], 8);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
         assert!(migrated["profiles"][0].get("slots").is_none());
@@ -258,7 +260,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 7);
+        assert_eq!(migrated["schema_version"], 8);
         assert_eq!(migrated["dictation"]["microphone"], "USB Microphone");
     }
 
@@ -275,7 +277,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 7);
+        assert_eq!(migrated["schema_version"], 8);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["ControlRight", "Digit1"])
@@ -291,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn current_schema_still_normalizes_externally_edited_aliases() {
+    fn v7_migration_derives_translation_with_the_legacy_rule() {
         let value = serde_json::json!({
             "schema_version": 7,
             "hotkeys": {
@@ -317,13 +319,41 @@ mod tests {
     }
 
     #[test]
+    fn current_schema_normalizes_and_preserves_independent_translation() {
+        let value = serde_json::json!({
+            "schema_version": 8,
+            "hotkeys": {
+                "dictation": ["Return"],
+                "assistant": ["ContextMenu"],
+                "translation": ["AltGr", "Num1", "Digit1"]
+            }
+        });
+
+        let migrated = migrate(value);
+
+        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(
+            migrated["hotkeys"]["dictation"],
+            serde_json::json!(["Enter"])
+        );
+        assert_eq!(
+            migrated["hotkeys"]["assistant"],
+            serde_json::json!(["Menu"])
+        );
+        assert_eq!(
+            migrated["hotkeys"]["translation"],
+            serde_json::json!(["AltRight", "Digit1"])
+        );
+    }
+
+    #[test]
     fn v6_migrates_to_neural_vad_defaults() {
         let migrated = migrate(serde_json::json!({
             "schema_version": 6,
             "dictation": { "polish_enabled": false }
         }));
 
-        assert_eq!(migrated["schema_version"], 7);
+        assert_eq!(migrated["schema_version"], 8);
         assert_eq!(migrated["dictation"]["polish_enabled"], false);
         assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
         assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
