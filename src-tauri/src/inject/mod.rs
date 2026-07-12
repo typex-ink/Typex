@@ -7,6 +7,69 @@ pub mod windows;
 use crate::error::Result;
 use crate::platform::focus::FocusTarget;
 use crate::settings::schema::InjectMethod;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+const INJECTION_PENDING: u8 = 0;
+const INJECTION_CANCELLED: u8 = 1;
+const INJECTION_COMMITTED: u8 = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectionState {
+    Pending,
+    Cancelled,
+    Committed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectionOutcome {
+    Injected,
+    Cancelled,
+}
+
+/// Session injection commit latch. Only one of cancel/commit can win from Pending.
+pub struct InjectionLatch(AtomicU8);
+
+impl InjectionLatch {
+    pub fn new() -> Self {
+        Self(AtomicU8::new(INJECTION_PENDING))
+    }
+
+    pub fn cancel(&self) -> bool {
+        self.0
+            .compare_exchange(
+                INJECTION_PENDING,
+                INJECTION_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub fn commit(&self) -> bool {
+        self.0
+            .compare_exchange(
+                INJECTION_PENDING,
+                INJECTION_COMMITTED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub fn state(&self) -> InjectionState {
+        match self.0.load(Ordering::Acquire) {
+            INJECTION_CANCELLED => InjectionState::Cancelled,
+            INJECTION_COMMITTED => InjectionState::Committed,
+            _ => InjectionState::Pending,
+        }
+    }
+}
+
+impl Default for InjectionLatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub fn copy_text_to_clipboard(text: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
@@ -42,6 +105,26 @@ pub trait Injector: Send + Sync {
             ));
         }
         self.inject(text)
+    }
+    /// Session-aware entry. Backends with preparation work should override this and commit at the
+    /// last boundary before their first OS input call.
+    fn inject_targeted_cancellable(
+        &self,
+        text: &str,
+        target: Option<&FocusTarget>,
+        latch: &InjectionLatch,
+    ) -> Result<InjectionOutcome> {
+        if target.is_some_and(|target| !target.is_current()) {
+            return Err(crate::error::TypexError::new(
+                crate::error::ErrorCode::NoFocus,
+                "foreground target changed before injection",
+            ));
+        }
+        if !latch.commit() {
+            return Ok(InjectionOutcome::Cancelled);
+        }
+        self.inject_targeted(text, target)
+            .map(|()| InjectionOutcome::Injected)
     }
     fn name(&self) -> &'static str;
 }
@@ -90,6 +173,55 @@ impl InjectorChain {
             InjectMethod::TypeDirect => Some("type_direct"),
         };
         self.inject_ordered(text, preferred, target)
+    }
+
+    pub fn inject_with_target_cancellable(
+        &self,
+        text: &str,
+        method: InjectMethod,
+        target: Option<&FocusTarget>,
+        latch: &InjectionLatch,
+    ) -> Result<InjectionOutcome> {
+        let preferred = match method {
+            InjectMethod::Auto => None,
+            InjectMethod::Paste => Some("paste"),
+            InjectMethod::TypeDirect => Some("type_direct"),
+        };
+        let mut last_err = None;
+        let ordered = self
+            .backends
+            .iter()
+            .filter(|backend| Some(backend.name()) == preferred)
+            .chain(
+                self.backends
+                    .iter()
+                    .filter(|backend| Some(backend.name()) != preferred),
+            );
+        for backend in ordered {
+            match backend.inject_targeted_cancellable(text, target, latch) {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) => {
+                    if latch.state() == InjectionState::Committed
+                        || matches!(
+                            error.code,
+                            crate::error::ErrorCode::NoFocus
+                                | crate::error::ErrorCode::InjectionBlocked
+                        )
+                    {
+                        return Err(error);
+                    }
+                    tracing::warn!(
+                        "注入后端 {} 失败: {}，尝试下一个",
+                        backend.name(),
+                        error.message
+                    );
+                    last_err = Some(error);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| {
+            crate::error::TypexError::new(crate::error::ErrorCode::Internal, "无可用注入后端")
+        }))
     }
 
     fn inject_ordered(
@@ -329,5 +461,53 @@ mod tests {
         chain.inject_with("hi", InjectMethod::Auto).unwrap();
         assert_eq!(paste.load(Ordering::SeqCst), 1);
         assert_eq!(typed.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn cancellation_wins_pending_latch_and_skips_every_backend() {
+        let first = Arc::new(AtomicU32::new(0));
+        let second = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![
+            Box::new(MockInjector {
+                fail: false,
+                calls: first.clone(),
+            }),
+            Box::new(MockInjector {
+                fail: false,
+                calls: second.clone(),
+            }),
+        ]);
+        let latch = InjectionLatch::new();
+
+        assert!(latch.cancel());
+        assert_eq!(
+            chain
+                .inject_with_target_cancellable("hi", InjectMethod::Auto, None, &latch)
+                .unwrap(),
+            InjectionOutcome::Cancelled
+        );
+        assert_eq!(first.load(Ordering::SeqCst), 0);
+        assert_eq!(second.load(Ordering::SeqCst), 0);
+        assert_eq!(latch.state(), InjectionState::Cancelled);
+    }
+
+    #[test]
+    fn commit_wins_latch_and_later_cancel_is_ignored() {
+        let calls = Arc::new(AtomicU32::new(0));
+        let chain = InjectorChain::new(vec![Box::new(MockInjector {
+            fail: false,
+            calls: calls.clone(),
+        })]);
+        let latch = InjectionLatch::new();
+
+        assert_eq!(
+            chain
+                .inject_with_target_cancellable("hi", InjectMethod::Auto, None, &latch)
+                .unwrap(),
+            InjectionOutcome::Injected
+        );
+        assert!(!latch.cancel());
+        assert_eq!(latch.state(), InjectionState::Committed);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }

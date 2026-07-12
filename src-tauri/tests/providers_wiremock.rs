@@ -476,6 +476,7 @@ async fn assistant_uses_polished_instruction_when_enabled() {
         registry,
         Box::new(|_| {}),
         Box::new(|_| Box::pin(async {})),
+        Box::new(|| {}),
     );
 
     let out = assistant
@@ -488,7 +489,7 @@ async fn assistant_uses_polished_instruction_when_enabled() {
         .await
         .unwrap();
 
-    assert_eq!(out, AssistantOutcome::HandedOff);
+    assert_eq!(out, AssistantOutcome::HandedOff(Some("answer".into())));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 

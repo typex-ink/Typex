@@ -111,7 +111,7 @@ pub enum HotkeyEvent {
     TriggerUp { held_ms: u64 },
     /// 组合键让路：触发键按住期间出现普通键 → 静默取消
     Yielded,
-    /// Esc 按下（listen-only 不吞键；仅 Recording 态有效由状态机决定）
+    /// Esc 按下（listen-only 不吞键；是否取消由 orchestrator 的实时设置决定）
     EscPressed,
 }
 
@@ -122,14 +122,18 @@ pub struct HotkeyConfig {
     pub assistant: Vec<KeyId>,
     /// 翻译 = 两触发键同按（默认 dictation + assistant 各一键）
     pub translation: Vec<KeyId>,
+    /// Escape participates in session cancellation instead of ordinary-key yielding.
+    pub esc_cancels: bool,
 }
 
 impl HotkeyConfig {
-    pub fn from_settings(h: &crate::settings::schema::HotkeySettings) -> Self {
+    pub fn from_settings(settings: &crate::settings::schema::Settings) -> Self {
+        let h = &settings.hotkeys;
         Self {
             dictation: h.dictation.clone(),
             assistant: h.assistant.clone(),
             translation: h.translation.clone(),
+            esc_cancels: settings.dictation.esc_cancels,
         }
         .normalized()
     }
@@ -144,6 +148,12 @@ impl HotkeyConfig {
     fn is_trigger_key(&self, key: &str) -> bool {
         self.dictation.iter().any(|candidate| candidate == key)
             || self.assistant.iter().any(|candidate| candidate == key)
+    }
+
+    fn same_chords(&self, other: &Self) -> bool {
+        self.dictation == other.dictation
+            && self.assistant == other.assistant
+            && self.translation == other.translation
     }
 }
 
@@ -180,6 +190,10 @@ impl HotkeyDetector {
     pub fn set_config(&mut self, config: HotkeyConfig, t_ms: u64) -> Vec<HotkeyEvent> {
         let config = config.normalized();
         if self.config == config {
+            return Vec::new();
+        }
+        if self.config.same_chords(&config) {
+            self.config = config;
             return Vec::new();
         }
         let events = if self.current_mode.is_some() && !self.yielded {
@@ -258,7 +272,7 @@ impl HotkeyDetector {
     }
 
     fn on_down(&mut self, key: &str, t_ms: u64) -> Vec<HotkeyEvent> {
-        if key == "Escape" && self.held.is_empty() {
+        if key == "Escape" {
             return vec![HotkeyEvent::EscPressed];
         }
         if self.config.is_trigger_key(key) {
@@ -342,6 +356,7 @@ mod tests {
             dictation: vec!["MetaRight".into()],
             assistant: vec!["AltRight".into()],
             translation: vec!["MetaRight".into(), "AltRight".into()],
+            esc_cancels: true,
         }
     }
 
@@ -456,6 +471,7 @@ mod tests {
             dictation: vec!["ControlRight".into()],
             assistant: vec!["AltRight".into()],
             translation: vec!["ControlRight".into(), "AltRight".into()],
+            esc_cancels: true,
         });
         // ControlLeft down：无触发键按住 → 无事件
         assert_eq!(d.on_key("ControlLeft", true, 0), vec![]);
@@ -474,12 +490,30 @@ mod tests {
     }
 
     #[test]
-    fn esc_passthrough_only_when_no_trigger_held() {
+    fn esc_is_distinct_from_ordinary_key_yielding() {
         let mut d = det();
         assert_eq!(d.on_key("Escape", true, 0), vec![HotkeyEvent::EscPressed]);
-        // 触发键按住期间 Esc 是普通键 → 让路
+        // 触发键按住期间仍保留 Esc 语义，由 orchestrator 按实时设置过滤。
         d.on_key("MetaRight", true, 100);
-        assert_eq!(d.on_key("Escape", true, 150), vec![HotkeyEvent::Yielded]);
+        assert_eq!(d.on_key("Escape", true, 150), vec![HotkeyEvent::EscPressed]);
+        assert_eq!(
+            d.on_key("MetaRight", false, 500),
+            vec![HotkeyEvent::TriggerUp { held_ms: 400 }]
+        );
+    }
+
+    #[test]
+    fn esc_setting_does_not_change_detector_semantics() {
+        let mut config = cfg();
+        config.esc_cancels = false;
+        let mut d = HotkeyDetector::new(config);
+        assert_eq!(d.on_key("Escape", true, 0), vec![HotkeyEvent::EscPressed]);
+        d.on_key("MetaRight", true, 100);
+        assert_eq!(d.on_key("Escape", true, 150), vec![HotkeyEvent::EscPressed]);
+        assert_eq!(
+            d.on_key("MetaRight", false, 500),
+            vec![HotkeyEvent::TriggerUp { held_ms: 400 }]
+        );
     }
 
     #[test]
@@ -541,6 +575,7 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
 
         assert_eq!(d.on_key("ControlRight", true, 0), vec![]);
@@ -566,6 +601,7 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: vec!["ignored-stale-value".into()],
+            esc_cancels: true,
         });
 
         assert_eq!(d.on_key("ControlRight", true, 0), vec![]);
@@ -598,6 +634,7 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
 
         assert_eq!(d.on_key("ControlRight", true, 0), vec![]);
@@ -621,6 +658,7 @@ mod tests {
             dictation: vec!["KeyA".into()],
             assistant: vec!["F13".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
 
         assert_eq!(
@@ -652,6 +690,7 @@ mod tests {
                     dictation: vec!["F13".into()],
                     assistant: vec!["F14".into()],
                     translation: Vec::new(),
+                    esc_cancels: true,
                 },
                 449,
             ),
@@ -671,6 +710,20 @@ mod tests {
         );
 
         assert_eq!(d.set_config(cfg(), 200), vec![]);
+        assert_eq!(
+            d.on_key("MetaRight", false, 449),
+            vec![HotkeyEvent::TriggerUp { held_ms: 349 }]
+        );
+    }
+
+    #[test]
+    fn esc_setting_update_preserves_active_gesture() {
+        let mut d = det();
+        d.on_key("MetaRight", true, 100);
+        let mut replacement = cfg();
+        replacement.esc_cancels = false;
+
+        assert!(d.set_config(replacement, 200).is_empty());
         assert_eq!(
             d.on_key("MetaRight", false, 449),
             vec![HotkeyEvent::TriggerUp { held_ms: 349 }]
@@ -702,11 +755,13 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         let replacement = HotkeyConfig {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
 
         let mut partial = HotkeyDetector::new(old.clone());

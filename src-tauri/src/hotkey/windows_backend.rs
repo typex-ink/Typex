@@ -678,6 +678,11 @@ impl WindowsEventAdapter {
         if self.config == config {
             return HookDecision::default();
         }
+        if self.config.same_chords(&config) {
+            let _ = self.detector.set_config(config.clone(), t_ms);
+            self.config = config;
+            return HookDecision::default();
+        }
         if self.right_alt == RightAltDisposition::TypexGesture {
             self.swallow_next_right_alt_up = true;
         }
@@ -798,7 +803,7 @@ impl WindowsEventAdapter {
         if self.pending_altgr.is_some() {
             if (key == "AltRight" && !raw.is_down()) || self.config.is_trigger_key(&key) {
                 decision.extend(self.activate_pending_altgr());
-            } else if raw.is_down() {
+            } else if raw.is_down() && (key != "Escape" || self.config.esc_cancels) {
                 self.pending_altgr = None;
                 self.right_alt = RightAltDisposition::AltGrBypass;
                 if let Some(token) = self.prestarted_altgr_candidate.take() {
@@ -860,7 +865,22 @@ impl WindowsEventAdapter {
         };
 
         if self.pending_modifier.is_some() {
-            if events.iter().any(|event| {
+            if self.config.esc_cancels
+                && events
+                    .iter()
+                    .any(|event| matches!(event, HotkeyEvent::EscPressed))
+            {
+                let pending = self.pending_modifier.take().expect("checked above");
+                events.insert(
+                    0,
+                    HotkeyEvent::CaptureCandidateCancelled {
+                        token: pending.token,
+                    },
+                );
+                if self.right_alt == RightAltDisposition::ChordCandidate {
+                    self.right_alt = RightAltDisposition::Yielded;
+                }
+            } else if events.iter().any(|event| {
                 matches!(
                     event,
                     HotkeyEvent::ModeUpgraded { .. } | HotkeyEvent::TriggerUp { .. }
@@ -1341,6 +1361,7 @@ mod tests {
             dictation: vec!["ControlRight".into()],
             assistant: vec!["AltRight".into()],
             translation: vec!["ControlRight".into(), "AltRight".into()],
+            esc_cancels: true,
         }
     }
 
@@ -1466,6 +1487,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["Menu".into()],
             translation: vec!["F13".into(), "Menu".into()],
+            esc_cancels: true,
         });
         assert_eq!(
             adapter.process(raw(0x7C, true, 0)).events,
@@ -1497,6 +1519,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         assert_eq!(
             adapter.set_config(replacement, 449).events,
@@ -1514,6 +1537,7 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Digit1".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
         assert_eq!(adapter.process(raw(0xA3, true, 0)), HookDecision::default());
         assert_eq!(
@@ -1527,6 +1551,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         assert_eq!(
             adapter.set_config(replacement, 361).events,
@@ -1554,6 +1579,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         assert_eq!(
             adapter.set_config(replacement, 140).events,
@@ -1573,6 +1599,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         assert_eq!(
             adapter.set_config(replacement, 120).events,
@@ -1622,6 +1649,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         assert_eq!(
             adapter.set_config(replacement, 100).events,
@@ -1643,12 +1671,14 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
 
         let mut partial = WindowsEventAdapter::new(HotkeyConfig {
             dictation: vec!["F13".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
         partial.process(raw(0xA5, true, 0));
         assert_eq!(
@@ -1695,6 +1725,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["AltRight".into(), "KeyA".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         });
 
         assert_eq!(adapter.process(raw(0xA5, true, 0)), HookDecision::default());
@@ -1888,6 +1919,7 @@ mod tests {
             dictation: vec!["ControlLeft".into()],
             assistant: vec!["AltRight".into()],
             translation: vec!["ControlLeft".into(), "AltRight".into()],
+            esc_cancels: true,
         });
         assert_eq!(
             adapter.process(raw(0xA2, true, 100)),
@@ -1941,6 +1973,7 @@ mod tests {
             dictation: vec!["ControlRight".into()],
             assistant: vec!["F13".into()],
             translation: vec!["ControlRight".into(), "F13".into()],
+            esc_cancels: true,
         };
         let mut adapter = WindowsEventAdapter::new(config);
         assert_eq!(adapter.process(raw(0xA5, true, 0)), HookDecision::default());
@@ -2005,6 +2038,50 @@ mod tests {
             adapter.process(raw(0xA3, false, 50)),
             HookDecision::default()
         );
+    }
+
+    #[test]
+    fn escape_cancels_pending_candidate_but_keeps_escape_semantics() {
+        let mut adapter = WindowsEventAdapter::new(config());
+        assert_eq!(
+            adapter.process(raw(0xA3, true, 0)).events,
+            vec![candidate_started(1)]
+        );
+
+        assert_eq!(
+            adapter.process(raw(0x1B, true, 20)).events,
+            vec![candidate_cancelled(1), HotkeyEvent::EscPressed]
+        );
+        assert_eq!(adapter.next_deadline(), None);
+    }
+
+    #[test]
+    fn disabled_escape_keeps_pending_candidate_alive() {
+        let mut disabled = config();
+        disabled.esc_cancels = false;
+        let mut adapter = WindowsEventAdapter::new(disabled);
+        adapter.process(raw(0xA3, true, 0));
+
+        assert_eq!(
+            adapter.process(raw(0x1B, true, 20)).events,
+            vec![HotkeyEvent::EscPressed]
+        );
+        assert_eq!(adapter.next_deadline(), Some(MODIFIER_CONFIRMATION_MS));
+        assert_eq!(
+            adapter.flush_due(MODIFIER_CONFIRMATION_MS).events,
+            vec![candidate_promoted(1, SessionMode::Dictation)]
+        );
+    }
+
+    #[test]
+    fn escape_setting_update_does_not_cancel_pending_candidate() {
+        let mut adapter = WindowsEventAdapter::new(config());
+        adapter.process(raw(0xA3, true, 0));
+        let mut disabled = config();
+        disabled.esc_cancels = false;
+
+        assert_eq!(adapter.set_config(disabled, 10), HookDecision::default());
+        assert_eq!(adapter.next_deadline(), Some(MODIFIER_CONFIRMATION_MS));
     }
 
     #[test]
@@ -2144,6 +2221,7 @@ mod tests {
             dictation: vec!["F13".into()],
             assistant: vec!["F14".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         let (_config_tx, config_rx) = watch::channel(terminal_config.clone());
         let (_paused_tx, paused_rx) = watch::channel(false);

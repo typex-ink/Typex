@@ -164,7 +164,7 @@ pub struct DictationSettings {
     pub language: String,
     /// 固定麦克风稳定设备 ID；空 = 系统默认。v4 旧名称由 audio 运行时唯一匹配迁移。
     pub microphone: String,
-    /// Esc 取消录音（05 §3.3 可关）
+    /// Esc 取消当前尚未提交的流程（05 §3.3 可关）
     pub esc_cancels: bool,
     /// 录音开始时快照；失败重试与长录音切片沿用同一份配置。
     pub vad: VadSettings,

@@ -166,7 +166,8 @@ impl HistoryService {
     pub fn stats(&self) -> Result<HistoryStats> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT COALESCE(SUM(duration_ms),0), COALESCE(SUM(char_count),0), COUNT(*) FROM history",
+            "SELECT COALESCE(SUM(duration_ms),0), COALESCE(SUM(char_count),0), COUNT(*)
+             FROM history WHERE mode <> 'assistant'",
             [],
             |row| {
                 Ok(HistoryStats {
@@ -265,10 +266,40 @@ mod tests {
         .unwrap();
         h.insert(2, SessionMode::Dictation, "b", "五字五字五", "x", 30_000)
             .unwrap();
+        h.insert(
+            3,
+            SessionMode::Assistant,
+            "解释这个问题",
+            "这是一段很长但不应计入口述统计的助手回答",
+            "x",
+            120_000,
+        )
+        .unwrap();
         let s = h.stats().unwrap();
         assert_eq!(s.total_duration_ms, 90_000.0);
         assert_eq!(s.total_chars, 15.0);
         assert_eq!(s.session_count, 2.0);
+    }
+
+    #[test]
+    fn assistant_roundtrip_keeps_instruction_and_answer() {
+        let h = svc();
+        h.insert(
+            1,
+            SessionMode::Assistant,
+            "为什么会超时",
+            "因为上游没有在期限内响应。",
+            "VS Code",
+            2_400,
+        )
+        .unwrap();
+
+        let items = h.query("超时", 0, 10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].mode, SessionMode::Assistant);
+        assert_eq!(items[0].transcript, "为什么会超时");
+        assert_eq!(items[0].result, "因为上游没有在期限内响应。");
+        assert_eq!(items[0].duration_ms, 2_400);
     }
 
     #[test]

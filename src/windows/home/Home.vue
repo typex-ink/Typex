@@ -316,8 +316,8 @@ onMounted(async () => {
           </div>
           <div v-if="expanded === item.id" class="hexp">
             <div class="cols">
-              <div><small>{{ t("home.transcript") }}</small>{{ item.transcript }}</div>
-              <div><small>{{ item.mode === "translation" ? t("home.result_translated") : t("home.result_polished") }}</small>{{ item.result }}</div>
+              <div><small>{{ item.mode === "assistant" ? t("home.voice_instruction") : t("home.transcript") }}</small>{{ item.transcript }}</div>
+              <div><small>{{ item.mode === "assistant" ? t("home.assistant_result") : item.mode === "translation" ? t("home.result_translated") : t("home.result_polished") }}</small>{{ item.result }}</div>
             </div>
             <div class="hexp-actions">
               <Button size="sm" @click="copyItem(item)">{{ t("actions.copy") }}</Button>

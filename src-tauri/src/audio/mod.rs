@@ -13,7 +13,7 @@ use std::time::Instant;
 use tokio::sync::{broadcast, mpsc};
 
 /// 一次录音的产物：16 kHz mono WAV + 时长。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Recording {
     pub wav_16k_mono: Vec<u8>,
     pub duration_ms: u64,
@@ -188,6 +188,26 @@ impl AudioService {
             failure_tx,
             ready_tx,
             opener: Arc::new(recorder::ActiveRecording::start),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_delayed_recording(recording: Recording, delay: std::time::Duration) -> Self {
+        let (failure_tx, _) = broadcast::channel(8);
+        let (ready_tx, _) = broadcast::channel(8);
+        Self {
+            capture: Arc::new(CaptureShared {
+                state: Mutex::new(CaptureState::Idle),
+                changed: Condvar::new(),
+            }),
+            failure_tx,
+            ready_tx,
+            opener: Arc::new(move |_, _, _| {
+                Ok((
+                    recorder::ActiveRecording::fake_delayed(Ok(recording.clone()), delay),
+                    None,
+                ))
+            }),
         }
     }
 

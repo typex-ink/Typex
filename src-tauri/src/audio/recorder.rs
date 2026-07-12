@@ -105,6 +105,23 @@ impl ActiveRecording {
             worker: None,
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn fake_delayed(result: Result<Recording>, delay: Duration) -> Self {
+        let (stop_tx, stop_rx) = std_mpsc::channel();
+        let (result_tx, result_rx) = std_mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            if matches!(stop_rx.recv(), Ok(StopSignal::Finish)) {
+                std::thread::sleep(delay);
+                let _ = result_tx.send(result);
+            }
+        });
+        Self {
+            stop_tx,
+            result_rx,
+            worker: Some(worker),
+        }
+    }
 }
 
 impl Drop for ActiveRecording {

@@ -1,6 +1,7 @@
 //! Native Windows text injection using `SendInput` (06 section 7.5).
 
 use crate::error::{ErrorCode, Result, TypexError};
+use crate::inject::{InjectionLatch, InjectionOutcome};
 use std::marker::PhantomData;
 use std::time::Duration;
 use windows::Win32::Foundation::{
@@ -784,26 +785,45 @@ fn execute_clipboard_paste<P>(
     port: &mut P,
     text: &str,
     paste_delay_ms: u64,
+    send_paste: impl FnMut() -> PasteDispatchOutcome,
+    wait: impl FnMut(Duration),
+) -> Result<()>
+where
+    P: ClipboardTransactionPort,
+{
+    execute_clipboard_paste_cancellable(port, text, paste_delay_ms, send_paste, wait, || true)
+        .map(|_| ())
+}
+
+fn execute_clipboard_paste_cancellable<P>(
+    port: &mut P,
+    text: &str,
+    paste_delay_ms: u64,
     mut send_paste: impl FnMut() -> PasteDispatchOutcome,
     mut wait: impl FnMut(Duration),
-) -> Result<()>
+    mut commit: impl FnMut() -> bool,
+) -> Result<InjectionOutcome>
 where
     P: ClipboardTransactionPort,
 {
     let (snapshot, written_sequence) = port.begin(text)?;
     wait(Duration::from_millis(paste_delay_ms.max(10)));
 
-    let dispatch = if port.is_unchanged(written_sequence)? {
-        send_paste()
-    } else {
-        PasteDispatchOutcome::not_dispatched(Err(TypexError::new(
+    let outcome = match port.is_unchanged(written_sequence) {
+        Ok(false) => Err(TypexError::new(
             ErrorCode::Internal,
             "clipboard changed before paste; refusing to paste unrelated content",
-        )))
+        )),
+        Err(error) => Err(error),
+        Ok(true) if !commit() => Ok(InjectionOutcome::Cancelled),
+        Ok(true) => {
+            let dispatch = send_paste();
+            if dispatch.result.is_ok() || dispatch.action_key_accepted {
+                wait(Duration::from_millis(RESTORE_DELAY_MS));
+            }
+            dispatch.result.map(|()| InjectionOutcome::Injected)
+        }
     };
-    if dispatch.result.is_ok() || dispatch.action_key_accepted {
-        wait(Duration::from_millis(RESTORE_DELAY_MS));
-    }
 
     if let Err(error) = port.restore_if_unchanged(snapshot, written_sequence) {
         tracing::warn!(
@@ -811,7 +831,7 @@ where
             "failed to restore Windows clipboard after paste"
         );
     }
-    dispatch.result
+    outcome
 }
 
 pub fn paste_text(text: &str, paste_delay_ms: u64) -> Result<()> {
@@ -830,6 +850,23 @@ pub fn paste_text_to(
         paste_delay_ms,
         || send_ctrl_v_for_paste(target),
         std::thread::sleep,
+    )
+}
+
+pub fn paste_text_to_cancellable(
+    text: &str,
+    paste_delay_ms: u64,
+    target: Option<&crate::platform::focus::FocusTarget>,
+    latch: &InjectionLatch,
+) -> Result<InjectionOutcome> {
+    let mut clipboard = NativeClipboardPort::new()?;
+    execute_clipboard_paste_cancellable(
+        &mut clipboard,
+        text,
+        paste_delay_ms,
+        || send_ctrl_v_for_paste(target),
+        std::thread::sleep,
+        || latch.commit(),
     )
 }
 
@@ -1027,6 +1064,7 @@ struct PasteDispatchOutcome {
     action_key_accepted: bool,
 }
 
+#[cfg(test)]
 impl PasteDispatchOutcome {
     fn not_dispatched(result: Result<()>) -> Self {
         Self {
@@ -1119,50 +1157,87 @@ fn send_strokes_with_outcome(
     target: Option<&crate::platform::focus::FocusTarget>,
     access: InputAccess,
 ) -> SendInputBatchOutcome {
+    send_strokes_with_commit(strokes, target, access, || true).0
+}
+
+fn send_strokes_with_commit(
+    strokes: Vec<KeyStroke>,
+    target: Option<&crate::platform::focus::FocusTarget>,
+    access: InputAccess,
+    commit: impl FnOnce() -> bool,
+) -> (SendInputBatchOutcome, bool) {
     if let Err(error) = ensure_foreground_window(target, access) {
-        return SendInputBatchOutcome {
-            result: Err(error),
-            accepted: 0,
-        };
+        return (
+            SendInputBatchOutcome {
+                result: Err(error),
+                accepted: 0,
+            },
+            false,
+        );
     }
     if strokes.is_empty() {
-        return SendInputBatchOutcome {
-            result: Ok(()),
-            accepted: 0,
-        };
+        let committed = commit();
+        return (
+            SendInputBatchOutcome {
+                result: Ok(()),
+                accepted: 0,
+            },
+            committed,
+        );
     }
     // Integrity lookup above is not atomic with SendInput. Revalidate the opaque session target at
     // the last possible boundary so a focus switch cannot redirect the batch to another window.
     if target.is_some_and(|target| !target.is_current()) {
-        return SendInputBatchOutcome {
-            result: Err(TypexError::new(
-                ErrorCode::NoFocus,
-                "foreground target changed immediately before SendInput",
-            )),
-            accepted: 0,
-        };
+        return (
+            SendInputBatchOutcome {
+                result: Err(TypexError::new(
+                    ErrorCode::NoFocus,
+                    "foreground target changed immediately before SendInput",
+                )),
+                accepted: 0,
+            },
+            false,
+        );
     }
     if !crate::platform::windows::foreground_has_keyboard_focus() {
-        return SendInputBatchOutcome {
-            result: Err(TypexError::new(
-                ErrorCode::NoFocus,
-                "Windows foreground thread lost keyboard focus before SendInput",
-            )),
-            accepted: 0,
-        };
+        return (
+            SendInputBatchOutcome {
+                result: Err(TypexError::new(
+                    ErrorCode::NoFocus,
+                    "Windows foreground thread lost keyboard focus before SendInput",
+                )),
+                accepted: 0,
+            },
+            false,
+        );
     }
     if access == InputAccess::Write
         && crate::platform::windows::foreground_focus_is_known_read_only()
     {
-        return SendInputBatchOutcome {
-            result: Err(TypexError::new(
-                ErrorCode::NoFocus,
-                "Windows keyboard focus became read-only before SendInput",
-            )),
-            accepted: 0,
-        };
+        return (
+            SendInputBatchOutcome {
+                result: Err(TypexError::new(
+                    ErrorCode::NoFocus,
+                    "Windows keyboard focus became read-only before SendInput",
+                )),
+                accepted: 0,
+            },
+            false,
+        );
     }
-    send_input_batch_outcome_with(&strokes, native_send_input)
+    if !commit() {
+        return (
+            SendInputBatchOutcome {
+                result: Ok(()),
+                accepted: 0,
+            },
+            false,
+        );
+    }
+    (
+        send_input_batch_outcome_with(&strokes, native_send_input),
+        true,
+    )
 }
 
 fn send_strokes(
@@ -1209,6 +1284,22 @@ pub fn send_unicode_to(
     target: Option<&crate::platform::focus::FocusTarget>,
 ) -> Result<()> {
     send_strokes(unicode_strokes(text), target, InputAccess::Write)
+}
+
+pub fn send_unicode_to_cancellable(
+    text: &str,
+    target: Option<&crate::platform::focus::FocusTarget>,
+    latch: &InjectionLatch,
+) -> Result<InjectionOutcome> {
+    let (outcome, committed) =
+        send_strokes_with_commit(unicode_strokes(text), target, InputAccess::Write, || {
+            latch.commit()
+        });
+    match outcome.result {
+        Err(error) => Err(error),
+        Ok(()) if committed => Ok(InjectionOutcome::Injected),
+        Ok(()) => Ok(InjectionOutcome::Cancelled),
+    }
 }
 
 #[cfg(test)]
@@ -1588,6 +1679,70 @@ mod tests {
                 TransactionEvent::Restore,
             ]
         );
+    }
+
+    #[test]
+    fn clipboard_transaction_cancel_restores_without_sending_input() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let (mut port, restored) = mock_port(events.clone(), 41, false);
+        let send_events = events.clone();
+        let wait_events = events.clone();
+
+        let outcome = execute_clipboard_paste_cancellable(
+            &mut port,
+            "private text",
+            25,
+            || {
+                send_events.borrow_mut().push(TransactionEvent::Send);
+                PasteDispatchOutcome {
+                    result: Ok(()),
+                    action_key_accepted: true,
+                }
+            },
+            |duration| {
+                wait_events
+                    .borrow_mut()
+                    .push(TransactionEvent::Wait(duration.as_millis() as u64));
+            },
+            || false,
+        )
+        .unwrap();
+
+        assert_eq!(outcome, InjectionOutcome::Cancelled);
+        assert!(restored.get());
+        assert_eq!(
+            *events.borrow(),
+            vec![
+                TransactionEvent::Begin,
+                TransactionEvent::Wait(25),
+                TransactionEvent::Restore,
+            ]
+        );
+    }
+
+    #[test]
+    fn clipboard_transaction_commit_makes_later_cancel_lose() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let (mut port, restored) = mock_port(events.clone(), 41, false);
+        let latch = InjectionLatch::new();
+
+        let outcome = execute_clipboard_paste_cancellable(
+            &mut port,
+            "private text",
+            10,
+            || PasteDispatchOutcome {
+                result: Ok(()),
+                action_key_accepted: true,
+            },
+            |_| {},
+            || latch.commit(),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, InjectionOutcome::Injected);
+        assert!(restored.get());
+        assert!(!latch.cancel());
+        assert_eq!(latch.state(), crate::inject::InjectionState::Committed);
     }
 
     #[test]

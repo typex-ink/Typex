@@ -18,9 +18,9 @@ use tauri_specta::{collect_commands, collect_events};
 
 fn publish_hotkey_config_if_changed(
     tx: &tokio::sync::watch::Sender<HotkeyConfig>,
-    hotkeys: &crate::settings::schema::HotkeySettings,
+    settings: &crate::settings::schema::Settings,
 ) -> bool {
-    let next = HotkeyConfig::from_settings(hotkeys);
+    let next = HotkeyConfig::from_settings(settings);
     tx.send_if_modified(|current| {
         if *current == next {
             false
@@ -176,9 +176,7 @@ async fn monitor_windows_hook_health<F>(
         let health = health_rx.borrow_and_update().clone();
         let action = latch.observe(&health, *paused_rx.borrow());
         if action.cancel_session {
-            let _ = commander
-                .0
-                .send(crate::orchestrator::SessionCommand::Cancel);
+            commander.cancel_recording();
         }
         if action.refresh_status {
             on_unavailable();
@@ -330,16 +328,13 @@ pub fn run() {
             app.manage(assistant_window_ready.clone());
 
             // hotkey 线程（配置热更新：settings watch → HotkeyConfig watch 桥接）
-            let hotkey_cfg = HotkeyConfig::from_settings(&s.hotkeys);
+            let hotkey_cfg = HotkeyConfig::from_settings(&s);
             let (cfg_tx, cfg_rx) = tokio::sync::watch::channel(hotkey_cfg.clone());
             {
                 let mut settings_rx = settings.subscribe();
                 tauri::async_runtime::spawn(async move {
                     while settings_rx.changed().await.is_ok() {
-                        let _ = publish_hotkey_config_if_changed(
-                            &cfg_tx,
-                            &settings_rx.borrow().hotkeys,
-                        );
+                        let _ = publish_hotkey_config_if_changed(&cfg_tx, &settings_rx.borrow());
                     }
                 });
             }
@@ -374,6 +369,7 @@ pub fn run() {
             // 回答型确认时经 show_panel 回调呼出回答弹窗
             let handle_a = app.handle().clone();
             let handle_panel = app.handle().clone();
+            let handle_hide_panel = app.handle().clone();
             let ready_panel = assistant_window_ready.clone();
             let assistant = Arc::new(crate::orchestrator::assistant::AssistantService::new(
                 settings.clone(),
@@ -438,6 +434,11 @@ pub fn run() {
                         }
                     }
                     .boxed()
+                }),
+                Box::new(move || {
+                    if let Some(window) = handle_hide_panel.get_webview_window("assistant") {
+                        let _ = window.hide();
+                    }
                 }),
             ));
 
@@ -507,8 +508,7 @@ pub fn run() {
                 selection: selection.clone(),
                 history: history.clone(),
             });
-            let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-            let commander = crate::orchestrator::SessionCommander(cmd_tx);
+            let (commander, cmd_rx) = crate::orchestrator::SessionCommander::channel();
             app.manage(commander.clone());
             #[cfg(target_os = "windows")]
             {
@@ -646,17 +646,32 @@ mod hotkey_config_bridge_tests {
     #[test]
     fn unrelated_settings_update_does_not_publish_hotkey_config() {
         let mut settings = crate::settings::schema::Settings::default();
-        let initial = HotkeyConfig::from_settings(&settings.hotkeys);
+        let initial = HotkeyConfig::from_settings(&settings);
         let (tx, mut rx) = tokio::sync::watch::channel(initial);
 
         settings.general.autostart = !settings.general.autostart;
-        assert!(!publish_hotkey_config_if_changed(&tx, &settings.hotkeys));
+        assert!(!publish_hotkey_config_if_changed(&tx, &settings));
         assert!(!rx.has_changed().unwrap());
 
         settings.hotkeys.dictation = vec!["F13".into()];
-        assert!(publish_hotkey_config_if_changed(&tx, &settings.hotkeys));
+        assert!(publish_hotkey_config_if_changed(&tx, &settings));
         assert!(rx.has_changed().unwrap());
         assert_eq!(rx.borrow_and_update().dictation, ["F13"]);
+    }
+
+    #[test]
+    fn esc_setting_change_publishes_without_changing_chords() {
+        let mut settings = crate::settings::schema::Settings::default();
+        let initial = HotkeyConfig::from_settings(&settings);
+        let original_dictation = initial.dictation.clone();
+        let (tx, mut rx) = tokio::sync::watch::channel(initial);
+
+        settings.dictation.esc_cancels = false;
+        assert!(publish_hotkey_config_if_changed(&tx, &settings));
+        assert!(rx.has_changed().unwrap());
+        let updated = rx.borrow_and_update();
+        assert!(!updated.esc_cancels);
+        assert_eq!(updated.dictation, original_dictation);
     }
 
     #[test]
@@ -687,12 +702,12 @@ mod windows_hook_health_tests {
     async fn runtime_failure_emits_one_cancel_for_recording_or_toggle_sessions() {
         let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
         let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
         let (refreshes, on_unavailable) = refresh_counter();
         let task = tokio::spawn(monitor_windows_hook_health(
             health_rx,
             paused_rx,
-            crate::orchestrator::SessionCommander(command_tx),
+            commander,
             on_unavailable,
         ));
 
@@ -701,7 +716,7 @@ mod windows_hook_health_tests {
         }));
         assert!(matches!(
             timeout(Duration::from_secs(1), command_rx.recv()).await,
-            Ok(Some(crate::orchestrator::SessionCommand::Cancel))
+            Ok(Some(crate::orchestrator::SessionControl::CancelRecording))
         ));
 
         health_tx.send_replace(WindowsHookHealth::Stopped);
@@ -718,21 +733,15 @@ mod windows_hook_health_tests {
                 code: 5,
             }));
         let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
         let (refreshes, on_unavailable) = refresh_counter();
         drop(health_tx);
 
-        monitor_windows_hook_health(
-            health_rx,
-            paused_rx,
-            crate::orchestrator::SessionCommander(command_tx),
-            on_unavailable,
-        )
-        .await;
+        monitor_windows_hook_health(health_rx, paused_rx, commander, on_unavailable).await;
 
         assert!(matches!(
             command_rx.try_recv(),
-            Ok(crate::orchestrator::SessionCommand::Cancel)
+            Ok(crate::orchestrator::SessionControl::CancelRecording)
         ));
         assert_eq!(refreshes.load(Ordering::Relaxed), 1);
     }
@@ -741,12 +750,12 @@ mod windows_hook_health_tests {
     async fn failure_while_paused_refreshes_status_without_an_extra_cancel() {
         let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
         let (_paused_tx, paused_rx) = tokio::sync::watch::channel(true);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
         let (refreshes, on_unavailable) = refresh_counter();
         let task = tokio::spawn(monitor_windows_hook_health(
             health_rx,
             paused_rx,
-            crate::orchestrator::SessionCommander(command_tx),
+            commander,
             on_unavailable,
         ));
 
@@ -764,12 +773,12 @@ mod windows_hook_health_tests {
     async fn healthy_and_expected_shutdown_states_are_silent() {
         let (health_tx, health_rx) = tokio::sync::watch::channel(WindowsHookHealth::Healthy);
         let (_paused_tx, paused_rx) = tokio::sync::watch::channel(false);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
         let (refreshes, on_unavailable) = refresh_counter();
         let task = tokio::spawn(monitor_windows_hook_health(
             health_rx,
             paused_rx,
-            crate::orchestrator::SessionCommander(command_tx),
+            commander,
             on_unavailable,
         ));
 

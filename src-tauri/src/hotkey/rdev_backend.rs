@@ -256,6 +256,7 @@ mod tests {
             dictation: vec!["MetaRight".into()],
             assistant: vec!["AltRight".into()],
             translation: Vec::new(),
+            esc_cancels: true,
         };
         let mut detector = HotkeyDetector::new(config);
         let (paused_tx, mut paused_rx) = tokio::sync::watch::channel(false);

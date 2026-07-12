@@ -50,8 +50,8 @@ pub enum AssistantEvent {
 pub enum AssistantOutcome {
     /// 改写型：结果直接替换选区（→ ProcessResult → Inject）
     Rewrite(String),
-    /// 回答型：已交回答弹窗展示（含弹窗内错误），主会话结束（→ AssistantHandedOff）
-    HandedOff,
+    /// 回答型：完整回答为 Some；弹窗内错误为 None（→ AssistantHandedOff）。
+    HandedOff(Option<String>),
 }
 
 pub struct AssistantService {
@@ -60,6 +60,8 @@ pub struct AssistantService {
     pub sink: Box<dyn Fn(AssistantEvent) + Send + Sync>,
     /// 呼出回答弹窗（app 层注入；参数 = 是否有选区，决定定位方式）
     pub show_panel: Box<dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync>,
+    /// 取消活动助手会话时隐藏回答窗。
+    pub hide_panel: Box<dyn Fn() + Send + Sync>,
     next_id: AtomicU64,
 }
 
@@ -69,14 +71,20 @@ impl AssistantService {
         registry: Arc<ProviderRegistry>,
         sink: Box<dyn Fn(AssistantEvent) + Send + Sync>,
         show_panel: Box<dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync>,
+        hide_panel: Box<dyn Fn() + Send + Sync>,
     ) -> Self {
         Self {
             settings,
             registry,
             sink,
             show_panel,
+            hide_panel,
             next_id: AtomicU64::new(1),
         }
+    }
+
+    pub fn hide_panel(&self) {
+        (self.hide_panel)();
     }
 
     /// 执行一次助手指令（语音转写稿）。弹窗呼出前的失败走 Err（HUD 失败态可重试）；
@@ -200,7 +208,7 @@ async fn drive_with_idle_timeout(
                         request_id: ctx.request_id,
                         error: err,
                     });
-                    return Ok(AssistantOutcome::HandedOff);
+                    return Ok(AssistantOutcome::HandedOff(None));
                 }
                 return Err(err);
             }
@@ -214,7 +222,7 @@ async fn drive_with_idle_timeout(
                         request_id: ctx.request_id,
                         error: e.into(),
                     });
-                    return Ok(AssistantOutcome::HandedOff);
+                    return Ok(AssistantOutcome::HandedOff(None));
                 }
                 return Err(e.into());
             }
@@ -261,7 +269,7 @@ async fn drive_with_idle_timeout(
                 request_id: ctx.request_id,
                 error: err,
             });
-            return Ok(AssistantOutcome::HandedOff);
+            return Ok(AssistantOutcome::HandedOff(None));
         }
         return Err(err);
     }
@@ -283,7 +291,7 @@ async fn drive_with_idle_timeout(
                 request_id: ctx.request_id,
                 full_text: display.to_string(),
             });
-            Ok(AssistantOutcome::HandedOff)
+            Ok(AssistantOutcome::HandedOff(Some(display.to_string())))
         }
     }
 }
@@ -390,7 +398,10 @@ mod tests {
         let out = h
             .run(vec![Ok("ANSWER: 原因"), Ok("是超时。")], true)
             .unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(
+            out,
+            AssistantOutcome::HandedOff(Some("原因是超时。".into()))
+        );
         assert_eq!(h.panel_count(), 1);
         assert_eq!(
             h.events(),
@@ -409,7 +420,7 @@ mod tests {
         let out = h
             .run(vec![Ok("ANS"), Ok("WER:"), Ok(" 回答体")], true)
             .unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(out, AssistantOutcome::HandedOff(Some("回答体".into())));
         assert_eq!(h.events().last().unwrap(), "done:回答体");
     }
 
@@ -417,7 +428,10 @@ mod tests {
     fn leading_whitespace_before_prefix_still_answer() {
         let h = Harness::new();
         let out = h.run(vec![Ok("  ANSWER: 前导空格也算")], true).unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(
+            out,
+            AssistantOutcome::HandedOff(Some("前导空格也算".into()))
+        );
         assert_eq!(h.events().last().unwrap(), "done:前导空格也算");
     }
 
@@ -425,7 +439,7 @@ mod tests {
     fn no_selection_is_always_answer_with_immediate_panel() {
         let h = Harness::new();
         let out = h.run(vec![Ok("任意"), Ok("输出")], false).unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(out, AssistantOutcome::HandedOff(Some("任意输出".into())));
         assert_eq!(h.panel_count(), 1);
         assert_eq!(h.events()[0], "started:指令");
         assert_eq!(h.events().last().unwrap(), "done:任意输出");
@@ -436,7 +450,7 @@ mod tests {
         // 宁可不替换也不误替换：凑不满前缀长度的超短输出按回答展示
         let h = Harness::new();
         let out = h.run(vec![Ok("AN")], true).unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(out, AssistantOutcome::HandedOff(Some("AN".into())));
         assert_eq!(h.panel_count(), 1);
         assert_eq!(h.events().last().unwrap(), "done:AN");
     }
@@ -455,7 +469,7 @@ mod tests {
         let out = h
             .run(vec![Ok("ANSWER: 部分"), Err(ProviderError::Timeout)], true)
             .unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(out, AssistantOutcome::HandedOff(None));
         assert!(h.events().last().unwrap().starts_with("error:"));
     }
 
@@ -469,7 +483,7 @@ mod tests {
                 Duration::from_millis(1),
             )
             .unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff);
+        assert_eq!(out, AssistantOutcome::HandedOff(None));
         assert_eq!(h.panel_count(), 1);
         assert_eq!(h.events(), vec!["started:指令", "error:助手回答超时"]);
     }

@@ -35,6 +35,7 @@ let pendingDelta = "";
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let lastWindowHeight = 0;
+let closing = false;
 
 const unlisteners: (() => void)[] = [];
 
@@ -105,8 +106,17 @@ function flushDelta() {
   }
 }
 
-function close() {
-  getCurrentWindow().hide();
+async function close() {
+  if (closing) return;
+  closing = true;
+  const cancelActiveStream = streaming.value;
+  if (cancelActiveStream) streaming.value = false;
+  try {
+    if (cancelActiveStream) await commands.sessionCommand("cancel");
+  } finally {
+    await getCurrentWindow().hide();
+    closing = false;
+  }
 }
 
 async function syncWindowSize(force = false) {
@@ -181,7 +191,10 @@ async function fitWindowWithinWorkArea(
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") close();
+  if (e.key === "Escape") {
+    e.preventDefault();
+    void close();
+  }
 }
 </script>
 
@@ -225,22 +238,15 @@ function onKey(e: KeyboardEvent) {
   justify-content: center;
   background: transparent;
 }
-/* 面板：圆角 16 + 毛玻璃 + 边框，禁系统阴影（05 §4.1） */
+/* 面板本体始终不透明；仅原生透明窗口的圆角外区域透出背景（05 §4.1）。 */
 .panel {
   box-sizing: border-box;
   width: 100vw;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-float);
   box-shadow: none;
   overflow: hidden;
-}
-@supports not (backdrop-filter: blur(20px)) {
-  .panel {
-    background: color-mix(in srgb, var(--surface) 98%, transparent);
-  }
 }
 .ask-row {
   display: flex;

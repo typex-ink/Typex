@@ -7,7 +7,7 @@ pub mod session;
 use crate::audio::{AudioService, CandidatePromotion, Recording};
 use crate::error::{ErrorCode, TypexError};
 use crate::hotkey::HotkeyEvent;
-use crate::inject::InjectorChain;
+use crate::inject::{InjectionLatch, InjectionOutcome, InjectorChain};
 use crate::providers::ProviderRegistry;
 use crate::providers::stt::{AudioInput, SttOptions};
 use crate::settings::SettingsService;
@@ -43,7 +43,7 @@ pub struct Orchestrator {
 }
 
 /// HUD/前端发来的会话控制命令（06 §10.1 会话组）。
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionCommand {
     Cancel,
@@ -55,7 +55,28 @@ pub enum SessionCommand {
 
 /// 命令入口句柄（Tauri State 持有）。
 #[derive(Clone)]
-pub struct SessionCommander(pub mpsc::UnboundedSender<SessionCommand>);
+pub struct SessionCommander(mpsc::UnboundedSender<SessionControl>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionControl {
+    User(SessionCommand),
+    CancelRecording,
+}
+
+impl SessionCommander {
+    pub(crate) fn channel() -> (Self, mpsc::UnboundedReceiver<SessionControl>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Self(tx), rx)
+    }
+
+    pub fn send(&self, command: SessionCommand) {
+        let _ = self.0.send(SessionControl::User(command));
+    }
+
+    pub fn cancel_recording(&self) {
+        let _ = self.0.send(SessionControl::CancelRecording);
+    }
+}
 
 /// 执行器内部状态。
 struct Exec {
@@ -63,6 +84,8 @@ struct Exec {
     next_session_id: u64,
     /// 会话音频（不丢话铁律：失败重试期间保留）
     audio_store: HashMap<u64, Recording>,
+    /// Blocking audio finalization writes here immediately before RecordingFinished.
+    finished_audio: Arc<std::sync::Mutex<HashMap<u64, crate::error::Result<Recording>>>>,
     /// 会话原始转写（历史记录用：id → (transcript, duration_ms)）
     transcript_store: HashMap<u64, (String, u64)>,
     recording_started: Option<Instant>,
@@ -74,26 +97,58 @@ struct Exec {
     pending_candidate_token: Option<u64>,
     /// Candidate selected by the current TriggerDown's StartRecording effect.
     promote_candidate_token: Option<u64>,
+    /// Abort handles for all asynchronous work owned by a session.
+    task_handles: HashMap<u64, Vec<tokio::task::AbortHandle>>,
+    /// Injection cancellation remains shared with spawn_blocking after its JoinHandle is aborted.
+    injection_latches: HashMap<u64, Arc<InjectionLatch>>,
     tx: mpsc::UnboundedSender<Event>,
 }
 
+impl Exec {
+    fn track_task(&mut self, session_id: u64, handle: &tokio::task::JoinHandle<()>) {
+        self.task_handles
+            .entry(session_id)
+            .or_default()
+            .push(handle.abort_handle());
+    }
+
+    fn abort_tasks(&mut self, session_id: u64) {
+        if let Some(handles) = self.task_handles.remove(&session_id) {
+            for handle in handles {
+                handle.abort();
+            }
+        }
+    }
+
+    fn release_session(&mut self, session_id: u64) {
+        self.abort_tasks(session_id);
+        self.injection_latches.remove(&session_id);
+        self.finished_audio.lock().unwrap().remove(&session_id);
+        self.audio_store.remove(&session_id);
+        self.transcript_store.remove(&session_id);
+    }
+}
+
 impl Orchestrator {
-    pub async fn run(
+    pub(crate) async fn run(
         self: Arc<Self>,
         mut hotkeys: mpsc::UnboundedReceiver<HotkeyEvent>,
-        mut commands: mpsc::UnboundedReceiver<SessionCommand>,
+        mut commands: mpsc::UnboundedReceiver<SessionControl>,
     ) {
         let (tx, mut internal_rx) = mpsc::unbounded_channel::<Event>();
         let mut exec = Exec {
             state: State::Idle,
             next_session_id: 1,
             audio_store: HashMap::new(),
+            finished_audio: Arc::new(std::sync::Mutex::new(HashMap::new())),
             transcript_store: HashMap::new(),
             recording_started: None,
             target_app: None,
             target_focus: None,
             pending_candidate_token: None,
             promote_candidate_token: None,
+            task_handles: HashMap::new(),
+            injection_latches: HashMap::new(),
             tx: tx.clone(),
         };
 
@@ -113,6 +168,36 @@ impl Orchestrator {
         loop {
             let event = tokio::select! {
                 biased;
+                Some(control) = commands.recv() => {
+                    if matches!(
+                        control,
+                        SessionControl::User(SessionCommand::Cancel)
+                            | SessionControl::CancelRecording
+                    ) {
+                        self.audio.cancel_pending_candidate();
+                        exec.pending_candidate_token = None;
+                        exec.promote_candidate_token = None;
+                    }
+                    match control {
+                        SessionControl::User(SessionCommand::Cancel) => {
+                            self.begin_cancel(&mut exec)
+                        }
+                        SessionControl::User(SessionCommand::Retry) => Some(Event::Retry),
+                        SessionControl::User(SessionCommand::Dismiss) => Some(Event::Dismiss),
+                        SessionControl::User(SessionCommand::CopyTranscript) => {
+                            Some(Event::CopyTranscriptRequested)
+                        }
+                        SessionControl::User(SessionCommand::InjectOriginal) => {
+                            Some(Event::InjectOriginalRequested)
+                        }
+                        SessionControl::CancelRecording => matches!(
+                            exec.state,
+                            State::Recording { .. }
+                        )
+                        .then_some(Event::Esc),
+                    }
+                },
+                Some(hk) = hotkeys.recv() => self.map_hotkey(hk, &mut exec),
                 Some(ev) = internal_rx.recv() => Some(ev),
                 failure = audio_failures.recv() => failure.ok().map(|failure| Event::RecordingFailed {
                     session_id: failure.session_id,
@@ -126,30 +211,47 @@ impl Orchestrator {
                     }
                     None
                 },
-                Some(hk) = hotkeys.recv() => self.map_hotkey(hk, &mut exec),
-                Some(cmd) = commands.recv() => {
-                    if matches!(cmd, SessionCommand::Cancel) {
-                        self.audio.cancel_pending_candidate();
-                        exec.pending_candidate_token = None;
-                        exec.promote_candidate_token = None;
-                    }
-                    Some(match cmd {
-                    SessionCommand::Cancel => Event::Esc,
-                    SessionCommand::Retry => Event::Retry,
-                    SessionCommand::Dismiss => Event::Dismiss,
-                    SessionCommand::CopyTranscript => Event::CopyTranscriptRequested,
-                    SessionCommand::InjectOriginal => Event::InjectOriginalRequested,
-                    })
-                },
                 else => break,
             };
             let Some(event) = event else { continue };
+
+            let event = match event {
+                Event::RecordingFinished { session_id } => {
+                    let result = exec.finished_audio.lock().unwrap().remove(&session_id);
+                    if matches!(
+                        exec.state,
+                        State::Transcribing {
+                            session_id: active,
+                            ..
+                        } if active == session_id
+                    ) {
+                        match result {
+                            Some(Ok(recording)) => {
+                                exec.audio_store.insert(session_id, recording);
+                                Event::RecordingFinished { session_id }
+                            }
+                            Some(Err(error)) => Event::RecordingFailed { session_id, error },
+                            None => continue,
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+                event => event,
+            };
 
             // 历史记录素材：转写稿 + 录音时长（成功注入时写库）
             if let Event::SttResult {
                 session_id,
                 transcript,
             } = &event
+                && matches!(
+                    exec.state,
+                    State::Transcribing {
+                        session_id: active,
+                        ..
+                    } if active == *session_id
+                )
             {
                 let dur = exec
                     .audio_store
@@ -159,9 +261,25 @@ impl Orchestrator {
                 exec.transcript_store
                     .insert(*session_id, (transcript.clone(), dur));
             }
-            // 成功注入 → 写历史（F-7）
+            // 成功注入 → 更新上次结果并写历史（F-7）。
             if let Event::InjectDone { session_id } = &event {
-                self.record_history(*session_id, &exec);
+                self.record_injected_history(*session_id, &exec);
+            }
+            // 完整成功回答写助手历史；弹窗内错误用 None，明确不写。
+            if let Event::AssistantHandedOff {
+                session_id,
+                answer: Some(answer),
+            } = &event
+                && matches!(
+                    exec.state,
+                    State::Processing {
+                        session_id: active,
+                        mode: SessionMode::Assistant,
+                        ..
+                    } if active == *session_id
+                )
+            {
+                self.record_history_result(*session_id, SessionMode::Assistant, answer, &exec);
             }
 
             let threshold = self.settings.get().hotkeys.hold_threshold_ms;
@@ -235,12 +353,27 @@ impl Orchestrator {
             HotkeyEvent::Yielded => Some(Event::Yielded),
             HotkeyEvent::EscPressed => {
                 if self.settings.get().dictation.esc_cancels {
-                    Some(Event::Esc)
+                    self.begin_cancel(exec)
                 } else {
                     None
                 }
             }
         }
+    }
+
+    /// Atomically wins cancellation before the injection commit boundary. A committed injection
+    /// must run to completion so history and UI reflect the OS input that may already have begun.
+    fn begin_cancel(&self, exec: &mut Exec) -> Option<Event> {
+        let session_id = exec.state.session_id()?;
+        if matches!(exec.state, State::Injecting { .. })
+            && exec
+                .injection_latches
+                .get(&session_id)
+                .is_some_and(|latch| !latch.cancel())
+        {
+            return None;
+        }
+        Some(Event::Esc)
     }
 
     fn dispatch(
@@ -303,29 +436,56 @@ impl Orchestrator {
                 exec.recording_started = None;
                 self.emit_snapshot(exec); // HUD 隐藏
             }
-            Effect::StopRecording { .. } => { /* CallStt 已含停止语义 */ }
+            Effect::StopRecording { session_id } => {
+                exec.recording_started = None;
+                let audio = self.audio.clone();
+                let finished_audio = exec.finished_audio.clone();
+                let tx = exec.tx.clone();
+                let assistant_read =
+                    (exec.state.mode() == Some(SessionMode::Assistant)).then(|| {
+                        (
+                            self.selection.clone(),
+                            self.pending_selection.clone(),
+                            self.selection_read_failed.clone(),
+                            exec.target_focus.clone(),
+                        )
+                    });
+                let handle = tokio::spawn(async move {
+                    let audio_fut = tokio::task::spawn_blocking(move || audio.stop());
+                    let selection_fut = async move {
+                        if let Some((reader, pending, failed, target)) = assistant_read {
+                            let outcome = tokio::task::spawn_blocking(move || {
+                                reader.read_targeted(target.as_ref())
+                            })
+                            .await;
+                            let (result, read_failed) = match outcome {
+                                Ok(Ok(selection)) => (selection, false),
+                                _ => (None, true),
+                            };
+                            failed.store(read_failed, std::sync::atomic::Ordering::Relaxed);
+                            *pending.lock().unwrap() = result;
+                        }
+                    };
+                    let (audio_result, ()) = tokio::join!(audio_fut, selection_fut);
+                    let audio_result = audio_result.unwrap_or_else(|error| {
+                        Err(TypexError::new(
+                            ErrorCode::Internal,
+                            format!("音频收尾任务失败: {error}"),
+                        ))
+                    });
+                    finished_audio
+                        .lock()
+                        .unwrap()
+                        .insert(session_id, audio_result);
+                    let _ = tx.send(Event::RecordingFinished { session_id });
+                });
+                exec.track_task(session_id, &handle);
+            }
             Effect::CallStt { session_id } => {
-                // 停止录音（若在录）并取音频；重试路径直接用 audio_store
-                let was_recording = self.audio.is_recording();
-                let recording = if was_recording {
-                    exec.recording_started = None;
-                    match self.audio.stop() {
-                        Ok(rec) => {
-                            exec.audio_store.insert(session_id, rec.clone());
-                            Some(rec)
-                        }
-                        Err(e) => {
-                            let _ = exec.tx.send(Event::RecordingFailed {
-                                session_id,
-                                error: e,
-                            });
-                            None
-                        }
-                    }
-                } else {
-                    exec.audio_store.get(&session_id).cloned()
+                // 正常路径由 RecordingFinished 进入；失败重试直接复用 audio_store。
+                let Some(rec) = exec.audio_store.get(&session_id).cloned() else {
+                    return;
                 };
-                let Some(rec) = recording else { return };
                 if rec.duration_ms < 90 {
                     let _ = exec.tx.send(Event::SttFailed {
                         session_id,
@@ -333,82 +493,50 @@ impl Orchestrator {
                     });
                     return;
                 }
-                // 助手模式：触发键已松开，此刻读选区（06 §7.6-5——按住期间读会被
-                // 剪贴板降级的模拟 Cmd+C 触发组合键让路）；与 STT 并发，不增加延迟。
-                // 重试路径（!was_recording）沿用首次读到的选区。
-                let assistant_read = (was_recording
-                    && exec.state.mode() == Some(SessionMode::Assistant))
-                .then(|| {
-                    (
-                        self.selection.clone(),
-                        self.pending_selection.clone(),
-                        self.selection_read_failed.clone(),
-                        exec.target_focus.clone(),
-                    )
-                });
                 let registry = self.registry.clone();
                 let settings = self.settings.get();
                 let lang = settings.dictation.language.clone();
                 let stt_prompt = settings.dictionary.stt_prompt();
                 let tx = exec.tx.clone();
-                tokio::spawn(async move {
-                    let selection_fut = async {
-                        if let Some((reader, pending, failed, target)) = assistant_read {
-                            let outcome = tokio::task::spawn_blocking(move || {
-                                reader.read_targeted(target.as_ref())
-                            })
-                            .await;
-                            let (result, read_failed) = match outcome {
-                                Ok(Ok(sel)) => (sel, false),
-                                _ => (None, true), // 读取报错 → 降级为普通提问（05 §4）
-                            };
-                            failed.store(read_failed, std::sync::atomic::Ordering::Relaxed);
-                            *pending.lock().unwrap() = result;
+                let handle = tokio::spawn(async move {
+                    let stt = match registry.stt_for(SlotKind::Stt) {
+                        Ok(stt) => stt,
+                        Err(error) => {
+                            let _ = tx.send(Event::SttFailed { session_id, error });
+                            return;
                         }
                     };
-                    let stt_fut = async {
-                        let stt = match registry.stt_for(SlotKind::Stt) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                return Event::SttFailed {
-                                    session_id,
-                                    error: e,
-                                };
-                            }
-                        };
-                        let result = crate::providers::stt::transcribe_auto_chunk(
-                            stt.as_ref(),
-                            AudioInput {
-                                wav_16k_mono: rec.wav_16k_mono,
-                                duration_ms: rec.duration_ms,
-                            },
-                            SttOptions {
-                                language: Some(lang),
-                                prompt: stt_prompt,
-                                temperature: None,
-                            },
-                            rec.vad,
-                        )
-                        .await;
-                        match result {
-                            Ok(t) if t.text.trim().is_empty() => Event::SttFailed {
-                                session_id,
-                                error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
-                            },
-                            Ok(t) => Event::SttResult {
-                                session_id,
-                                transcript: t.text.trim().to_string(),
-                            },
-                            Err(e) => Event::SttFailed {
-                                session_id,
-                                error: e.into(),
-                            },
-                        }
+                    let result = crate::providers::stt::transcribe_auto_chunk(
+                        stt.as_ref(),
+                        AudioInput {
+                            wav_16k_mono: rec.wav_16k_mono,
+                            duration_ms: rec.duration_ms,
+                        },
+                        SttOptions {
+                            language: Some(lang),
+                            prompt: stt_prompt,
+                            temperature: None,
+                        },
+                        rec.vad,
+                    )
+                    .await;
+                    let event = match result {
+                        Ok(transcript) if transcript.text.trim().is_empty() => Event::SttFailed {
+                            session_id,
+                            error: TypexError::new(ErrorCode::NoSpeech, "没有听到声音"),
+                        },
+                        Ok(transcript) => Event::SttResult {
+                            session_id,
+                            transcript: transcript.text.trim().to_string(),
+                        },
+                        Err(error) => Event::SttFailed {
+                            session_id,
+                            error: error.into(),
+                        },
                     };
-                    // join：确保选区已写入 pending 再发 SttResult（CallProcess 会立即消费）
-                    let ((), event) = tokio::join!(selection_fut, stt_fut);
                     let _ = tx.send(event);
                 });
+                exec.track_task(session_id, &handle);
             }
             Effect::CallProcess {
                 session_id,
@@ -432,7 +560,7 @@ impl Orchestrator {
                         .load(std::sync::atomic::Ordering::Relaxed);
                     let prompt_context = pipeline::PromptContext::new(exec.target_app.clone());
                     let tx = exec.tx.clone();
-                    tokio::spawn(async move {
+                    let handle = tokio::spawn(async move {
                         let event = match assistant
                             .run(transcript, selection, read_failed, prompt_context)
                             .await
@@ -440,20 +568,21 @@ impl Orchestrator {
                             Ok(assistant::AssistantOutcome::Rewrite(text)) => {
                                 Event::ProcessResult { session_id, text }
                             }
-                            Ok(assistant::AssistantOutcome::HandedOff) => {
-                                Event::AssistantHandedOff { session_id }
+                            Ok(assistant::AssistantOutcome::HandedOff(answer)) => {
+                                Event::AssistantHandedOff { session_id, answer }
                             }
                             Err(error) => Event::ProcessFailed { session_id, error },
                         };
                         let _ = tx.send(event);
                     });
+                    exec.track_task(session_id, &handle);
                     return;
                 }
                 let tx = exec.tx.clone();
                 let settings = self.settings.get();
                 let registry = self.registry.clone();
                 let prompt_context = pipeline::PromptContext::new(exec.target_app.clone());
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     let event = match pipeline::process(
                         mode,
                         transcript,
@@ -476,33 +605,31 @@ impl Orchestrator {
                     };
                     let _ = tx.send(event);
                 });
+                exec.track_task(session_id, &handle);
             }
             Effect::Inject { session_id, text } => {
                 let injector = self.injector.clone();
                 let tx = exec.tx.clone();
                 let method = self.settings.get().dictation.inject_method;
                 let target = exec.target_focus.clone();
-                *self.last_result.lock().unwrap() = Some(text.clone());
+                let latch = Arc::new(InjectionLatch::new());
+                exec.injection_latches.insert(session_id, latch.clone());
                 // enigo/剪贴板是阻塞调用 → blocking 线程
-                tokio::task::spawn_blocking(move || {
-                    let result =
-                        if crate::platform::focus::captured_target_is_current(target.as_ref()) {
-                            injector.inject_with_target(&text, method, target.as_ref())
-                        } else {
-                            Err(TypexError::new(
-                                ErrorCode::NoFocus,
-                                "foreground target changed before injection",
-                            ))
-                        };
+                let handle = tokio::task::spawn_blocking(move || {
+                    let result = injector.inject_with_target_cancellable(
+                        &text,
+                        method,
+                        target.as_ref(),
+                        &latch,
+                    );
                     let event = match result {
-                        Ok(()) => Event::InjectDone { session_id },
-                        Err(e) => Event::InjectFailed {
-                            session_id,
-                            error: e,
-                        },
+                        Ok(InjectionOutcome::Injected) => Event::InjectDone { session_id },
+                        Ok(InjectionOutcome::Cancelled) => return,
+                        Err(error) => Event::InjectFailed { session_id, error },
                     };
                     let _ = tx.send(event);
                 });
+                exec.track_task(session_id, &handle);
             }
             Effect::EmitUi => self.emit_snapshot(exec),
             Effect::EmitBusyHint => {
@@ -534,14 +661,36 @@ impl Orchestrator {
                     }
                 }
             }
+            Effect::CancelTasks { session_id } => {
+                exec.abort_tasks(session_id);
+                if let Some(assistant) = &self.assistant {
+                    assistant.hide_panel();
+                }
+            }
             Effect::ReleaseAudio { session_id } => {
-                exec.audio_store.remove(&session_id);
-                exec.transcript_store.remove(&session_id);
+                exec.release_session(session_id);
             }
         }
     }
 
-    fn record_history(&self, session_id: u64, exec: &Exec) {
+    fn record_injected_history(&self, session_id: u64, exec: &Exec) {
+        let State::Injecting {
+            session_id: active,
+            mode,
+            text,
+            ..
+        } = &exec.state
+        else {
+            return;
+        };
+        if *active != session_id {
+            return;
+        }
+        *self.last_result.lock().unwrap() = Some(text.clone());
+        self.record_history_result(session_id, *mode, text, exec);
+    }
+
+    fn record_history_result(&self, session_id: u64, mode: SessionMode, result: &str, exec: &Exec) {
         let Some(history) = &self.history else { return };
         if !self.settings.get().history.enabled {
             return;
@@ -549,8 +698,6 @@ impl Orchestrator {
         let Some((transcript, duration_ms)) = exec.transcript_store.get(&session_id) else {
             return;
         };
-        let result = self.last_result.lock().unwrap().clone().unwrap_or_default();
-        let mode = exec.state.mode().unwrap_or(SessionMode::Dictation);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -560,7 +707,7 @@ impl Orchestrator {
             now,
             mode,
             transcript,
-            &result,
+            result,
             &app_name,
             *duration_ms as u32,
         ) {
@@ -657,7 +804,16 @@ fn snapshot_of(state: &State, recording_started: Option<Instant>) -> SessionSnap
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::schema::VadSettings;
     use crate::types::SessionPhase;
+
+    struct NoSelection;
+
+    impl crate::selection::SelectionReader for NoSelection {
+        fn read(&self) -> crate::error::Result<Option<String>> {
+            Ok(None)
+        }
+    }
 
     #[test]
     fn snapshot_projection_failed_keeps_transcript_flag() {
@@ -672,5 +828,98 @@ mod tests {
         assert_eq!(snap.phase, SessionPhase::Failed);
         assert!(snap.has_transcript);
         assert_eq!(snap.error, Some(ErrorCode::Timeout));
+    }
+
+    #[tokio::test]
+    async fn delayed_audio_finish_publishes_transcribing_and_remains_cancellable() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Arc::new(SettingsService::load(dir.path().to_path_buf()));
+        settings
+            .mutate(|settings| {
+                settings.general.chimes_enabled = false;
+                settings.dictation.polish_enabled = false;
+            })
+            .unwrap();
+        let recording = Recording {
+            wav_16k_mono: Vec::new(),
+            duration_ms: 100,
+            vad: VadSettings::default(),
+        };
+        let audio = Arc::new(AudioService::with_delayed_recording(
+            recording,
+            std::time::Duration::from_millis(250),
+        ));
+        let registry = Arc::new(ProviderRegistry::new(settings.get()));
+        let (snapshot_tx, mut snapshot_rx) = mpsc::unbounded_channel();
+        let orchestrator = Arc::new(Orchestrator {
+            settings: settings.clone(),
+            audio,
+            injector: Arc::new(InjectorChain::new(Vec::new())),
+            registry,
+            snapshot_sink: Box::new(move |snapshot| {
+                let _ = snapshot_tx.send(snapshot.phase);
+            }),
+            level_sink: Box::new(|_| {}),
+            last_result: Arc::new(std::sync::Mutex::new(None)),
+            assistant: None,
+            pending_selection: Arc::new(std::sync::Mutex::new(None)),
+            selection_read_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            selection: Arc::new(NoSelection),
+            history: None,
+        });
+        let (hotkey_tx, hotkey_rx) = mpsc::unbounded_channel();
+        let (commander, command_rx) = SessionCommander::channel();
+        let task = tokio::spawn(orchestrator.run(hotkey_rx, command_rx));
+
+        hotkey_tx
+            .send(HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation,
+            })
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), snapshot_rx.recv())
+                .await
+                .unwrap(),
+            Some(SessionPhase::Recording)
+        );
+
+        hotkey_tx
+            .send(HotkeyEvent::TriggerUp { held_ms: 351 })
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), snapshot_rx.recv())
+                .await
+                .unwrap(),
+            Some(SessionPhase::Transcribing)
+        );
+
+        settings
+            .mutate(|settings| settings.dictation.esc_cancels = false)
+            .unwrap();
+        hotkey_tx.send(HotkeyEvent::EscPressed).unwrap();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), snapshot_rx.recv())
+                .await
+                .is_err(),
+            "disabled Escape must not cancel audio finalization"
+        );
+
+        commander.send(SessionCommand::Cancel);
+        let idle = tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            loop {
+                if snapshot_rx.recv().await == Some(SessionPhase::Idle) {
+                    break SessionPhase::Idle;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(idle, SessionPhase::Idle);
+
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        while let Ok(phase) = snapshot_rx.try_recv() {
+            assert_eq!(phase, SessionPhase::Idle);
+        }
+        task.abort();
     }
 }

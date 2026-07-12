@@ -3,7 +3,7 @@
 //! 适用：不接受粘贴的场景（部分终端/远程桌面/密码框式输入）。
 //! 妥协：长文本慢（逐字符事件）；依赖辅助功能权限（与 paste 的模拟按键相同）。
 
-use super::Injector;
+use super::{InjectionLatch, InjectionOutcome, Injector};
 use crate::error::Result;
 #[cfg(not(target_os = "windows"))]
 use crate::error::{ErrorCode, TypexError};
@@ -49,6 +49,43 @@ impl Injector for TypeDirectInjector {
                 ));
             }
             self.inject(text)
+        }
+    }
+
+    fn inject_targeted_cancellable(
+        &self,
+        text: &str,
+        target: Option<&crate::platform::focus::FocusTarget>,
+        latch: &InjectionLatch,
+    ) -> Result<InjectionOutcome> {
+        #[cfg(target_os = "windows")]
+        {
+            super::windows::send_unicode_to_cancellable(text, target, latch)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if target.is_some_and(|target| !target.is_current()) {
+                return Err(TypexError::new(
+                    ErrorCode::NoFocus,
+                    "foreground target changed before injection",
+                ));
+            }
+            use enigo::{Enigo, Keyboard, Settings};
+            let mut enigo = Enigo::new(&Settings::default()).map_err(|error| {
+                TypexError::new(
+                    ErrorCode::PermissionMissing,
+                    format!("enigo 初始化失败（缺辅助功能权限？）: {error}"),
+                )
+            })?;
+            if !latch.commit() {
+                return Ok(InjectionOutcome::Cancelled);
+            }
+            enigo
+                .text(text)
+                .map(|()| InjectionOutcome::Injected)
+                .map_err(|error| {
+                    TypexError::new(ErrorCode::Internal, format!("逐字输入失败: {error}"))
+                })
         }
     }
 

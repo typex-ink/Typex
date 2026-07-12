@@ -87,7 +87,7 @@ pub fn session_command(
     commander: State<'_, crate::orchestrator::SessionCommander>,
     command: crate::orchestrator::SessionCommand,
 ) {
-    let _ = commander.0.send(command);
+    commander.send(command);
 }
 
 /// 助手窗口前端已注册 assistant:// 事件监听器。

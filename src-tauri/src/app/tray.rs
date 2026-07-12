@@ -160,9 +160,7 @@ fn toggle_paused(
     if next {
         // Resetting the hotkey detector only clears held keys. The orchestrator must also leave
         // Recording so push-to-talk and toggle sessions release the microphone while paused.
-        let _ = commander
-            .0
-            .send(crate::orchestrator::SessionCommand::Cancel);
+        commander.cancel_recording();
     }
     next
 }
@@ -345,14 +343,13 @@ mod tests {
     fn entering_pause_updates_listener_and_requests_session_cancel() {
         let (paused_tx, paused_rx) = tokio::sync::watch::channel(false);
         let paused = crate::app::PausedState(paused_tx);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let commander = crate::orchestrator::SessionCommander(command_tx);
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
 
         assert!(toggle_paused(&paused, &commander));
         assert!(*paused_rx.borrow());
         assert!(matches!(
             command_rx.try_recv(),
-            Ok(crate::orchestrator::SessionCommand::Cancel)
+            Ok(crate::orchestrator::SessionControl::CancelRecording)
         ));
     }
 
@@ -360,8 +357,7 @@ mod tests {
     fn resuming_listener_does_not_cancel_a_session() {
         let (paused_tx, paused_rx) = tokio::sync::watch::channel(true);
         let paused = crate::app::PausedState(paused_tx);
-        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
-        let commander = crate::orchestrator::SessionCommander(command_tx);
+        let (commander, mut command_rx) = crate::orchestrator::SessionCommander::channel();
 
         assert!(!toggle_paused(&paused, &commander));
         assert!(!*paused_rx.borrow());

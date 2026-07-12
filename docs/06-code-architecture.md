@@ -50,7 +50,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 窗口 | 生命周期 | 特性 |
 |---|---|---|
 | **HUD** | 常驻（隐藏/显示切换，避免创建延迟） | 无边框、透明、置顶、**不可获得焦点**（macOS 必须用 NSPanel/nonactivating，否则注入目标失焦——经 `tauri-nspanel`）、忽略鼠标事件（除按钮区） |
-| **回答弹窗** | 按需显示，关闭即隐藏 | 无边框、透明、禁用原生窗口阴影、不可手动调整大小、原生窗口高度跟随内容、置顶、可获得焦点、优先贴近选区下方、失焦自动关闭（无 pin）、只读展示（无输入能力，见 05 §4） |
+| **回答弹窗** | 按需显示，关闭即隐藏 | 无边框；原生窗口仅圆角外透明，面板本体使用不透明 `--surface`；禁用原生窗口阴影、不可手动调整大小、原生窗口高度跟随内容、置顶、可获得焦点、优先贴近选区下方、失焦自动关闭（无 pin）、只读展示（无输入能力，见 05 §4） |
 | **设置** | 按需创建 | 常规窗口 720×520 |
 | **引导** | 首次启动 | 常规窗口 |
 | **主页** | 按需 | 常规窗口 880×560：侧边栏导航（首页/历史记录）+ 内容区（统计、最近记录、历史列表） |
@@ -178,8 +178,8 @@ typex/
 所有三大功能共享同一状态机，仅「处理阶段」策略不同：
 
 ```
-            ┌──────── cancel (Esc) ────────┐
-            ▼                              │
+            ┌──────── cancel (Esc，注入提交前) ─────────────────┐
+            ▼                                                    │
 Idle ─press─▶ Recording ─release─▶ Transcribing ─▶ Processing ─▶ Injecting ─▶ Done ─▶ Idle
                 │                     │  (STT)        │ (F-1:整理/直通         │
                 │                     │               │  F-2:翻译              │
@@ -199,8 +199,9 @@ pub enum SessionPhase {
 }
 ```
 
-- 状态机本体是**纯函数式转移表**（`fn advance(state, event) -> (state, Vec<Effect>)`），不做 IO；`Effect`（StartRecording / CallStt / Inject / EmitUi / PlayChime…）由 orchestrator 的执行器逐个 dispatch 到 service。**这是全项目单测密度最高的地方**（重按忽略、Esc 取消、组合键让路、失败重试等规则全部在此验证）。
+- 状态机本体是**纯函数式转移表**（`fn advance(state, event) -> (state, Vec<Effect>)`），不做 IO；`Effect`（StartRecording / StopRecording / CallStt / Inject / EmitUi / PlayChime…）由 orchestrator 的执行器逐个 dispatch 到 service。松键转移的 Effect 顺序固定为 `EmitUi(Transcribing)` → `StopRecording`；阻塞音频收尾完成后以 `RecordingFinished` 再触发 `CallStt`。**这是全项目单测密度最高的地方**（重按忽略、Esc 取消、组合键让路、失败重试等规则全部在此验证）。
 - 任何时刻只有一个活动会话（当前不并行）；每个会话有自增 `session_id`，所有异步回调带 id 校验，杜绝「上一条的转写结果注入到下一条」的竞态。
+- 执行器保存当前音频收尾、STT、LLM 与注入任务句柄；取消时终止可终止任务并关闭生成中的助手窗。所有完成事件除 `session_id` 外还必须核对当前 phase，迟到回调不得写历史、注入、弹窗或重新占有音频。
 - 每次 phase 变更 → `SessionSnapshot` 经 `app/events.rs` 推送给前端（HUD/面板据此渲染，前端无自己的业务状态机；每个状态携带可显示的进度语义，见 [05 UX 规格 §3](05-ux-spec.md)）。
 
 ### 5.3 线程与异步模型
@@ -212,7 +213,7 @@ pub enum SessionPhase {
 | hotkey 线程 | `std::thread`（mac/X11 为 rdev；Windows 为 Win32 消息循环） | 键盘事件 → 判定逻辑 → `mpsc` 发给 orchestrator；Windows 安装/卸载 `WH_KEYBOARD_LL` |
 | UIA 线程（Windows） | 专用 COM STA/MTA worker | 初始化 COM、执行 `TextPattern.GetSelection` 与 bounds 查询；请求有超时且不阻塞 Tauri 主线程 |
 | cpal 回调线程 | 音频驱动回调 | **只做** ring buffer 写入（实时线程禁止分配/锁/日志） |
-| audio worker 线程 | `std::thread` | 从 ring buffer 取样 → 重采样/电平/VAD；候选阶段只积累内存，提升为正式录音后才以 50ms 节流发电平事件 |
+| audio worker 线程 | `std::thread` + 结束时 `spawn_blocking` 等待 | 从 ring buffer 取样与电平；候选阶段只积累内存，提升为正式录音后才以 50ms 节流发电平事件；停止流、排空、重采样、VAD 与 WAV 编码不得阻塞 orchestrator 循环 |
 | 本地推理 worker | LLM 使用专属 `std::thread`；ASR 使用 `spawn_blocking` | 每个模型缓存用独占 inference lease 串行推理；条目携带 GPU/CPU load mode 与代际；GPU runtime fallback 先释放失败代际，再在缓存锁外以无设备、无 context/mtmd offload 的严格 CPU 参数加载，LLM 在首个可见 delta 前、ASR 在非流式返回前最多从头重试一次 |
 
 跨线程通信统一 `tokio::sync::mpsc`（service → orchestrator）与 `watch`（配置广播）；hotkey/audio 线程持有的发送端是它们与外界的唯一接口。
@@ -285,7 +286,7 @@ pub enum SessionPhase {
 - 听写与助手 chord 必须非空且互不为子集；相同 chord 也按不可达配置处理。前端在 IPC 前阻止，`SettingsService::update` 再以 `InvalidRequest` 拒绝；启动读取到历史非法值时只恢复 `HotkeySettings::default()` 并写无键值 warning，其他设置不得丢失。
 - **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，同时立即发出带唯一 token 的内部 `CaptureCandidateStarted`；AudioService 异步开流并只在内存积累样本。窗口内普通键/AltGr 发匹配取消，双触发键或超时确认让 `TriggerDown` 携带同 token 并提升现有流。暂停、配置更新、hook 失败/终止与退出也必须取消未决 token；原始 down 时间戳必须保留用于 350 ms 长短按判定。
 - **漏 release 自恢复**：rdev/CGEventTap 偶发漏掉触发键 release 时，`HotkeyDetector` 会残留 held 状态。修饰键正常不会自动连发，因此同一触发键在 250 ms 抖动窗口后再次 down 视为上一轮 release 丢失：旧 held 状态重置，必要时向状态机发 `Yielded` 取消卡住的录音，再发新的 `TriggerDown`，保证下一次按键恢复响应。
-- **配置热更新边界**：settings 桥接只广播归一化后确实变化的 `HotkeyConfig`，判定器和 Windows adapter 仍须对相同配置幂等。听写/助手 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未确认的候选必须发送匹配 token 的取消事件，禁止把未确认手势提交给会话状态机。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；未确认候选、AltGr、让路和未配置路径不得设置该 tombstone。
+- **配置热更新边界**：settings 桥接只广播归一化后确实变化的 chord 或 `esc_cancels`，判定器和 Windows adapter 仍须对相同配置幂等；只切换 `esc_cancels` 不得结束或重置当前 chord。听写/助手 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未确认的候选必须发送匹配 token 的取消事件，禁止把未确认手势提交给会话状态机。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；未确认候选、AltGr、让路和未配置路径不得设置该 tombstone。
 - **唯一需要事件拦截的点**：Windows 上单击 Alt 会聚焦菜单栏——助手键（右 Alt）短按时用低级钩子 `WH_KEYBOARD_LL` 吞掉对应 keyup。macOS/Linux 的修饰键单按无系统副作用，无需拦截。启动时自检钩子可用性，失败降级为「监听不拦截」+ UI 提示改键。
 - Windows 事件解码必须区分 `VK_RCONTROL`、`VK_RMENU`、扩展键与 `LLKHF_INJECTED`；Typex 自己的 SendInput 事件不得反向触发会话。右 Ctrl / Ctrl+C、物理右 Alt / 普通键和 AltGr 常见的伪 `Left Ctrl` + `Right Alt` 序列必须经过同一 75 ms 副作用确认边界；只有已确认的右 Alt 助手/翻译手势可以吞对应 keyup。
 - Windows hook 的 health watch 是运行期安全信号而不只是诊断查询：从 Healthy 进入 `Failed` 或意外 `Stopped` 时，runner 必须只发送一次会话 `Cancel` 并刷新托盘为「快捷键不可用」，防止漏掉 TriggerUp 后持续占用麦克风。callback panic 或事件通道关闭进入 `Failed` 时，hook state 必须原子禁止后续 raw event、退出消息循环并卸钩，且该 `Failed` 不得在 `WM_QUIT` 收尾时被覆盖为 `Stopped`。启动失败走同一个可订阅 health 状态；应用主动退出使用独立的正常 `Shutdown` 终态，不取消、不报错。
@@ -302,12 +303,15 @@ pub enum SessionPhase {
 - 两条 VAD 都用于结束裁剪和长录音静音切片：首个语音区间前保留 300 ms，最后语音区间后保留 150 ms。未检出语音但存在连续至少 90 ms 弱信号时提交未裁剪 16 kHz 音频，真正静音返回 `NoSpeech`。录音开始时快照 VAD 配置并随 `Recording` 保存，失败重试与长录音切片不得重读实时设置。
 - 设备选择：空配置使用系统默认输入设备并在下次开流时跟随系统切换；设置中固定设备时，Windows 保存 WASAPI `IMMDevice` endpoint ID、界面只显示 friendly label。固定 ID 缺失必须返回 `AudioDevice`，禁止静默回退默认设备。历史版本保存的 display name 仅在当前枚举结果中唯一匹配时迁移为 ID；无匹配或同名歧义均明确失败。
 - 录音启动失败与运行时 stream error/设备拔出通过独立 `RecordingFailed` 事件主动通知 orchestrator；`Recording` 立即转 `Failed(Recording)` 并执行 `CancelRecording` 释放 active stream，不等待下一次 stop。该失败态的重试语义是重新打开麦克风并开始录音，不进入注入或 STT 阶段。
+- 松键后 orchestrator 先发布 `Transcribing` 快照，再把 `AudioService::stop` 放入阻塞任务；只有同一活动会话收到 `RecordingFinished` 才保存音频并启动 STT。音频收尾期间主循环继续处理 Esc；取消先到时，完成结果直接丢弃且不得调用 Provider。
 
 ### 7.5 文本注入（Injector 后端链）
 
 ```
 trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>; }
 ```
+
+会话注入另有可取消入口，返回 `Injected | Cancelled`，并共享原子门闩 `Pending | Cancelled | Committed`。paste 后端可在写入临时剪贴板后保持 Pending，紧邻首个真实 Cmd/Ctrl+V 或逐字输入 OS API 前竞争提交：取消先赢必须恢复剪贴板且不发输入，提交先赢则取消不再生效并正常完成。非会话调用继续使用原有兼容入口。
 
 按平台组成后备链（每个后端失败自动尝试下一个，全失败 → 复制到剪贴板 + HUD 提示）：
 
@@ -351,7 +355,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 内容 | 位置（平台标准目录） | 说明 |
 |---|---|---|
 | `settings.json` | config dir（如 `~/Library/Application Support/ink.typex.app/`） | 含 profile 与 credentials；导出诊断时 credentials 为空 |
-| `history.sqlite` | data dir | WAL 模式；启动时跑保留期清理 |
+| `history.sqlite` | data dir | WAL 模式；启动时跑保留期清理；成功助手问答复用现有行结构保存 `mode=assistant`、语音指令与完整回答，统计查询排除所有 `assistant` 行 |
 | 失败重试音频 | cache dir `/pending/` | 会话结束/放弃即删；启动时清孤儿文件 |
 | 日志 | log dir，按天滚动，保留 7 天 | 经 redact 层 |
 

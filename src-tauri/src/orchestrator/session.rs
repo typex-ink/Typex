@@ -96,7 +96,7 @@ pub enum Event {
     TriggerUp { held_ms: u64 },
     /// 组合键让路（普通键介入）
     Yielded,
-    /// Esc（listen-only；仅 Recording 响应）
+    /// Esc（listen-only；由执行器按设置与注入提交门闩过滤）
     Esc,
     /// HUD ✕ / dismiss
     Dismiss,
@@ -120,8 +120,12 @@ pub enum Event {
     ProcessFailed { session_id: u64, error: TypexError },
     /// 整理层失败但按降级策略直通原文（F-9：绝不阻塞主流程）
     ProcessDegraded { session_id: u64, original: String },
-    /// 助手模式：回答型结果已交给回答弹窗流式展示，会话就此完成（F-3 / ADR-23）
-    AssistantHandedOff { session_id: u64 },
+    /// 助手模式：回答型结果已交给回答弹窗流式展示，会话就此完成（F-3 / ADR-23）。
+    /// 完整成功回答为 Some；弹窗内终态错误为 None。
+    AssistantHandedOff {
+        session_id: u64,
+        answer: Option<String>,
+    },
     /// 注入完成
     InjectDone { session_id: u64 },
     /// 注入失败
@@ -136,6 +140,10 @@ pub enum Effect {
         session_id: u64,
     },
     CancelRecording,
+    /// 终止本会话仍在运行的音频收尾/STT/LLM/注入任务，并关闭生成中的回答窗。
+    CancelTasks {
+        session_id: u64,
+    },
     /// 停止录音并以音频调 STT
     CallStt {
         session_id: u64,
@@ -235,7 +243,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 // push-to-talk 结束，或 toggle 模式第二次触发 chord 已完整释放。
                 (
                     State::Transcribing { session_id, mode },
-                    vec![E::CallStt { session_id }, E::EmitUi],
+                    vec![E::EmitUi, E::StopRecording { session_id }],
                 )
             }
         }
@@ -261,7 +269,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             // 听写/翻译 toggle 模式下二次按下 = 结束录音。
             (
                 State::Transcribing { session_id, mode },
-                vec![E::CallStt { session_id }, E::EmitUi],
+                vec![E::EmitUi, E::StopRecording { session_id }],
             )
         }
         (s @ State::Recording { toggled: false, .. }, Event::TriggerDown { .. }) => {
@@ -304,6 +312,10 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
         (s @ State::Recording { .. }, _) => (s, vec![]),
 
         // ───────── Transcribing ─────────
+        (
+            s @ State::Transcribing { session_id, .. },
+            Event::RecordingFinished { session_id: sid },
+        ) if sid == session_id => (s, vec![E::CallStt { session_id }]),
         (
             State::Transcribing { session_id, mode },
             Event::SttResult {
@@ -359,6 +371,15 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 vec![E::EmitUi, E::PlayChime(Chime::Error)],
             )
         }
+        (State::Transcribing { session_id, .. }, Event::Esc) => (
+            State::Idle,
+            vec![
+                E::CancelRecording,
+                E::CancelTasks { session_id },
+                E::EmitUi,
+                E::ReleaseAudio { session_id },
+            ],
+        ),
         // 忙碌重按：状态不变 + 提示（Transcribing/Processing/Injecting 共通）
         (s @ State::Transcribing { .. }, Event::TriggerDown { .. }) => (s, vec![E::EmitBusyHint]),
         (s @ State::Transcribing { .. }, _) => (s, vec![]),
@@ -381,9 +402,12 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
             vec![E::Inject { session_id, text }, E::EmitUi],
         ),
-        (State::Processing { session_id, .. }, Event::AssistantHandedOff { session_id: sid })
-            if sid == session_id =>
-        {
+        (
+            State::Processing { session_id, .. },
+            Event::AssistantHandedOff {
+                session_id: sid, ..
+            },
+        ) if sid == session_id => {
             // F-3：回答型结果交给回答弹窗流式展示，主会话即结束（改写型走 ProcessResult → Inject）
             (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
         }
@@ -436,6 +460,14 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 vec![E::EmitUi, E::PlayChime(Chime::Error)],
             )
         }
+        (State::Processing { session_id, .. }, Event::Esc) => (
+            State::Idle,
+            vec![
+                E::CancelTasks { session_id },
+                E::EmitUi,
+                E::ReleaseAudio { session_id },
+            ],
+        ),
         (s @ State::Processing { .. }, Event::TriggerDown { .. }) => (s, vec![E::EmitBusyHint]),
         (s @ State::Processing { .. }, _) => (s, vec![]),
 
@@ -486,6 +518,14 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 effects,
             )
         }
+        (State::Injecting { session_id, .. }, Event::Esc) => (
+            State::Idle,
+            vec![
+                E::CancelTasks { session_id },
+                E::EmitUi,
+                E::ReleaseAudio { session_id },
+            ],
+        ),
         (s @ State::Injecting { .. }, Event::TriggerDown { .. }) => (s, vec![E::EmitBusyHint]),
         (s @ State::Injecting { .. }, _) => (s, vec![]),
 
@@ -574,9 +614,14 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
                 ],
             )
         }
-        (State::Failed { session_id, .. }, Event::Dismiss) => {
-            (State::Idle, vec![E::EmitUi, E::ReleaseAudio { session_id }])
-        }
+        (State::Failed { session_id, .. }, Event::Esc | Event::Dismiss) => (
+            State::Idle,
+            vec![
+                E::CancelTasks { session_id },
+                E::EmitUi,
+                E::ReleaseAudio { session_id },
+            ],
+        ),
         (
             s @ State::Failed {
                 transcript: Some(_),
@@ -665,11 +710,14 @@ mod tests {
     fn hold_351ms_release_is_push_to_talk_end() {
         let (s, fx) = advance(recording(1), Event::TriggerUp { held_ms: 351 }, T);
         assert_eq!(s.phase(), SessionPhase::Transcribing);
-        assert!(fx.contains(&Effect::CallStt { session_id: 1 }));
+        assert_eq!(
+            fx,
+            vec![Effect::EmitUi, Effect::StopRecording { session_id: 1 }]
+        );
     }
 
     #[test]
-    fn dictation_and_translation_toggle_second_press_calls_stt_on_keydown() {
+    fn dictation_and_translation_toggle_second_press_finishes_audio_on_keydown() {
         for mode in [SessionMode::Dictation, SessionMode::Translation] {
             let initial = State::Recording {
                 session_id: 1,
@@ -688,12 +736,15 @@ mod tests {
 
             assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
             assert_eq!(transcribing.session_id(), Some(1));
-            assert!(down_fx.contains(&Effect::CallStt { session_id: 1 }));
+            assert_eq!(
+                down_fx,
+                vec![Effect::EmitUi, Effect::StopRecording { session_id: 1 }]
+            );
         }
     }
 
     #[test]
-    fn assistant_toggle_second_press_waits_for_keyup_before_calling_stt() {
+    fn assistant_toggle_second_press_waits_for_keyup_before_finishing_audio() {
         let initial = State::Recording {
             session_id: 1,
             mode: SessionMode::Assistant,
@@ -716,7 +767,10 @@ mod tests {
         let (transcribing, up_fx) = advance(still_recording, Event::TriggerUp { held_ms: 100 }, T);
         assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
         assert_eq!(transcribing.session_id(), Some(1));
-        assert!(up_fx.contains(&Effect::CallStt { session_id: 1 }));
+        assert_eq!(
+            up_fx,
+            vec![Effect::EmitUi, Effect::StopRecording { session_id: 1 }]
+        );
     }
 
     #[test]
@@ -748,7 +802,14 @@ mod tests {
             mode: SessionMode::Assistant,
             transcript: "总结一下".into(),
         };
-        let (s, fx) = advance(p, Event::AssistantHandedOff { session_id: 1 }, T);
+        let (s, fx) = advance(
+            p,
+            Event::AssistantHandedOff {
+                session_id: 1,
+                answer: Some("回答".into()),
+            },
+            T,
+        );
         assert_eq!(s, State::Idle);
         assert!(fx.contains(&Effect::ReleaseAudio { session_id: 1 }));
     }
@@ -760,7 +821,14 @@ mod tests {
             mode: SessionMode::Assistant,
             transcript: "x".into(),
         };
-        let (s, fx) = advance(p.clone(), Event::AssistantHandedOff { session_id: 1 }, T);
+        let (s, fx) = advance(
+            p.clone(),
+            Event::AssistantHandedOff {
+                session_id: 1,
+                answer: Some("迟到".into()),
+            },
+            T,
+        );
         assert_eq!(s, p);
         assert!(fx.is_empty());
     }
@@ -824,7 +892,10 @@ mod tests {
 
         assert_eq!(transcribing.phase(), SessionPhase::Transcribing);
         assert_eq!(transcribing.mode(), Some(SessionMode::Translation));
-        assert!(effects.contains(&Effect::CallStt { session_id: 1 }));
+        assert_eq!(
+            effects,
+            vec![Effect::EmitUi, Effect::StopRecording { session_id: 1 }]
+        );
     }
 
     // ── 组合键让路（场景 3）──
@@ -893,13 +964,12 @@ mod tests {
     // ── Esc（场景 5）──
 
     #[test]
-    fn esc_only_cancels_recording_state() {
+    fn esc_cancels_every_uncommitted_session_phase() {
         let (s, fx) = advance(recording(1), Event::Esc, T);
         assert_eq!(s, State::Idle);
         assert!(fx.contains(&Effect::CancelRecording));
 
-        // 其他态 Esc 无效果
-        for st in [
+        let cancelled = [
             State::Transcribing {
                 session_id: 1,
                 mode: SessionMode::Dictation,
@@ -909,12 +979,63 @@ mod tests {
                 mode: SessionMode::Dictation,
                 transcript: "x".into(),
             },
-            State::Idle,
-        ] {
+            State::Injecting {
+                session_id: 1,
+                mode: SessionMode::Dictation,
+                text: "x".into(),
+                unpolished: false,
+            },
+            State::Failed {
+                session_id: 1,
+                mode: SessionMode::Dictation,
+                stage: FailedStage::Processing,
+                error: err(ErrorCode::Timeout),
+                transcript: Some("x".into()),
+            },
+        ];
+        for state in cancelled {
+            let (next, effects) = advance(state, Event::Esc, T);
+            assert_eq!(next, State::Idle);
+            assert!(effects.contains(&Effect::CancelTasks { session_id: 1 }));
+            assert!(effects.contains(&Effect::ReleaseAudio { session_id: 1 }));
+        }
+
+        // Idle 没有活动会话。
+        for st in [State::Idle] {
             let (s2, fx2) = advance(st.clone(), Event::Esc, T);
             assert_eq!(s2, st);
             assert!(fx2.is_empty());
         }
+    }
+
+    #[test]
+    fn recording_finished_is_the_only_normal_path_to_stt() {
+        let (transcribing, stop_effects) =
+            advance(recording(1), Event::TriggerUp { held_ms: 351 }, T);
+        assert_eq!(
+            stop_effects,
+            vec![Effect::EmitUi, Effect::StopRecording { session_id: 1 }]
+        );
+
+        let (same, stt_effects) = advance(
+            transcribing.clone(),
+            Event::RecordingFinished { session_id: 1 },
+            T,
+        );
+        assert_eq!(same, transcribing);
+        assert_eq!(stt_effects, vec![Effect::CallStt { session_id: 1 }]);
+    }
+
+    #[test]
+    fn recording_finished_after_cancel_has_no_effect() {
+        let transcribing = State::Transcribing {
+            session_id: 1,
+            mode: SessionMode::Dictation,
+        };
+        let (idle, _) = advance(transcribing, Event::Esc, T);
+        let (state, effects) = advance(idle, Event::RecordingFinished { session_id: 1 }, T);
+        assert_eq!(state, State::Idle);
+        assert!(effects.is_empty());
     }
 
     #[test]

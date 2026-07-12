@@ -40,21 +40,22 @@
 - **组合键让路**：触发键按住期间出现普通键 down → 会话静默取消，Effect 仅含取消/释放录音（`CancelRecording` + `ReleaseAudio`），无 `EmitUi`、注入或提示音。
 - 暂停：Recording 的 push-to-talk 与短按 toggle 两种状态收到托盘暂停发来的 `Cancel` → Idle + 释放录音；Transcribing/Processing 不被暂停强杀。
 - 重按忽略：Transcribing/Processing/Injecting 中触发键按下 → 状态不变，Effect = `EmitUi(busy-hint)`；Failed 中按下 → 放弃旧会话开新录音。
-- Esc：仅 Recording 态响应；其他态收到 Esc 不产生 Effect。
+- 录音结束两阶段：松键先进入 Transcribing，Effect 严格为 `EmitUi` → `StopRecording`；匹配的 `RecordingFinished` 才产生 `CallStt`，取消后迟到的完成事件无 Effect。
+- Esc：开关启用时 Recording、Transcribing、Processing、注入尚未提交的 Injecting 与 Failed 都回到 Idle 并释放会话素材；开关关闭时执行器不向状态机发送 Esc。注入已经提交时 Esc 竞争失败，状态与任务继续完成。
 - 失败恢复：Transcribing 失败 → `recoverable_payload` 含音频；Processing 失败 → 含转写稿且 Effect 提供「复制原文」；重试从正确的 stage 恢复而非从头。
 - 录音失败：Recording 中收到启动失败或运行时设备拔出 → `Failed(Recording)`，Effect 含 `CancelRecording` + 错误反馈；Retry → 同一模式重新 `StartRecording`，不得进入 STT/Injecting。
 - **session_id 竞态**：携带旧 session_id 的 SttResult/LlmDelta 到达 → 被丢弃，状态零变化（这是防「上一句注入到下一句」的核心测试）。
 - 整理层降级：听写中 Polish 超时/报错 → 注入原始转写 + `EmitUi(unpolished)`。
 - 共享预整理：翻译/助手在 `polish_enabled=true` 时先使用文本整理提示词；`polish_enabled=false` 时跳过；整理超时/报错/未配置时直通原始转写继续下游。
 - 翻译降级：STT 成功翻译失败 → Failed 且提供「注入原文」Effect。
-- 取消后迟到的回调：Cancel 后 SttResult 到达 → 丢弃。
-- 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff`（回答型，已交回答弹窗流式）→ Idle + 释放音频；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
+- 取消后迟到的回调：Cancel 后 RecordingFinished/SttResult/ProcessResult/AssistantHandedOff/InjectDone 到达 → 丢弃，且不得启动下游、弹窗或写历史。
+- 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff(Some(answer))`（完整成功回答）→ Idle + 释放音频并写助手历史；`AssistantHandedOff(None)`（弹窗终态错误）不写历史；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
 
 ### 3.2 其他纯逻辑单测
 
 | 对象 | 重点用例 |
 |---|---|
-| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；多键 chord 的 partial/完整/乱序/共享非子集/翻译并集，相同、空或任一子集配置在前后端均拒绝；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；普通键让路；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
+| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；多键 chord 的 partial/完整/乱序/共享非子集/翻译并集，相同、空或任一子集配置在前后端均拒绝；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；Esc 与普通键让路严格分离，`esc_cancels=false` 时活动/空闲/Windows 75 ms 候选阶段均不取消，只切换该设置不得重置 chord；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
 | Windows 候选录音 adapter | 原始触发键立即发候选 token；75 ms 确认携带同 token 提升；Ctrl+C/物理 RAlt+普通键/AltGr 匹配取消且无可见副作用；双键翻译复用候选；快速释放保留原始 held_ms；暂停、配置更新、hook 失败/意外终止与退出清理未决 token |
 | Windows hook health monitor | Healthy/Starting 与暂停态不误取消；运行期 Failed/意外 Stopped 对 push-to-talk/toggle 统一发一次 `Cancel`；重复终态不重复；启动失败使用同一可订阅状态；主动 Shutdown 静默 |
 | Windows 音频转换与设备解析 | WASAPI 常见 `f32/i16/u16` → mono f32 的边界值、声道混合、重采样长度；有界缓冲溢出计数；endpoint ID 精确选择；旧 display name 唯一匹配迁移；同名歧义/固定设备缺失；设备拔出/stream error 脱敏分类与主动通知 |
@@ -65,7 +66,7 @@
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含高配手动模型（Whisper large-v3、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档 |
 | 本地 llama GPU→CPU fallback | load mode；CPU 模型 `n_gpu_layers=0` 且 devices 为空、context 的 K/Q/V 与 op offload 关闭、ASR mtmd `use_gpu=false`；仅 GPU runtime 错误且 LLM 首个可见 delta 前重试一次；输入错误、CPU mode、已输出与第二次错误不重试；ASR 非流式整次重试；并发请求由 inference lease 串行且只加载一个共享 CPU 条目、fallback 前释放失败 GPU 条目、CPU 加载不持缓存锁、显式 unload 后 detached fallback 不回填、`UnloadAfterUse` 只清自己的缓存代际 |
-| 剪贴板事务与 Windows 空选区判定（`inject/paste.rs` / `inject/windows.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；恢复失败不吞注入成功的结果；原多格式快照完整传递；用户/剪贴板管理器中途改变 sequence/owner 时不覆盖；同一非空 owner 分批发布格式导致 sequence 连续变化时接受最终原子载荷并更新恢复基线；复制文本与旧值相同仍按 sequence 识别；sequence 相同与 `u32` 回绕边界；`vscode-editor-data` 缺失、合法 JSON true/false、损坏/字段类型错误/超大 metadata、尾随 NUL 与 Unicode 文本。只有可可靠证明的空选区才返回 `None`，未知情况保留文本 |
+| 剪贴板事务与 Windows 空选区判定（`inject/paste.rs` / `inject/windows.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；取消先赢时恢复且 SendInput/后备注入调用为 0，提交先赢时取消失败且只完成一次；恢复失败不吞注入成功的结果；原多格式快照完整传递；用户/剪贴板管理器中途改变 sequence/owner 时不覆盖；同一非空 owner 分批发布格式导致 sequence 连续变化时接受最终原子载荷并更新恢复基线；复制文本与旧值相同仍按 sequence 识别；sequence 相同与 `u32` 回绕边界；`vscode-editor-data` 缺失、合法 JSON true/false、损坏/字段类型错误/超大 metadata、尾随 NUL 与 Unicode 文本。只有可可靠证明的空选区才返回 `None`，未知情况保留文本 |
 | PromptKit 模板渲染 | 变量替换（target_language、词典注入）、`ANSWER:` 前缀解析 |
 | F-10 词典 | settings 迁移与规范化；STT prompt / 火山 corpus / 本地 hotwords 注入；空词典时 LLM `<dictionary>` 行省略 |
 | 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误 |
@@ -86,10 +87,10 @@
 ### 4.2 服务级集成
 
 - `SettingsService`：临时目录读写全流程、并发写、变更广播（watch 收到且仅收到一次）。
-- `AudioService`：候选 `prepare/promote/cancel` 的 token 隔离；打开中取消、确认先于 stream ready、启动失败延迟到确认、运行时失败与取消竞态；候选期间无电平输出且取消立即释放。
+- `AudioService` / orchestrator：候选 `prepare/promote/cancel` 的 token 隔离；打开中取消、确认先于 stream ready、启动失败延迟到确认、运行时失败与取消竞态；候选期间无电平输出且取消立即释放；用延迟音频收尾证明 Transcribing 快照先发布、主循环仍可取消且取消后不启动 STT。
 - `ProviderRegistry`：配置变更 → 只重建受影响的 profile 实例；缺少密钥或旧版 `keyring://` 引用 → 明确 `not_configured` 错误而非 panic。
-- `history`：CRUD、保留期清理（注入 Clock 拨快 91 天）、并发写（WAL）。
-- `InjectorChain`：用 mock Injector 断言后备链顺序、首个成功即停、全失败 → 剪贴板兜底 Effect。
+- `history`：CRUD、保留期清理（注入 Clock 拨快 91 天）、并发写（WAL）；助手成功问答保存完整指令/回答，错误、取消、部分流不保存，统计聚合排除助手。
+- `InjectorChain`：用 mock Injector 断言后备链顺序、首个成功即停、全失败 → 剪贴板兜底 Effect；可取消入口覆盖 Pending/Cancelled/Committed 竞争及取消后不走后备注入。
 - Windows SendInput adapter：用构造器测试 Ctrl+V、BMP、surrogate pair、emoji、换行和每个 keyup 的 INPUT 序列；系统调用本身由受控 harness 回归。
 - Windows UIA adapter：可注入 worker 通道与纯结果归并层覆盖 `Supported`（空/非空）、`Unsupported`、COM/Internal 错误、超时后熔断、请求队列 full/stopped、响应通道断开，以及多 range 文本与 bounds 并集；UIA 明确返回空选区时不得误走 Ctrl+C。
 
@@ -124,7 +125,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 | 首次启动完成 | `onboarding_done` 与自启选择必须先保存，再调用 `complete_onboarding`；提交中不可重复触发；主页切换失败时保留引导页并显示可重试错误 |
 | 模型管理 | `hardware_ok=false && downloadable=true` 时显示低于建议但下载按钮可用并调用下载；`downloadable=false` 时仍禁用 |
 | ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误） |
-| 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**） |
+| 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；`done` 固化完整回答；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**）；生成中 Esc/关闭/失焦发送取消并隐藏，完成后关闭不取消；各状态面板保持不透明 |
+| 主页历史 | 助手记录展开标签为「语音指令 / 助手结果」，复制完整 `result`；统计数据不因助手回答字数改变 |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |
 | 听写设置 | VAD 分段控件键盘切换；只渲染当前模式门限；两组范围/步长/显示精度；切换模式保留两组独立值并持久化 |
 | shared/ 工具 | 常规单测 |

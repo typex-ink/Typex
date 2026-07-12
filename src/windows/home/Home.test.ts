@@ -7,6 +7,8 @@ import Home from "./Home.vue";
 
 const mockGetSettings = vi.hoisted(() => vi.fn());
 const mockUpdateSettings = vi.hoisted(() => vi.fn());
+const mockQueryHistory = vi.hoisted(() => vi.fn());
+const mockClipboardWrite = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock("@/ipc/bindings", () => ({
   commands: {
@@ -16,7 +18,7 @@ vi.mock("@/ipc/bindings", () => ({
       status: "ok",
       data: { total_duration_ms: 0, total_chars: 0 },
     })),
-    queryHistory: vi.fn(async () => ({ status: "ok", data: [] })),
+    queryHistory: mockQueryHistory,
     deleteHistoryItem: vi.fn(async () => ({ status: "ok", data: null })),
     clearHistory: vi.fn(async () => ({ status: "ok", data: null })),
     openSettingsWindow: vi.fn(async () => ({ status: "ok", data: null })),
@@ -96,6 +98,11 @@ async function mountHome(settings = makeSettings()) {
 describe("Home dictionary", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQueryHistory.mockResolvedValue({ status: "ok", data: [] });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: mockClipboardWrite },
+    });
   });
 
   it("adds a trimmed dictionary term through settings", async () => {
@@ -117,5 +124,32 @@ describe("Home dictionary", () => {
     expect(commands.updateSettings).toHaveBeenCalledOnce();
     const next = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
     expect(next.dictionary.terms).toEqual(["Typex"]);
+  });
+
+  it("labels assistant history and copies the complete answer", async () => {
+    const assistantItem = {
+      id: 7,
+      created_at: Date.now(),
+      mode: "assistant",
+      transcript: "Why did it time out?",
+      result: "The upstream service did not answer before the deadline.",
+      app_name: "VS Code",
+      duration_ms: 2200,
+      char_count: 57,
+    };
+    mockQueryHistory.mockResolvedValue({ status: "ok", data: [assistantItem] });
+    const wrapper = await mountHome();
+    const historyNav = wrapper.findAll("nav div").find((item) => item.text().includes("历史"));
+    await historyNav!.trigger("click");
+    await flushPromises();
+    await wrapper.get(".hrow.clickable").trigger("click");
+
+    expect(wrapper.get(".hexp").text()).toContain("语音指令");
+    expect(wrapper.get(".hexp").text()).toContain("助手结果");
+    const copy = wrapper
+      .findAll(".hexp button")
+      .find((button) => button.text().includes("复制"));
+    await copy!.trigger("click");
+    expect(mockClipboardWrite).toHaveBeenCalledWith(assistantItem.result);
   });
 });
