@@ -8,7 +8,7 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
 pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
@@ -173,8 +173,8 @@ pub enum InjectMethod {
 pub struct DictationSettings {
     /// F-9 整理层开关（默认开，关闭 = 原样模式）
     pub polish_enabled: bool,
-    /// 自定义整理提示词；空 = 用内置模板（03 §3.4）
-    pub polish_prompt: String,
+    /// 自定义整理 system prompt；空 = 用内置值（03 §3.4）
+    pub polish_system_prompt: String,
     pub inject_method: InjectMethod,
     /// 粘贴前延迟 ms（平台坑 7.2-4）
     pub paste_delay_ms: u64,
@@ -192,7 +192,7 @@ impl Default for DictationSettings {
     fn default() -> Self {
         Self {
             polish_enabled: true,
-            polish_prompt: String::new(),
+            polish_system_prompt: String::new(),
             inject_method: InjectMethod::Auto,
             paste_delay_ms: 60,
             language: "auto".into(),
@@ -249,8 +249,8 @@ pub struct TranslationSettings {
     pub target_language: String,
     /// 双向翻译（默认开，02 F-2）
     pub bidirectional: bool,
-    /// 自定义翻译提示词；空 = 内置模板
-    pub translate_prompt: String,
+    /// 自定义翻译 system prompt；空 = 内置值
+    pub translate_system_prompt: String,
     /// 最近使用过的目标语言（HUD 快切）
     pub recent_targets: Vec<String>,
 }
@@ -261,7 +261,7 @@ impl Default for TranslationSettings {
             source_language: "中文（简体）".into(),
             target_language: "English".into(),
             bidirectional: true,
-            translate_prompt: String::new(),
+            translate_system_prompt: String::new(),
             recent_targets: Vec::new(),
         }
     }
@@ -270,9 +270,9 @@ impl Default for TranslationSettings {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct AssistantSettings {
-    /// 自定义处理/问答提示词；空 = 内置模板
-    pub process_prompt: String,
-    pub ask_prompt: String,
+    /// 自定义处理/问答 system prompt；空 = 内置值
+    pub process_system_prompt: String,
+    pub ask_system_prompt: String,
 }
 
 /// 快捷键绑定：每组是一个完整 chord，按键使用稳定物理 KeyId。
@@ -371,7 +371,7 @@ impl DictionarySettings {
         Some(
             terms
                 .into_iter()
-                .map(|term| format!("- {}", escape_dictionary_xml(&term)))
+                .map(|term| format!("- {term}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
         )
@@ -403,21 +403,6 @@ pub fn normalize_dictionary_terms<'a>(terms: impl IntoIterator<Item = &'a str>) 
         out.push(term);
     }
 
-    out
-}
-
-fn escape_dictionary_xml(term: &str) -> String {
-    let mut out = String::with_capacity(term.len());
-    for ch in term.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            _ => out.push(ch),
-        }
-    }
     out
 }
 
@@ -574,7 +559,7 @@ mod tests {
 
         let llm = dictionary.llm_context().unwrap();
         assert!(llm.contains("- Typex"));
-        assert!(llm.contains("A&amp;B &lt;tag&gt;"));
+        assert!(llm.contains("A&B <tag>"));
     }
 
     #[test]

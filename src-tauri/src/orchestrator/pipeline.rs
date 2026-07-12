@@ -7,10 +7,9 @@
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
-use crate::providers::llm::{LlmRequest, Msg, collect_text, prompt};
+use crate::providers::llm::{collect_text, prompt};
 use crate::settings::schema::Settings;
 use crate::types::{SessionMode, SlotKind};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,7 +29,7 @@ pub struct PreparedTranscript {
     pub degraded: bool,
 }
 
-/// 提示词渲染上下文：会话开始时采样，后续重试沿用同一份上下文。
+/// LLM 请求上下文：会话开始时采样，后续重试沿用同一份上下文。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptContext {
     pub target_app: Option<String>,
@@ -43,12 +42,6 @@ impl PromptContext {
                 let app = app.trim();
                 (!app.is_empty()).then(|| app.to_string())
             }),
-        }
-    }
-
-    pub fn insert_values(&self, values: &mut HashMap<&'static str, String>) {
-        if let Some(app) = &self.target_app {
-            values.insert("{target_app}", app.clone());
         }
     }
 }
@@ -68,7 +61,7 @@ pub async fn process(
     }
 }
 
-/// 按听写的文本整理开关和提示词预处理 STT 文本。
+/// 按听写的文本整理开关和 system prompt 预处理 STT 文本。
 ///
 /// 用于听写最终正文，也用于翻译文本和助手语音指令。关闭「文本整理」时不处理；
 /// 开启但整理槽不可用/超时/报错/空输出时直通原文，不阻断下游功能。
@@ -95,28 +88,19 @@ pub async fn prepare_transcript(
         }
     };
 
-    let template = if settings.dictation.polish_prompt.is_empty() {
-        prompt::POLISH_TEMPLATE
-    } else {
-        &settings.dictation.polish_prompt
-    };
-    let mut values = HashMap::new();
-    values.insert("{transcript}", transcript.clone());
-    prompt_context.insert_values(&mut values);
-    if let Some(dictionary) = settings.dictionary.llm_context() {
-        values.insert("{dictionary}", dictionary);
-    }
-    let rendered = prompt::render(template, &values);
+    let dictionary = settings.dictionary.llm_context();
+    let content = prompt::dictation_cleanup_request(
+        &transcript,
+        prompt_context.target_app.as_deref(),
+        dictionary.as_deref(),
+    );
 
-    let req = LlmRequest {
-        system: String::new(),
-        messages: vec![Msg {
-            role: "user".into(),
-            content: rendered,
-        }],
-        temperature: 0.2,
-        max_tokens: None,
-    };
+    let req = prompt::single_turn_request(
+        &settings.dictation.polish_system_prompt,
+        prompt::POLISH_SYSTEM_PROMPT,
+        content,
+        0.2,
+    );
     match tokio::time::timeout(POLISH_TIMEOUT, collect_text(llm.as_ref(), req)).await {
         Ok(Ok(text)) if !text.trim().is_empty() => PreparedTranscript {
             text: text.trim().to_string(),
@@ -158,7 +142,7 @@ async fn polish(
     }
 }
 
-/// F-2 翻译：双向判向在提示词内完成；失败 → Failed（HUD 注入原文降级）。
+/// F-2 翻译：双向判向由 system prompt + XML 参数完成；失败 → Failed（HUD 注入原文降级）。
 async fn translate(
     transcript: String,
     settings: &Settings,
@@ -172,44 +156,20 @@ async fn translate(
     let transcript = prepare_transcript(transcript, settings, registry, prompt_context)
         .await
         .text;
-    let template = if settings.translation.translate_prompt.is_empty() {
-        prompt::TRANSLATE_TEMPLATE
-    } else {
-        &settings.translation.translate_prompt
-    };
-    let mut values = HashMap::new();
-    values.insert("{transcript}", transcript.clone());
-    values.insert(
-        "{source_language}",
-        settings.translation.source_language.clone(),
+    let content = prompt::translation_request(
+        &transcript,
+        &settings.translation.source_language,
+        &settings.translation.target_language,
+        settings.translation.bidirectional,
+        prompt_context.target_app.as_deref(),
     );
-    values.insert(
-        "{target_language}",
-        settings.translation.target_language.clone(),
-    );
-    prompt_context.insert_values(&mut values);
-    // 双向翻译子句：开关关闭时不注入值 → 模板中该行按可选段规则整体省略
-    if settings.translation.bidirectional {
-        values.insert(
-            "{bidirectional_source}",
-            settings.translation.source_language.clone(),
-        );
-        values.insert(
-            "{bidirectional_target}",
-            settings.translation.target_language.clone(),
-        );
-    }
-    let rendered = prompt::render(template, &values);
 
-    let req = LlmRequest {
-        system: String::new(),
-        messages: vec![Msg {
-            role: "user".into(),
-            content: rendered,
-        }],
-        temperature: 0.3,
-        max_tokens: None,
-    };
+    let req = prompt::single_turn_request(
+        &settings.translation.translate_system_prompt,
+        prompt::TRANSLATE_SYSTEM_PROMPT,
+        content,
+        0.3,
+    );
     match collect_text(llm.as_ref(), req).await {
         Ok(text) if !text.trim().is_empty() => ProcessOutcome::Done(text.trim().to_string()),
         Ok(_) => ProcessOutcome::Failed(TypexError::new(ErrorCode::ServerError, "翻译结果为空")),

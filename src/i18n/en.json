@@ -120,13 +120,8 @@
     "dictation": {
       "polish": "Text cleanup",
       "polish_hint": "Removes filler words, fixes punctuation, technical terms, and mixed Chinese/English spacing",
-      "prompt_label": "Cleanup prompt (advanced)",
-      "prompt_hint": "Placeholders: {'{transcript}'} raw transcript · {'{dictionary}'} personal dictionary · {'{target_app}'} target app",
-      "ph_help_prefix": "Available placeholders: ",
-      "ph_help_transcript": "raw transcript (required)",
-      "ph_help_dictionary": "personal dictionary (optional, F-10)",
-      "ph_help_target_app": "target app (optional)",
-      "ph_missing": "Missing required placeholder {ph} — cannot save",
+      "system_prompt_label": "Cleanup system prompt",
+      "system_prompt_hint": "Controls how dictated text is cleaned while preserving intent, tone, and key terms",
       "vad_mode": "Voice detection",
       "vad_mode_hint": "Neural works best in most environments; energy threshold uses input volume only",
       "vad_neural": "Neural network",
@@ -153,19 +148,14 @@
       "target_hint": "The language to translate into",
       "bidirectional": "Bidirectional",
       "bidirectional_hint": "When you speak {target}, translate back into {source} automatically",
-      "prompt_label": "Translation prompt (advanced)",
-      "prompt_hint": "Placeholders: {'{transcript}'} raw transcript · {'{source_language}'} source · {'{target_language}'} target · {'{target_app}'} target app · {'{bidirectional_source}'}/{'{bidirectional_target}'} bidirectional clause (line omitted when the toggle is off)",
-      "ph_missing_list": "Missing required placeholders: {list}"
+      "system_prompt_label": "Translation system prompt",
+      "system_prompt_hint": "Controls translation fidelity, language style, formatting, and output"
     },
     "assistant": {
-      "prompt_label": "No-selection Q&A prompt (advanced)",
-      "prompt_hint": "Placeholders: {'{instruction}'} voice question · {'{target_app}'} target app (optional)",
-      "process_prompt_label": "Selected-text prompt (advanced)",
-      "process_prompt_hint": "Placeholders: {'{selection}'} selected text · {'{instruction}'} voice instruction · {'{target_app}'} target app (optional); answers should start with ANSWER:",
-      "ask_prompt_label": "No-selection Q&A prompt (advanced)",
-      "ask_prompt_hint": "Placeholders: {'{instruction}'} voice question · {'{target_app}'} target app (optional)",
-      "ph_missing": "Missing required placeholder {ph}",
-      "ph_missing_list": "Missing required placeholders: {list}"
+      "process_system_prompt_label": "Selected-text system prompt",
+      "process_system_prompt_hint": "Controls how voice instructions transform selected text or answer questions about it",
+      "ask_system_prompt_label": "No-selection Q&A system prompt",
+      "ask_system_prompt_hint": "Controls the response style and output for voice questions without selected text"
     },
     "providers": {
       "slot_stt": "Speech to text",

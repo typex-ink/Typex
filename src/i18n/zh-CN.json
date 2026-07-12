@@ -120,13 +120,8 @@
     "dictation": {
       "polish": "文本整理",
       "polish_hint": "去语气词、修标点、修复技术术语和中英文混排",
-      "prompt_label": "整理提示词（高级）",
-      "prompt_hint": "占位符：{'{transcript}'} 原始转写 · {'{dictionary}'} 个人词典 · {'{target_app}'} 目标应用",
-      "ph_help_prefix": "可用占位符：",
-      "ph_help_transcript": "原始转写文本（必需）",
-      "ph_help_dictionary": "个人词典（可选，F-10）",
-      "ph_help_target_app": "目标应用（可选）",
-      "ph_missing": "缺少必需占位符 {ph}，无法保存",
+      "system_prompt_label": "整理系统提示词",
+      "system_prompt_hint": "控制听写转录的清理方式，并保留原意、语气和关键术语",
       "vad_mode": "语音活动检测",
       "vad_mode_hint": "神经网络适合多数环境；能量门限仅按输入音量判断",
       "vad_neural": "神经网络",
@@ -153,19 +148,14 @@
       "target_hint": "要翻译成的语言",
       "bidirectional": "双向翻译",
       "bidirectional_hint": "检测到你说的是 {target} 时，自动译回 {source}",
-      "prompt_label": "翻译提示词（高级）",
-      "prompt_hint": "占位符：{'{transcript}'} 原始转写 · {'{source_language}'} 源语言 · {'{target_language}'} 目标语言 · {'{target_app}'} 目标应用 · {'{bidirectional_source}'}/{'{bidirectional_target}'} 双向子句（开关关闭时该行省略）",
-      "ph_missing_list": "缺少必需占位符：{list}"
+      "system_prompt_label": "翻译系统提示词",
+      "system_prompt_hint": "控制译文的忠实度、语言风格、格式保留和输出方式"
     },
     "assistant": {
-      "prompt_label": "无选区问答提示词（高级）",
-      "prompt_hint": "占位符：{'{instruction}'} 语音问题 · {'{target_app}'} 目标应用（可选）",
-      "process_prompt_label": "选区处理提示词（高级）",
-      "process_prompt_hint": "占位符：{'{selection}'} 选中文本 · {'{instruction}'} 语音指令 · {'{target_app}'} 目标应用（可选）；回答型需输出 ANSWER:",
-      "ask_prompt_label": "无选区问答提示词（高级）",
-      "ask_prompt_hint": "占位符：{'{instruction}'} 语音问题 · {'{target_app}'} 目标应用（可选）",
-      "ph_missing": "缺少必需占位符 {ph}",
-      "ph_missing_list": "缺少必需占位符：{list}"
+      "process_system_prompt_label": "选区处理系统提示词",
+      "process_system_prompt_hint": "控制如何按语音指令处理选中文本，或回答与选区有关的问题",
+      "ask_system_prompt_label": "无选区问答系统提示词",
+      "ask_system_prompt_hint": "控制无选区语音问答的回答方式和输出风格"
     },
     "providers": {
       "slot_stt": "语音转文字",

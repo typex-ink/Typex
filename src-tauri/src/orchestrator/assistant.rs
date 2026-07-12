@@ -9,7 +9,7 @@
 use crate::error::{ErrorCode, Result, TypexError};
 use crate::providers::ProviderError;
 use crate::providers::ProviderRegistry;
-use crate::providers::llm::{LlmDelta, LlmRequest, Msg, prompt};
+use crate::providers::llm::{LlmDelta, prompt};
 use crate::settings::SettingsService;
 use crate::types::SlotKind;
 use futures_util::StreamExt;
@@ -104,35 +104,27 @@ impl AssistantService {
                 .await
                 .text;
 
-        // 选提示词：有选区 = 处理模板（F-3a）；无选区 = 问答模板（F-3b）
-        let (template, custom) = if selection.is_some() {
-            (prompt::PROCESS_TEMPLATE, s.assistant.process_prompt.clone())
-        } else {
-            (prompt::ASK_TEMPLATE, s.assistant.ask_prompt.clone())
-        };
-        let template = if custom.is_empty() {
-            template.to_string()
-        } else {
-            custom
-        };
+        // 有选区 = F-3a 处理协议；无选区 = F-3b 问答协议。
+        let (custom_system, built_in_system, content) =
+            if let Some(selection) = selection.as_deref() {
+                (
+                    s.assistant.process_system_prompt.as_str(),
+                    prompt::PROCESS_SYSTEM_PROMPT,
+                    prompt::selection_processing_request(
+                        selection,
+                        &instruction,
+                        prompt_context.target_app.as_deref(),
+                    ),
+                )
+            } else {
+                (
+                    s.assistant.ask_system_prompt.as_str(),
+                    prompt::ASK_SYSTEM_PROMPT,
+                    prompt::question_request(&instruction, prompt_context.target_app.as_deref()),
+                )
+            };
 
-        let mut values = std::collections::HashMap::new();
-        values.insert("{instruction}", instruction.clone());
-        if let Some(sel) = &selection {
-            values.insert("{selection}", sel.clone());
-        }
-        prompt_context.insert_values(&mut values);
-        let rendered = prompt::render(&template, &values);
-
-        let req = LlmRequest {
-            system: String::new(),
-            messages: vec![Msg {
-                role: "user".into(),
-                content: rendered,
-            }],
-            temperature: 0.3,
-            max_tokens: None,
-        };
+        let req = prompt::single_turn_request(custom_system, built_in_system, content, 0.3);
 
         let ctx = RunCtx {
             request_id,

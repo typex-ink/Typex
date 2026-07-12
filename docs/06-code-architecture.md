@@ -132,7 +132,7 @@ typex/
 │       │   │   ├── volcengine.rs
 │       │   │   └── local.rs      # Qwen3-ASR(llama.cpp) + SenseVoice(sherpa-onnx)（feature "local-models"）
 │       │   ├── llm/
-│       │   │   ├── mod.rs        # trait LlmProvider + PromptKit（内置提示词模板）
+│       │   │   ├── mod.rs        # trait LlmProvider + PromptKit（内置 system prompt + 固定 XML user message）
 │       │   │   ├── chat_completions.rs
 │       │   │   ├── responses.rs
 │       │   │   └── local.rs      # llama.cpp + Qwen3.5（仅整理/翻译槽，feature "local-models"）
@@ -347,6 +347,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 - 设置文件：`tauri-plugin-store`（JSON，位于平台标准配置目录），带 `schema_version` 与迁移函数。
 - `hotkeys.dictation` / `hotkeys.assistant` / `hotkeys.translation` 分别保存规范化完整 chord。schema v6 将历史后端/浏览器别名迁移为 §7.3 的稳定 `KeyId`；schema v8 升级时把 v7 翻译键按旧规则重建为听写与助手的有序去重并集，此后每组独立归一化、持久化，修改任一项不再派生其他项。
 - schema v7 增加 `dictation.vad.{mode,energy_threshold,neural_threshold}`；旧配置迁移为神经网络模式。门限保存前必须为有限值且在规格范围内；加载时 VAD 子树无效只恢复该子树，不得丢弃其他设置。
+- schema v9 将四类可编辑模板替换为 `dictation.polish_system_prompt`、`translation.translate_system_prompt`、`assistant.process_system_prompt`、`assistant.ask_system_prompt`。v8 及更旧配置升级时直接删除旧模板字段并将新字段置空（空值表示使用内置 system prompt），不迁移旧模板内容。动态任务和数据只能由 orchestrator 通过 `providers/llm/prompt.rs` 的固定 XML builder 生成单条 user message；builder 必须使用 XML writer 转义所有动态值。
 - `dictation.microphone`：空字符串表示系统默认；非空值表示平台稳定设备 ID（Windows 为 WASAPI endpoint ID）。旧版设备名称在运行时唯一匹配后写回稳定 ID。
 - 密钥：随 profile 的 `credentials` 字段存入 `settings.json`，与其他配置项同路径；诊断包导出清空 `credentials`，日志 redact 层拦截 Authorization/密钥文本。旧版 `keyring://` 引用在迁移时清除，运行时也视为未配置。
 - 日志：`tracing` + 滚动文件，默认 INFO；**全局 redact 层**保证 Authorization/密钥永不入日志（见 §5.5）。
@@ -447,7 +448,7 @@ src/
 |---|---|---|
 | 状态机单测 | `cargo test`（纯函数，无 IO） | §5.2 全部转移规则：长短按、组合键让路、重按忽略、失败重试、session_id 竞态 |
 | Provider 集成测 | `wiremock`（本地 mock HTTP） | 两种 wire 格式的请求构造/SSE 解析/错误分类/重试；火山 flash 的 header 判定 |
-| 整理提示词回归 | `docs/fixtures/denoise-cases.md` 驱动的手动/半自动评测 | 改口/语气词/格式指令样例集，防提示词回归；自动评测器必须复用运行时提示词，不维护单独提示词副本 |
+| 提示词与消息契约回归 | `docs/fixtures/` 驱动的手动/半自动评测 + Rust 静态测试 | 防整理/翻译/处理/问答行为回归；断言 system/user 分离、固定 XML 结构与动态值转义；自动评测器必须复用运行时 system prompt，不维护单独副本 |
 | 前端组件 | `vitest` + `@vue/test-utils`（IPC 层 mock bindings） | HotkeyRecorder、ProviderCard 表单、错误文案映射 |
 | 端到端 | 用**人工回归清单**（`docs/09-release-checklist.md`，按 02 章验收标准逐条 × 三平台） | 键盘监听/注入/权限这类系统能力自动化成本过高，不强上 E2E 框架 |
 | CI 门槛 | clippy `-D warnings`、`cargo test`、`vue-tsc`、vitest、bindings 新鲜度校验、hud 体积断言 | PR 必须绿 |

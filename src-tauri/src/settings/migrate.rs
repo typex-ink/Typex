@@ -22,6 +22,9 @@ pub fn migrate(mut value: Value) -> Value {
     } else {
         sanitize_v7_vad(&mut value);
     }
+    if version < 9 {
+        migrate_v8_to_v9(&mut value);
+    }
     normalize_hotkey_ids(&mut value, version < 8);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
@@ -31,6 +34,45 @@ pub fn migrate(mut value: Value) -> Value {
         );
     }
     value
+}
+
+fn migrate_v8_to_v9(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+
+    replace_prompt_field(root, "dictation", "polish_prompt", "polish_system_prompt");
+    replace_prompt_field(
+        root,
+        "translation",
+        "translate_prompt",
+        "translate_system_prompt",
+    );
+
+    let assistant = root
+        .entry("assistant")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(assistant) = assistant.as_object_mut() {
+        assistant.remove("process_prompt");
+        assistant.remove("ask_prompt");
+        assistant.insert("process_system_prompt".into(), Value::String(String::new()));
+        assistant.insert("ask_system_prompt".into(), Value::String(String::new()));
+    }
+}
+
+fn replace_prompt_field(
+    root: &mut serde_json::Map<String, Value>,
+    section: &str,
+    old_field: &str,
+    new_field: &str,
+) {
+    let section = root
+        .entry(section)
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(section) = section.as_object_mut() {
+        section.remove(old_field);
+        section.insert(new_field.into(), Value::String(String::new()));
+    }
 }
 
 fn default_vad_value() -> Value {
@@ -201,7 +243,7 @@ mod tests {
         });
 
         let migrated = migrate(value);
-        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(migrated["schema_version"], 9);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
         assert!(migrated["profiles"][0].get("slots").is_none());
@@ -260,7 +302,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(migrated["schema_version"], 9);
         assert_eq!(migrated["dictation"]["microphone"], "USB Microphone");
     }
 
@@ -277,7 +319,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(migrated["schema_version"], 9);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["ControlRight", "Digit1"])
@@ -321,7 +363,7 @@ mod tests {
     #[test]
     fn current_schema_normalizes_and_preserves_independent_translation() {
         let value = serde_json::json!({
-            "schema_version": 8,
+            "schema_version": 9,
             "hotkeys": {
                 "dictation": ["Return"],
                 "assistant": ["ContextMenu"],
@@ -331,7 +373,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(migrated["schema_version"], 9);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["Enter"])
@@ -353,7 +395,7 @@ mod tests {
             "dictation": { "polish_enabled": false }
         }));
 
-        assert_eq!(migrated["schema_version"], 8);
+        assert_eq!(migrated["schema_version"], 9);
         assert_eq!(migrated["dictation"]["polish_enabled"], false);
         assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
         assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
@@ -379,5 +421,64 @@ mod tests {
         assert_eq!(migrated["dictation"]["polish_enabled"], false);
         assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
         assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
+    }
+
+    #[test]
+    fn v8_prompt_templates_are_discarded_for_v9_system_prompts() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 8,
+            "dictation": {
+                "polish_enabled": false,
+                "polish_prompt": "legacy {transcript}",
+                "polish_system_prompt": "do not preserve"
+            },
+            "translation": {
+                "source_language": "日本語",
+                "translate_prompt": "legacy {transcript}"
+            },
+            "assistant": {
+                "process_prompt": "legacy {selection}",
+                "ask_prompt": "legacy {instruction}"
+            }
+        }));
+
+        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["dictation"]["polish_enabled"], false);
+        assert_eq!(migrated["translation"]["source_language"], "日本語");
+        assert_eq!(migrated["dictation"]["polish_system_prompt"], "");
+        assert_eq!(migrated["translation"]["translate_system_prompt"], "");
+        assert_eq!(migrated["assistant"]["process_system_prompt"], "");
+        assert_eq!(migrated["assistant"]["ask_system_prompt"], "");
+        assert!(migrated["dictation"].get("polish_prompt").is_none());
+        assert!(migrated["translation"].get("translate_prompt").is_none());
+        assert!(migrated["assistant"].get("process_prompt").is_none());
+        assert!(migrated["assistant"].get("ask_prompt").is_none());
+    }
+
+    #[test]
+    fn v9_custom_system_prompts_are_preserved() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 9,
+            "dictation": { "polish_system_prompt": "custom polish" },
+            "translation": { "translate_system_prompt": "custom translate" },
+            "assistant": {
+                "process_system_prompt": "custom process",
+                "ask_system_prompt": "custom ask"
+            }
+        }));
+
+        assert_eq!(
+            migrated["dictation"]["polish_system_prompt"],
+            "custom polish"
+        );
+        assert_eq!(
+            migrated["translation"]["translate_system_prompt"],
+            "custom translate"
+        );
+        assert_eq!(
+            migrated["assistant"]["process_system_prompt"],
+            "custom process"
+        );
+        assert_eq!(migrated["assistant"]["ask_system_prompt"], "custom ask");
     }
 }

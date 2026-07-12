@@ -29,7 +29,7 @@ function makeSettings(
   translation: string[] = [...new Set([...dictation, ...assistant])],
 ): Settings {
   return {
-    schema_version: 8,
+    schema_version: 9,
     hotkeys: {
       dictation,
       assistant,

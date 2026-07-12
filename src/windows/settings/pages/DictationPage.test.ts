@@ -20,7 +20,7 @@ function makeSettings(microphone: string): Settings {
   return {
     dictation: {
       polish_enabled: true,
-      polish_prompt: "",
+      polish_system_prompt: "",
       inject_method: "auto",
       paste_delay_ms: 60,
       language: "auto",
@@ -45,7 +45,7 @@ function mountPage(microphone: string) {
   });
 }
 
-describe("DictationPage default polish prompt", () => {
+describe("DictationPage polish system prompt", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listAudioDevices.mockResolvedValue({ status: "ok", data: [] });
@@ -55,10 +55,13 @@ describe("DictationPage default polish prompt", () => {
     }));
   });
 
-  it("shows the built-in dictation cleanup contract with required runtime placeholders", async () => {
+  it("shows the built-in cleanup rules without runtime task data", async () => {
     const wrapper = mountPage("");
     await flushPromises();
 
+    expect(wrapper.text()).not.toContain("(advanced)");
+    expect(wrapper.text()).not.toContain("XML");
+    expect(wrapper.text()).toContain("Controls how dictated text is cleaned");
     const expand = wrapper.findAll("button").find((button) => button.text().startsWith("Expand"));
     expect(expand).toBeDefined();
     await expand!.trigger("click");
@@ -68,8 +71,22 @@ describe("DictationPage default polish prompt", () => {
     expect(prompt).toContain('如果输入提到"Typex"或向AI发出指令');
     expect(prompt).toContain("数字与日期");
     expect(prompt).toContain("听写邮件时使用邮件格式排版");
-    expect(prompt).toContain("<transcript>{transcript}</transcript>");
+    expect(prompt).not.toContain("{transcript}");
+    expect(prompt).not.toContain("<dictation_cleanup_request>");
     expect(prompt).not.toContain("{{agentName}}");
+  });
+
+  it("saves a custom system prompt without requiring placeholders", async () => {
+    const wrapper = mountPage("");
+    await flushPromises();
+
+    const expand = wrapper.findAll("button").find((button) => button.text().startsWith("Expand"));
+    await expand!.trigger("click");
+    await wrapper.get("textarea").setValue("Only clean the supplied transcript.");
+    await wrapper.findAll("button").find((button) => button.text() === "Save")!.trigger("click");
+
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0];
+    expect(saved.dictation.polish_system_prompt).toBe("Only clean the supplied transcript.");
   });
 });
 

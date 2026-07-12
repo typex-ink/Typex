@@ -6071,6 +6071,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-av-foundation",
+ "quick-xml",
  "rdev",
  "reqwest 0.12.28",
  "rodio",
