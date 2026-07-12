@@ -40,7 +40,6 @@ const typingWpm = useSetting(
 <template>
   <div>
     <h5 class="page-title">{{ t("settings.nav_history") }}</h5>
-    <p class="desc">{{ t("settings.history.desc") }}</p>
     <FormRow :label="t('settings.history.save_toggle')">
       <Toggle v-model="enabled" />
     </FormRow>
@@ -78,11 +77,6 @@ const typingWpm = useSetting(
   font-size: 15px;
   margin-bottom: 14px;
   font-weight: 600;
-}
-.desc {
-  font-size: 12px;
-  color: var(--text-2);
-  margin: -10px 0 16px;
 }
 .ok {
   color: var(--success);

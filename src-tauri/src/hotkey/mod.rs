@@ -106,7 +106,7 @@ pub enum HotkeyEvent {
     CaptureCandidatePromoted { token: u64, mode: SessionMode },
     /// A normal chord or runtime reset discards the matching candidate silently.
     CaptureCandidateCancelled { token: u64 },
-    /// 按住期间组合出另一触发键 → 升级为翻译（音频保留）
+    /// 按住期间补全严格更长的 chord → 对应模式接管（音频保留）
     ModeUpgraded { mode: SessionMode },
     /// 全部触发键松开；held_ms 自首个触发键按下起算
     TriggerUp { held_ms: u64 },
@@ -424,16 +424,42 @@ impl HotkeyDetector {
                 .all(|key| self.held.iter().any(|held| held.id == *key))
     }
 
-    fn completed_mode(&self) -> Option<SessionMode> {
-        if self.chord_active(&self.config.translation) {
-            Some(SessionMode::Translation)
-        } else if self.chord_active(&self.config.dictation) {
-            Some(SessionMode::Dictation)
-        } else if self.chord_active(&self.config.assistant) {
-            Some(SessionMode::Assistant)
-        } else {
-            None
+    fn chord_contains(outer: &[KeyId], inner: &[KeyId]) -> bool {
+        inner
+            .iter()
+            .all(|key| outer.iter().any(|other| other == key))
+    }
+
+    fn chord_for_mode(&self, mode: SessionMode) -> &[KeyId] {
+        match mode {
+            SessionMode::Dictation => &self.config.dictation,
+            SessionMode::Assistant => &self.config.assistant,
+            SessionMode::Translation => &self.config.translation,
         }
+    }
+
+    fn completed_mode(&self) -> Option<SessionMode> {
+        let active_mode = self.current_mode;
+        let mut selected = active_mode;
+        for mode in [
+            SessionMode::Translation,
+            SessionMode::Dictation,
+            SessionMode::Assistant,
+        ] {
+            let chord = self.chord_for_mode(mode);
+            if !self.chord_active(chord) {
+                continue;
+            }
+            let can_take_over = selected.is_none_or(|current| {
+                let current_chord = self.chord_for_mode(current);
+                chord.len() > current_chord.len()
+                    && (active_mode.is_none() || Self::chord_contains(chord, current_chord))
+            });
+            if can_take_over {
+                selected = Some(mode);
+            }
+        }
+        selected
     }
 
     fn reset_gesture(&mut self) {
@@ -458,13 +484,9 @@ impl HotkeyDetector {
                 self.gesture_started_at_ms = Some(t_ms);
                 vec![HotkeyEvent::TriggerDown { mode }]
             }
-            Some(current)
-                if mode == SessionMode::Translation && current != SessionMode::Translation =>
-            {
-                self.current_mode = Some(SessionMode::Translation);
-                vec![HotkeyEvent::ModeUpgraded {
-                    mode: SessionMode::Translation,
-                }]
+            Some(current) if mode != current => {
+                self.current_mode = Some(mode);
+                vec![HotkeyEvent::ModeUpgraded { mode }]
             }
             Some(_) => Vec::new(),
         }
@@ -911,6 +933,57 @@ mod tests {
             d.on_key("Menu", false, 225),
             vec![HotkeyEvent::TriggerUp { held_ms: 200 }]
         );
+    }
+
+    #[test]
+    fn longer_dictation_chord_takes_over_translation_subset_in_either_order() {
+        let config = HotkeyConfig {
+            dictation: vec!["ControlRight".into(), "Space".into()],
+            assistant: vec!["AltRight".into()],
+            translation: vec!["ControlRight".into()],
+            esc_cancels: true,
+        };
+        let mut subset_first = HotkeyDetector::new(config.clone());
+        assert_eq!(
+            subset_first.on_key("ControlRight", true, 0),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Translation
+            }]
+        );
+        assert_eq!(
+            subset_first.on_key("Space", true, 25),
+            vec![HotkeyEvent::ModeUpgraded {
+                mode: SessionMode::Dictation
+            }]
+        );
+
+        let mut longer_completed_together = HotkeyDetector::new(config);
+        assert_eq!(longer_completed_together.on_key("Space", true, 0), vec![]);
+        assert_eq!(
+            longer_completed_together.on_key("ControlRight", true, 25),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
+        );
+    }
+
+    #[test]
+    fn unrelated_complete_chord_does_not_replace_the_active_mode() {
+        let mut detector = HotkeyDetector::new(HotkeyConfig {
+            dictation: vec!["ControlRight".into(), "KeyA".into()],
+            assistant: vec!["AltRight".into()],
+            translation: vec!["ControlRight".into(), "KeyB".into(), "KeyC".into()],
+            esc_cancels: true,
+        });
+        assert_eq!(detector.on_key("ControlRight", true, 0), vec![]);
+        assert_eq!(
+            detector.on_key("KeyA", true, 10),
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
+        );
+        assert_eq!(detector.on_key("KeyB", true, 20), vec![]);
+        assert_eq!(detector.on_key("KeyC", true, 30), vec![]);
     }
 
     #[test]

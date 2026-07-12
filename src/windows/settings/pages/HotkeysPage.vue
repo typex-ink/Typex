@@ -53,7 +53,6 @@ const translation = computed({
 <template>
   <div>
     <h5 class="page-title">{{ t("settings.nav_hotkeys") }}</h5>
-    <p class="desc">{{ t("settings.hotkeys.desc") }}</p>
     <Callout v-if="validationError" variant="warn" class="validation-error">
       {{ t("settings.hotkeys.unreachable_chords") }}
     </Callout>
@@ -74,11 +73,6 @@ const translation = computed({
   font-size: 15px;
   margin-bottom: 14px;
   font-weight: 600;
-}
-.desc {
-  font-size: 12px;
-  color: var(--text-2);
-  margin: -10px 0 16px;
 }
 .validation-error {
   margin-bottom: 12px;

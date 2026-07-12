@@ -204,4 +204,26 @@ describe("Onboarding", () => {
     expect(wrapper.text()).toContain("听写与助手不能相同或互相包含");
     expect(wrapper.text()).toContain("右 Ctrl");
   });
+
+  it("第 4 步允许翻译成为另一组合的严格子集", async () => {
+    const wrapper = await mountOnboarding();
+    await goToHotkeys(wrapper);
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+
+    await recorders[0].get("button").trigger("click");
+    keyboard("keydown", "ControlRight");
+    keyboard("keydown", "Digit1");
+    keyboard("keyup", "Digit1");
+    await flushPromises();
+
+    await recorders[2].get("button").trigger("click");
+    keyboard("keydown", "ControlRight");
+    keyboard("keyup", "ControlRight");
+    await flushPromises();
+
+    const saved = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(saved?.hotkeys.dictation).toEqual(["ControlRight", "Digit1"]);
+    expect(saved?.hotkeys.translation).toEqual(["ControlRight"]);
+    expect(wrapper.text()).not.toContain("翻译不能与前两项完全相同");
+  });
 });

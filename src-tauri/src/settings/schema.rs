@@ -502,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_or_subset_hotkeys_are_not_reachable() {
+    fn indistinguishable_hotkeys_are_not_reachable() {
         let equal = HotkeySettings {
             dictation: vec!["ControlRight".into()],
             assistant: vec!["ControlRight".into()],
@@ -517,13 +517,24 @@ mod tests {
         };
         assert!(!subset.chords_are_reachable());
 
-        let translation_shadows_dictation = HotkeySettings {
+        let translation_matches_dictation = HotkeySettings {
+            dictation: vec!["ControlRight".into()],
+            assistant: vec!["AltRight".into()],
+            translation: vec!["ControlRight".into()],
+            ..HotkeySettings::default()
+        };
+        assert!(!translation_matches_dictation.chords_are_reachable());
+    }
+
+    #[test]
+    fn translation_can_be_a_strict_subset_of_another_chord() {
+        let hotkeys = HotkeySettings {
             dictation: vec!["ControlRight".into(), "KeyA".into()],
             assistant: vec!["AltRight".into()],
             translation: vec!["ControlRight".into()],
             ..HotkeySettings::default()
         };
-        assert!(!translation_shadows_dictation.chords_are_reachable());
+        assert!(hotkeys.chords_are_reachable());
     }
 
     #[test]

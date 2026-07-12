@@ -125,10 +125,12 @@ export function hotkeyChordsAreReachable(
 
   const isSubset = (left: readonly string[], right: readonly string[]) =>
     left.every((key) => right.includes(key));
+  const isSameChord = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length && isSubset(left, right);
   return (
     !isSubset(normalizedDictation, normalizedAssistant) &&
     !isSubset(normalizedAssistant, normalizedDictation) &&
-    !isSubset(normalizedTranslation, normalizedDictation) &&
-    !isSubset(normalizedTranslation, normalizedAssistant)
+    !isSameChord(normalizedTranslation, normalizedDictation) &&
+    !isSameChord(normalizedTranslation, normalizedAssistant)
   );
 }

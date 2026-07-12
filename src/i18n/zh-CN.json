@@ -270,11 +270,9 @@
       "import_confirm": "导入"
     },
     "hotkeys": {
-      "desc": "听写与助手键位可改；翻译 = 两键同按（自动跟随）。",
-      "unreachable_chords": "请选择三个非空快捷键；听写与助手不能相同或互相包含，翻译不能等于或包含于前两项。"
+      "unreachable_chords": "请选择三个非空快捷键；听写与助手不能相同或互相包含，翻译不能与前两项完全相同。"
     },
     "history": {
-      "desc": "历史仅保存在本机，不含音频。",
       "save_toggle": "保存历史记录",
       "retention": "保留期限",
       "days": "{n} 天",

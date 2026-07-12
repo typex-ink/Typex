@@ -92,7 +92,7 @@ pub fn derive_translation_chord(dictation: &[KeyId], assistant: &[KeyId]) -> Vec
     normalize_hotkey_chord(&merged)
 }
 
-/// All three functional chords must remain independently reachable.
+/// Functional chords must be non-empty and distinguishable at their exact shape.
 pub fn hotkey_chords_are_reachable(
     dictation: &[KeyId],
     assistant: &[KeyId],
@@ -109,10 +109,12 @@ pub fn hotkey_chords_are_reachable(
         left.iter()
             .all(|key| right.iter().any(|other| other == key))
     };
+    let same_chord =
+        |left: &[KeyId], right: &[KeyId]| left.len() == right.len() && is_subset(left, right);
     !is_subset(&dictation, &assistant)
         && !is_subset(&assistant, &dictation)
-        && !is_subset(&translation, &dictation)
-        && !is_subset(&translation, &assistant)
+        && !same_chord(&translation, &dictation)
+        && !same_chord(&translation, &assistant)
 }
 
 /// Modifier keys do not auto-repeat and can use duplicate-down stale recovery.
@@ -189,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn functional_chords_reject_empty_equal_and_shadowing_bindings() {
+    fn functional_chords_reject_empty_and_indistinguishable_bindings() {
         let translation = ["ControlRight".into(), "AltRight".into()];
         assert!(!hotkey_chords_are_reachable(
             &[],
@@ -216,6 +218,11 @@ mod tests {
             &["AltRight".into()],
             &["ControlRight".into()]
         ));
+        assert!(!hotkey_chords_are_reachable(
+            &["ControlRight".into()],
+            &["AltRight".into()],
+            &[]
+        ));
     }
 
     #[test]
@@ -233,6 +240,20 @@ mod tests {
             &["ControlRight".into()],
             &["AltRight".into()],
             &["F13".into(), "Menu".into()]
+        ));
+    }
+
+    #[test]
+    fn translation_can_be_a_strict_subset_or_superset() {
+        assert!(hotkey_chords_are_reachable(
+            &["ControlRight".into(), "KeyA".into()],
+            &["AltRight".into()],
+            &["ControlRight".into()]
+        ));
+        assert!(hotkey_chords_are_reachable(
+            &["ControlRight".into()],
+            &["AltRight".into()],
+            &["ControlRight".into(), "AltRight".into()]
         ));
     }
 }

@@ -49,6 +49,15 @@ function mountPage(settings = makeSettings()) {
   });
 }
 
+function keyboard(
+  type: "keydown" | "keyup",
+  code: string,
+  location = 0,
+  modifiers: KeyboardEventInit = {},
+) {
+  window.dispatchEvent(new KeyboardEvent(type, { ...modifiers, code, location, bubbles: true }));
+}
+
 describe("HotkeysPage chord validation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,7 +114,7 @@ describe("HotkeysPage chord validation", () => {
     expect(saved.hotkeys.translation).toEqual(["F13", "Menu"]);
   });
 
-  it("blocks a translation chord that would shadow dictation", async () => {
+  it("blocks a translation chord identical to dictation", async () => {
     const wrapper = mountPage();
     const recorders = wrapper.findAllComponents(HotkeyRecorder);
 
@@ -113,6 +122,58 @@ describe("HotkeysPage chord validation", () => {
     await nextTick();
 
     expect(commands.updateSettings).not.toHaveBeenCalled();
-    expect(wrapper.text()).toContain("translation cannot equal or be contained");
+    expect(wrapper.text()).toContain("translation cannot exactly match");
+  });
+
+  it("allows translation to be a strict subset of dictation", async () => {
+    const wrapper = mountPage(
+      makeSettings(
+        ["ControlRight", "KeyA"],
+        ["AltRight"],
+        ["ControlRight", "KeyA", "AltRight"],
+      ),
+    );
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+
+    recorders[2].vm.$emit("update:modelValue", ["ControlRight"]);
+    await flushPromises();
+
+    expect(commands.updateSettings).toHaveBeenCalledOnce();
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
+    expect(saved.hotkeys.translation).toEqual(["ControlRight"]);
+  });
+
+  it("allows translation to contain keys from both other chords", async () => {
+    const wrapper = mountPage();
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+
+    recorders[2].vm.$emit("update:modelValue", ["ControlRight", "AltRight", "F13"]);
+    await flushPromises();
+
+    expect(commands.updateSettings).toHaveBeenCalledOnce();
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
+    expect(saved.hotkeys.translation).toEqual(["ControlRight", "AltRight", "F13"]);
+  });
+
+  it("records right Ctrl plus right Shift when WebView drops the Shift keydown", async () => {
+    const wrapper = mountPage(
+      makeSettings(["ControlRight"], ["ShiftRight"], ["KeyW"]),
+    );
+    const recorders = wrapper.findAllComponents(HotkeyRecorder);
+
+    await recorders[2].get("button").trigger("click");
+    keyboard("keydown", "ControlRight", 2);
+    keyboard("keydown", "Unidentified", 2);
+    keyboard("keyup", "ControlRight", 2, { shiftKey: true });
+    await nextTick();
+    expect(commands.updateSettings).not.toHaveBeenCalled();
+
+    keyboard("keyup", "ShiftLeft", 2);
+    await flushPromises();
+
+    expect(commands.updateSettings).toHaveBeenCalledOnce();
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
+    expect(saved.hotkeys.translation).toEqual(["ControlRight", "ShiftRight"]);
+    expect(wrapper.text()).not.toContain("translation cannot exactly match");
   });
 });

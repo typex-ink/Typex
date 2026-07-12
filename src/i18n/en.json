@@ -270,11 +270,9 @@
       "import_confirm": "Import"
     },
     "hotkeys": {
-      "desc": "Dictation and assistant keys are customizable; translation = both keys held together (follows automatically).",
-      "unreachable_chords": "Choose three non-empty shortcuts. Dictation and assistant cannot contain each other, and translation cannot equal or be contained by either one."
+      "unreachable_chords": "Choose three non-empty shortcuts. Dictation and assistant cannot contain each other, and translation cannot exactly match either one."
     },
     "history": {
-      "desc": "History is stored on this device only and contains no audio.",
       "save_toggle": "Save history",
       "retention": "Retention",
       "days": "{n} days",

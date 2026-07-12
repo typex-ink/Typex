@@ -59,7 +59,7 @@ impl SettingsService {
         if !new.hotkeys.chords_are_reachable() {
             return Err(TypexError::new(
                 ErrorCode::InvalidRequest,
-                "三组快捷键必须非空，且不能互相遮蔽",
+                "三组快捷键必须非空且可区分",
             ));
         }
         if !new.dictation.vad.is_valid() {
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn update_rejects_translation_that_shadows_dictation() {
+    fn update_rejects_translation_identical_to_dictation() {
         let dir = std::env::temp_dir().join(format!(
             "typex-test-shadowing-translation-update-{}",
             std::process::id()
@@ -289,6 +289,25 @@ mod tests {
         assert_eq!(error.code, ErrorCode::InvalidRequest);
         assert_eq!(service.get(), before);
         assert!(!dir.join("settings.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_allows_translation_as_a_strict_subset() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-subset-translation-update-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let service = SettingsService::load(dir.clone());
+        let mut update = service.get();
+        update.hotkeys.dictation = vec!["ControlRight".into(), "KeyA".into()];
+        update.hotkeys.assistant = vec!["AltRight".into()];
+        update.hotkeys.translation = vec!["ControlRight".into()];
+
+        let saved = service.update(update.clone()).unwrap();
+        assert_eq!(saved.hotkeys, update.hotkeys);
+        assert_eq!(service.get().hotkeys, update.hotkeys);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

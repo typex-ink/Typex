@@ -90,7 +90,7 @@ pub enum Event {
         mode: SessionMode,
         next_session_id: u64,
     },
-    /// 按住期间组合出翻译键
+    /// 按住期间补全严格更长的 chord
     ModeUpgraded { mode: SessionMode },
     /// 全部触发键松开
     TriggerUp { held_ms: u64 },
@@ -213,7 +213,7 @@ pub fn advance(state: State, event: Event, threshold_ms: u64) -> (State, Vec<Eff
             },
             Event::ModeUpgraded { mode },
         ) => (
-            // 模式升级（听写→翻译）：音频保留，仅换徽标
+            // 更长 chord 接管模式：音频保留，仅换徽标
             State::Recording {
                 session_id,
                 mode,
@@ -872,6 +872,26 @@ mod tests {
         // 无 CancelRecording/StartRecording —— 音频保留
         assert!(!fx.contains(&Effect::CancelRecording));
         assert!(!fx.contains(&Effect::StartRecording));
+    }
+
+    #[test]
+    fn longer_chord_can_switch_translation_to_dictation_without_restarting_audio() {
+        let state = State::Recording {
+            session_id: 1,
+            mode: SessionMode::Translation,
+            toggled: false,
+        };
+        let (state, effects) = advance(
+            state,
+            Event::ModeUpgraded {
+                mode: SessionMode::Dictation,
+            },
+            T,
+        );
+
+        assert_eq!(state.mode(), Some(SessionMode::Dictation));
+        assert_eq!(state.session_id(), Some(1));
+        assert_eq!(effects, vec![Effect::EmitUi]);
     }
 
     #[test]

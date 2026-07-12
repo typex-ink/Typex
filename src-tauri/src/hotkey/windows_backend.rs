@@ -799,7 +799,8 @@ impl WindowsEventAdapter {
             if self.pending_modifier.is_none()
                 && !self.detector.has_active_gesture()
                 && (self.config.dictation.as_slice() == ["AltRight"]
-                    || self.config.assistant.as_slice() == ["AltRight"])
+                    || self.config.assistant.as_slice() == ["AltRight"]
+                    || self.config.translation.as_slice() == ["AltRight"])
             {
                 let token = self.allocate_candidate_token();
                 self.prestarted_altgr_candidate = Some(token);
@@ -1544,6 +1545,32 @@ mod tests {
     }
 
     #[test]
+    fn recorded_right_shift_binding_reaches_the_shared_detector() {
+        let mut adapter = WindowsEventAdapter::new(HotkeyConfig {
+            dictation: vec!["ShiftRight".into()],
+            assistant: vec!["F13".into()],
+            translation: vec!["ShiftRight".into(), "F13".into()],
+            esc_cancels: true,
+        });
+        let mut down = scanned(0x10, 0x36, false);
+        down.t_ms = 100;
+        assert_eq!(
+            adapter.process(down).events,
+            vec![HotkeyEvent::TriggerDown {
+                mode: SessionMode::Dictation
+            }]
+        );
+
+        let mut up = scanned(0x10, 0x36, false);
+        up.transition = KeyTransition::Up;
+        up.t_ms = 451;
+        assert_eq!(
+            adapter.process(up).events,
+            vec![HotkeyEvent::TriggerUp { held_ms: 351 }]
+        );
+    }
+
+    #[test]
     fn config_update_ends_confirmed_single_chord_before_replacing_it() {
         let mut adapter = WindowsEventAdapter::new(config());
         assert_eq!(
@@ -1866,6 +1893,27 @@ mod tests {
         assert_eq!(
             adapter.process(synthetic_altgr_left_ctrl(false, 501, 900)),
             HookDecision::default()
+        );
+    }
+
+    #[test]
+    fn standalone_synthetic_altgr_prestarts_single_right_alt_translation() {
+        let mut adapter = WindowsEventAdapter::new(HotkeyConfig {
+            dictation: vec!["F13".into()],
+            assistant: vec!["F14".into()],
+            translation: vec!["AltRight".into()],
+            esc_cancels: true,
+        });
+        adapter.process(synthetic_altgr_left_ctrl(true, 100, 500));
+        assert_eq!(
+            adapter
+                .process(synthetic_altgr_right_alt(true, 101, 500))
+                .events,
+            vec![candidate_started(1)]
+        );
+        assert_eq!(
+            adapter.flush_due(101 + MODIFIER_CONFIRMATION_MS).events,
+            vec![candidate_promoted(1, SessionMode::Translation)]
         );
     }
 

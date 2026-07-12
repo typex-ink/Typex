@@ -36,7 +36,7 @@
 对 `advance(state, event) -> (state, Vec<Effect>)` 做穷举式表驱动测试。**必须逐条覆盖的场景清单**（与 [02 功能规格](02-features.md)、[05 §7](05-ux-spec.md) 对齐，新增行为先加进这张表）：
 
 - 长按/短按：349ms 释放 = toggle 开始；351ms 释放 = push-to-talk 结束；toggle 模式下听写/翻译在第二次 keydown 立即结束，助手模式等待完整 chord 释放后结束（确保读取选区时触发修饰键已松开）。
-- 组合键：录音中追加第二触发键 → 模式切为翻译且音频保留；两键同时按下（乱序）等价。
+- 组合键：默认键位录音中追加第二触发键 → 模式切为翻译且音频保留；自定义配置中，较短 chord 启动后补全严格包含它的较长 chord → 切为后者模式，顺序不影响最终模式。
 - **组合键让路**：触发键按住期间出现普通键 down → 会话静默取消，Effect 仅含取消/释放录音（`CancelRecording` + `ReleaseAudio`），无 `EmitUi`、注入或提示音。
 - 暂停：Recording 的 push-to-talk 与短按 toggle 两种状态收到托盘暂停发来的 `Cancel` → Idle + 释放录音；Transcribing/Processing 不被暂停强杀。
 - 重按忽略：Transcribing/Processing/Injecting 中触发键按下 → 状态不变，Effect = `EmitUi(busy-hint)`；Failed 中按下 → 放弃旧会话开新录音。
@@ -55,8 +55,8 @@
 
 | 对象 | 重点用例 |
 |---|---|
-| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；三组多键 chord 的 partial/完整/乱序、独立翻译直触发、听写/助手补全后升级翻译，空值、听写/助手互含及翻译为另两项子集均拒绝；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；Esc 与普通键让路严格分离，`esc_cancels=false` 时活动/空闲/Windows 75 ms 候选阶段均不取消，只切换该设置不得重置 chord；Esc 序列只在首次 down 认领，成功时吞 repeat/up 且只发一次会话事件，失败时完整透传；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
-| Windows 候选录音 adapter | 原始触发键立即发候选 token；75 ms 确认携带同 token 提升；Ctrl+C/物理 RAlt+普通键/AltGr 匹配取消且无可见副作用；双键翻译复用候选；快速释放保留原始 held_ms；暂停、配置更新、hook 失败/意外终止与退出清理未决 token |
+| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；三组多键 chord 的 partial/完整/乱序、独立翻译直触发、较短 chord 补全后由严格包含它的较长 chord 接管，空值、听写/助手互含及翻译与另两项完全相同均拒绝，翻译为另两项严格子集合法；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；Esc 与普通键让路严格分离，`esc_cancels=false` 时活动/空闲/Windows 75 ms 候选阶段均不取消，只切换该设置不得重置 chord；Esc 序列只在首次 down 认领，成功时吞 repeat/up 且只发一次会话事件，失败时完整透传；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移且右 Shift 绑定可端到端触发；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
+| Windows 候选录音 adapter | 原始触发键立即发候选 token；75 ms 确认携带同 token 提升；Ctrl+C/物理 RAlt+普通键/AltGr 匹配取消且无可见副作用；`translation=[AltRight]` 在 AltGr 伪 LCtrl+RAlt 路径同样从原始 down 预启动并提升为翻译；双键翻译复用候选；快速释放保留原始 held_ms；暂停、配置更新、hook 失败/意外终止与退出清理未决 token |
 | Windows hook health monitor | Healthy/Starting 与暂停态不误取消；运行期 Failed/意外 Stopped 对 push-to-talk/toggle 统一发一次 `Cancel`；重复终态不重复；启动失败使用同一可订阅状态；主动 Shutdown 静默 |
 | Windows 音频转换与设备解析 | WASAPI 常见 `f32/i16/u16` → mono f32 的边界值、声道混合、重采样长度；有界缓冲溢出计数；endpoint ID 精确选择；旧 display name 唯一匹配迁移；同名歧义/固定设备缺失；设备拔出/stream error 脱敏分类与主动通知 |
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
@@ -120,8 +120,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 |---|---|
 | HUD（`Hud.vue`） | 表驱动：每种 `SessionSnapshot`（各 phase × 各 mode × 各错误码）→ 断言渲染的文案/按钮/徽标。这是把 [05 §3](05-ux-spec.md) 的状态表固化成测试；尺寸变化只调用一次 Rust `set_hud_size`，连续 ResizeObserver 通知须串行合并且以最新尺寸为准，不得分别调用原生 size/position |
 | 错误码 → 文案 | 遍历 Rust 导出的全部 ErrorCode（从 bindings 类型取）：zh-CN 与 en 均有对应 i18n key（防「Rust 加了错误码忘了文案」——**这条是编译期抓不到的契约缝隙，必须测**） |
-| HotkeyRecorder | 录制态只切换按钮文案且不展开提示块、浏览器 code→稳定 `KeyId` 表、Windows WebView2 误报 `ShiftLeft` 但 `location=RIGHT` 时仍保存 `ShiftRight`、完整组合键保存/渲染、Esc 静默取消、历史别名展示、平台化标签与冲突警告 |
-| 首次启动引导 | 第 4 步可分别录制听写/助手/翻译快捷键；修改任一项只持久化该完整 chord 并同步练习提示；空值、听写/助手互含或翻译遮蔽另两项时阻止保存并显示校验提示 |
+| HotkeyRecorder | 录制态只切换按钮文案且不展开提示块、浏览器 code→稳定 `KeyId` 表、Windows WebView2 误报 `ShiftLeft` 但 `location=RIGHT` 时仍保存 `ShiftRight`、同一右 Shift 的 down/up 被报成不同侧时仍完成录制、组合中某键 keydown 为 `Unidentified` 但 keyup 可识别时恢复完整 chord、没有未知 keydown 的孤立 keyup 被忽略、已识别修饰键先释放而另一修饰键仍 held 时不提前提交、等待最终 keyup 超过 2 秒或窗口失焦时取消且保留原绑定、完整组合键保存/渲染、Esc 静默取消、历史别名展示、平台化标签与冲突警告 |
+| 首次启动引导 | 第 4 步可分别录制听写/助手/翻译快捷键；修改任一项只持久化该完整 chord 并同步练习提示；空值、听写/助手互含或翻译与另两项完全相同时阻止保存并显示校验提示，翻译与另两项存在严格子集关系时允许保存 |
 | 首次启动完成 | `onboarding_done` 与自启选择必须先保存，再调用 `complete_onboarding`；提交中不可重复触发；主页切换失败时保留引导页并显示可重试错误 |
 | 模型管理 | `hardware_ok=false && downloadable=true` 时显示低于建议但下载按钮可用并调用下载；`downloadable=false` 时仍禁用 |
 | ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误） |

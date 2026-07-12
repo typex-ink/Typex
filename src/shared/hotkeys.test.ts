@@ -86,7 +86,7 @@ describe("stable hotkey KeyId contract", () => {
     [["AltGr", "KeyA"], ["AltRight"], ["ControlRight", "AltRight"]],
     [["ControlRight"], ["AltRight"], ["ControlRight"]],
     [["ControlRight"], ["AltRight"], []],
-  ])("rejects empty or shadowing functional chords", (dictation, assistant, translation) => {
+  ])("rejects empty or indistinguishable functional chords", (dictation, assistant, translation) => {
     expect(hotkeyChordsAreReachable(dictation, assistant, translation)).toBe(false);
   });
 
@@ -106,6 +106,16 @@ describe("stable hotkey KeyId contract", () => {
         ["ControlRight"],
         ["AltRight"],
         ["F13", "Menu"],
+      ),
+    ).toBe(true);
+  });
+
+  it("allows translation to be a strict subset of another chord", () => {
+    expect(
+      hotkeyChordsAreReachable(
+        ["ControlRight", "KeyA"],
+        ["AltRight"],
+        ["ControlRight"],
       ),
     ).toBe(true);
   });
