@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 首次启动引导 640×480，5 步（05 §6）
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import AppIcon from "@/components/AppIcon.vue";
@@ -236,12 +235,28 @@ const practiceDone = ref(false);
 
 // ── 完成 ──
 const autostartOn = ref(true); // 默认开启（02 F-6）
+const finishing = ref(false);
+const finishError = ref(false);
 async function finish() {
-  await store.mutate((s) => {
-    s.onboarding_done = true;
-    s.general.autostart = autostartOn.value;
-  });
-  await getCurrentWindow().close();
+  if (finishing.value) return;
+  finishing.value = true;
+  finishError.value = false;
+  try {
+    const saved = await store.mutate((s) => {
+      s.onboarding_done = true;
+      s.general.autostart = autostartOn.value;
+    });
+    if (!saved) {
+      finishError.value = true;
+      return;
+    }
+    const result = await commands.completeOnboarding();
+    if (result.status === "error") finishError.value = true;
+  } catch {
+    finishError.value = true;
+  } finally {
+    finishing.value = false;
+  }
 }
 
 async function next() {
@@ -431,9 +446,10 @@ onUnmounted(() => {
       <span class="done-check">✓</span>
       <h5>{{ t("onboarding.done_title") }}</h5>
       <label class="autostart-row">
-        <input v-model="autostartOn" type="checkbox" />
+        <input v-model="autostartOn" type="checkbox" :disabled="finishing" />
         <span>{{ t("onboarding.autostart") }}</span>
       </label>
+      <p v-if="finishError" class="cfg-err" role="alert">{{ t("onboarding.finish_failed") }}</p>
     </div>
 
     <!-- 底部 -->
@@ -451,8 +467,10 @@ onUnmounted(() => {
         <Button variant="primary" @click="step = 2">{{ t("onboarding.start") }}</Button>
       </template>
       <template v-else-if="step === 5">
-        <Button variant="ghost" @click="back">{{ t("onboarding.back") }}</Button>
-        <Button variant="primary" @click="finish">{{ t("onboarding.finish") }}</Button>
+        <Button variant="ghost" :disabled="finishing" @click="back">{{ t("onboarding.back") }}</Button>
+        <Button class="finish-button" variant="primary" :disabled="finishing" @click="finish">
+          {{ finishing ? t("onboarding.finishing") : t("onboarding.finish") }}
+        </Button>
       </template>
       <template v-else>
         <Button variant="ghost" @click="back">{{ t("onboarding.back") }}</Button>
@@ -730,6 +748,10 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+.finish-button {
+  min-width: 88px;
+  justify-content: center;
 }
 .lang-select {
   min-width: 130px;

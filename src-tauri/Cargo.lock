@@ -6047,6 +6047,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "windows 0.61.3",
+ "winreg 0.55.0",
  "wiremock",
  "zip 8.6.0",
 ]

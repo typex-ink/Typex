@@ -411,6 +411,8 @@ pub fn show_home<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let _ = &window;
     #[cfg(target_os = "macos")]
     apply_macos_window_chrome("home", &window, native_theme(&theme));
+    window.show()?;
+    window.set_focus()?;
     Ok(())
 }
 

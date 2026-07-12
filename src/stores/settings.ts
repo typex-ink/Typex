@@ -17,13 +17,15 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
-  /// 就地修改并推送到 Rust（返回后 Rust 广播新配置回来）
-  async function mutate(fn: (s: Settings) => void) {
-    if (!settings.value) return;
+  /// 就地修改并推送到 Rust；返回是否持久化成功。
+  async function mutate(fn: (s: Settings) => void): Promise<boolean> {
+    if (!settings.value) return false;
     const draft = JSON.parse(JSON.stringify(settings.value)) as Settings;
     fn(draft);
     const result = await commands.updateSettings(draft);
-    if (result.status === "ok") settings.value = result.data;
+    if (result.status === "error") return false;
+    settings.value = result.data;
+    return true;
   }
 
   return { settings, loaded, load, mutate };

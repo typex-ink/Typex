@@ -41,7 +41,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
 | Windows 系统 API | target-specific `windows` crate | 最小 feature 集；`unsafe` 集中在 `platform/windows.rs` 与对应平台 backend 边界 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
-| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；`llama-cpp-2` target-gate 为 macOS Metal / Windows Vulkan / 其他 CPU；GPU-loaded 模型仅在运行初始化/decode 错误且尚可安全重放时回退一次 CPU；Windows 的 sherpa/ONNX、Vulkan loader 与 MSVC runtime 采用安装目录内 app-local 部署；推荐档按硬件下载，高配模型手动选择（[03 §8](03-model-providers.md)） |
+| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；`llama-cpp-2` target-gate 为 macOS Metal / Windows Vulkan / 其他 CPU；GPU-loaded 模型仅在运行初始化/decode 错误且尚可安全重放时回退一次 CPU；Windows 的 sherpa/ONNX、Vulkan loader 与 MSVC runtime 采用安装目录内 app-local 部署；硬件仅用于推荐档和性能提示，不阻止存在远程源的模型下载（[03 §8](03-model-providers.md)、[ADR-26](08-decisions.md)） |
 
 ## 2. 进程与窗口模型
 
@@ -273,6 +273,8 @@ pub enum SessionPhase {
 9. **剪贴板恢复不保真**（arboard 仅文本/图片）→ 设置页明示；与剪贴板管理器可能互相干扰记录中间内容。
 10. **Windows 混合 DPI 与负坐标**：HUD/回答窗定位统一以目标 HWND 的 monitor work area 为源，在物理/逻辑坐标边界显式换算；禁止用 HUD 自身 monitor 推断目标屏幕。
 11. **Windows 原生运行库不能依赖开发机环境**：默认 feature 的 EXE 硬链接 sherpa/ONNX、MSVC C++/OpenMP runtime 与 Vulkan loader；NSIS 必须把四个 sherpa/ONNX DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll` 和 `vulkan-1.dll` 放在 EXE 同目录。Vulkan loader 存在但没有可用 ICD/GPU 时直接加载 CPU 模型；GPU 模型已加载后的 context/decode 错误仅在无可见输出时从头 CPU 重试一次。不得因缺少 loader 在进程装载阶段退出，也不得在 LLM 已流式输出后重放造成重复文本。
+12. **Windows 启动不得闪控制台**：debug/release EXE 均使用 GUI subsystem；debug 仅尝试附着已有父控制台以保留开发日志，失败即静默继续，禁止创建新控制台。登录自启的 HKCU Run 命令固定为带引号的当前 EXE 完整路径，启动对账必须修复旧路径且保持一致状态幂等（[ADR-26](08-decisions.md)）。
+13. **Windows 安装路径不主动迁移**：NSIS 保持 `currentUser`；仅当没有历史卸载/产品登记、`$INSTDIR` 仍是 Tauri 原默认值时，installer hook 改用 `%LOCALAPPDATA%\Programs\Typex`。历史安装位置与显式 `/D=` 优先，GUI 与静默安装使用同一判断（[ADR-26](08-decisions.md)）。
 
 ### 7.3 快捷键（push-to-talk 细节）
 
@@ -368,6 +370,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 音频 | `list_audio_devices` | 返回 `Result<AudioInputDevice[]>`；每项为 `{ id, label }`，设置界面展示 label、保存 id，枚举失败不得伪装为空列表 |
 | Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
+| 窗口 | `complete_onboarding` / `open_onboarding_window` | `complete_onboarding` 先创建/显示并聚焦主页，再关闭 onboarding；任一步失败返回错误并保留可重试的引导页 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
 | 历史 | `query_history { search, offset }` / `get_stats` / `delete_history_item` / `clear_history` | `get_stats` 返回主页统计（总时长/字数/节省时间/语速，本地聚合） |
@@ -449,7 +452,7 @@ src/
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **Windows 本地 Tauri 构建**：`pnpm tauri dev/build/bundle` 统一经 `scripts/tauri.mjs` 启动。包装器只为会编译原生代码的 `dev` / `build` 命令通过 `vswhere` 初始化 MSVC x64 环境，并发现、校验 Vulkan SDK / SPIRV-Headers CMake package；`bundle` 只打包已有 EXE，原样透传官方 Tauri CLI。Cargo 产物仍使用项目默认 `src-tauri/target`，禁止重定向 `CARGO_TARGET_DIR` 或占用应用运行时 cwd。仓库级 Cargo config 只为 `x86_64-pc-windows-msvc` 固定 Ninja，并为所有 Cargo 入口注入 llama.cpp CMake project include；后者仅把 Vulkan shader generator 的 `ExternalProject` 根目录收敛到同一 Cargo `OUT_DIR` 下的 `build/ep`，避免上游默认嵌套路径超过 MSVC 限制。`llama-cpp-sys-2` 与 `sherpa-rs-sys` 的 dev package profile 关闭 debug assertions，使其 build script 与实际使用的 Release 原生库保持一致，避免错误引入 debug CRT。Windows 的 sherpa-onnx 使用上游 `download-binaries` 固定版本预编译包和内置 SHA-256 校验，避免本地 FetchContent 生成超长目录；macOS/Linux 保持原 generator 与源码构建，包装器原样透传官方 Tauri CLI。
-- **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。NSIS smoke 必须解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 PE import 闭包，不能只断言安装器文件存在。
+- **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。Windows 还必须构建 debug EXE 并验证 PE subsystem 为 GUI。NSIS smoke 必须确认默认目录 hook 已进入渲染脚本，解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 release/包内 EXE 的 GUI subsystem 与 PE import 闭包，不能只断言安装器文件存在。
 - **发布**：tag → 各平台 build job 产出唯一命名的平台 artifact 与 updater manifest fragment → publish job 校验后聚合 SHA256 和唯一 `latest.json`。Windows 使用 Tauri 2 原生 updater 格式：同一个 NSIS x64 `.exe` 同时作为手动安装和 updater 下载资产，旁边发布对应 `.exe.sig`，不生成仅供 Tauri v1 迁移的 legacy `.nsis.zip`；Windows 与 macOS 复用仓库现有 updater 密钥。构建前先从原生 release 产物、Microsoft VC tools redist 和固定版本/哈希的 Vulkan Loader 包生成 runtime staging，Tauri Windows resource map 将其安装到 EXE 同目录。Tauri `.sig` 是更新完整性签名，Authenticode 是 Windows 发布者身份，二者独立。SignPath/Authenticode 可后置，但构建链必须保留稳定签名插入点。更新通道分 stable/nightly，任何平台 fragment 不得同名覆盖或跨通道引用。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。

@@ -202,6 +202,13 @@ jobs:
       - name: Rust no-default-features test
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features
 
+      - name: Build debug GUI executable
+        run: cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
+
+      - name: Verify debug PE subsystem
+        shell: pwsh
+        run: ./scripts/verify-windows-bundle.ps1 -Profile debug -BinaryOnly
+
       - name: Rust default check (CPU and Vulkan)
         run: cargo check --manifest-path src-tauri/Cargo.toml
 

@@ -100,6 +100,7 @@ windows = { version = "0.61.3", features = [
     "Win32_Security",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
     "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
@@ -113,6 +114,7 @@ windows = { version = "0.61.3", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+winreg = "0.55"
 # Windows GPU 加速统一使用 Vulkan；运行时失败回退 CPU。
 llama-cpp-2 = { version = "0.1.150", features = ["vulkan", "mtmd"], optional = true }
 

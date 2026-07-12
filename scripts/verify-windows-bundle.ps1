@@ -2,6 +2,7 @@
 param(
     [switch]$RequireInstallerExtraction,
     [switch]$RequireUpdaterSignature,
+    [switch]$BinaryOnly,
     [ValidateSet("debug", "release")]
     [string]$Profile = "release"
 )
@@ -45,8 +46,48 @@ function Assert-Exists([string]$Path) {
     }
 }
 
-Assert-Exists $manifestPath
 Assert-Exists $binaryPath
+
+function Get-PeSubsystem([string]$Path) {
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $reader = [IO.BinaryReader]::new($stream)
+    try {
+        if ($reader.ReadUInt16() -ne 0x5A4D) {
+            throw "$Path is not a PE executable (missing MZ header)"
+        }
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadUInt32()
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            throw "$Path is not a PE executable (missing PE header)"
+        }
+        $optionalHeader = $peOffset + 24
+        $stream.Position = $optionalHeader
+        $magic = $reader.ReadUInt16()
+        if ($magic -ne 0x010B -and $magic -ne 0x020B) {
+            throw "$Path has an unsupported PE optional-header magic"
+        }
+        $stream.Position = $optionalHeader + 68
+        return $reader.ReadUInt16()
+    } finally {
+        $reader.Dispose()
+    }
+}
+
+function Assert-GuiSubsystem([string]$Path) {
+    $subsystem = Get-PeSubsystem $Path
+    if ($subsystem -ne 2) {
+        throw "$Path must use the Windows GUI subsystem (2); found $subsystem"
+    }
+}
+
+Assert-GuiSubsystem $binaryPath
+if ($BinaryOnly) {
+    Write-Host "$Profile typex.exe uses the Windows GUI subsystem"
+    return
+}
+
+Assert-Exists $manifestPath
 if (-not (Test-Path -LiteralPath $bundleDir -PathType Container)) {
     throw "NSIS bundle directory is missing: $bundleDir"
 }
@@ -198,6 +239,25 @@ foreach ($source in $expectedInstalled.Values) {
 $installerScript = Join-Path $nsisWorkDir "installer.nsi"
 Assert-Exists $installerScript
 $installerScriptText = Get-Content -Raw -LiteralPath $installerScript
+$installerHookPath = Join-Path $tauriDir "windows\installer-hooks.nsh"
+Assert-Exists $installerHookPath
+$installerHookText = Get-Content -Raw -LiteralPath $installerHookPath
+if (-not $installerScriptText.Contains([IO.Path]::GetFileName($installerHookPath))) {
+    throw "Rendered NSIS script does not include the Typex installer hook"
+}
+if (-not $installerScriptText.Contains('!define INSTALLMODE "currentUser"')) {
+    throw "Rendered NSIS script must retain the currentUser install mode"
+}
+foreach ($token in @(
+    '$INSTDIR == "$LOCALAPPDATA\${PRODUCTNAME}"',
+    '${UNINSTKEY}',
+    '${MANUPRODUCTKEY}',
+    '$LOCALAPPDATA\Programs\${PRODUCTNAME}'
+)) {
+    if (-not $installerHookText.Contains($token)) {
+        throw "Installer hook is missing the default-directory constraint: $token"
+    }
+}
 foreach ($name in @("typex.exe") + @($expectedInstalled.Keys)) {
     if (-not $installerScriptText.Contains($name)) {
         throw "Rendered NSIS script does not include $name"
@@ -303,6 +363,7 @@ function Assert-ExtractedPayload(
         }
 
         $extractedExecutable = $executableMatches[0].FullName
+        Assert-GuiSubsystem $extractedExecutable
         $expectedVersion = (Get-Item -LiteralPath $binaryPath).VersionInfo
         $actualVersion = (Get-Item -LiteralPath $extractedExecutable).VersionInfo
         foreach ($property in @("ProductName", "ProductVersion", "OriginalFilename")) {
@@ -365,4 +426,4 @@ if (Test-Path -LiteralPath $updaterSignaturePath -PathType Leaf) {
     }
 }
 
-Write-Host "Windows NSIS payload, PE dependency closure, and available updater signature verified"
+Write-Host "Windows NSIS hook, GUI subsystem, payload, PE dependency closure, and available updater signature verified"

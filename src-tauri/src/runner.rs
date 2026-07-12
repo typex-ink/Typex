@@ -31,8 +31,84 @@ fn publish_hotkey_config_if_changed(
     })
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 fn required_autostart_update(current: bool, desired: bool) -> Option<bool> {
     (current != desired).then_some(desired)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_autostart(handle: &tauri::AppHandle, on: bool) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let manager = handle.autolaunch();
+    let desired = match manager.is_enabled() {
+        Ok(current) => match required_autostart_update(current, on) {
+            Some(desired) => desired,
+            None => return true,
+        },
+        Err(error) => {
+            tracing::debug!(%error, "开机自启状态读取失败，尝试按配置对齐");
+            on
+        }
+    };
+    let result = if desired {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    if let Err(error) = result {
+        tracing::warn!(%error, "开机自启设置失败");
+        return false;
+    }
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn apply_autostart(handle: &tauri::AppHandle, on: bool) -> bool {
+    use crate::platform::autostart::{
+        ReconcileAction, ensure_run_key, expected_command, read_command, remove_command,
+        required_action, write_command,
+    };
+    use tauri_plugin_autostart::ManagerExt;
+
+    let app_name = handle.package_info().name.clone();
+    let executable = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            tracing::warn!(%error, "无法解析当前 EXE，开机自启未更新");
+            return false;
+        }
+    };
+    let expected = expected_command(&executable);
+    let current_command = match read_command(&app_name) {
+        Ok(command) => command,
+        Err(error) => {
+            tracing::warn!(%error, "Windows 开机自启注册项读取失败");
+            return false;
+        }
+    };
+    let manager = handle.autolaunch();
+    let current_enabled = match manager.is_enabled() {
+        Ok(enabled) => enabled,
+        Err(error) => {
+            tracing::debug!(%error, "Windows 开机自启启用状态读取失败，尝试按配置对齐");
+            false
+        }
+    };
+
+    let result = match required_action(on, current_enabled, current_command.as_deref(), &expected) {
+        ReconcileAction::None => return true,
+        ReconcileAction::Write => ensure_run_key()
+            .map_err(|error| error.to_string())
+            .and_then(|()| manager.enable().map_err(|error| error.to_string()))
+            .and_then(|()| write_command(&app_name, &expected).map_err(|error| error.to_string())),
+        ReconcileAction::Remove => remove_command(&app_name).map_err(|error| error.to_string()),
+    };
+    if let Err(error) = result {
+        tracing::warn!(%error, "Windows 开机自启设置失败");
+        return false;
+    }
+    true
 }
 
 /// tauri-specta builder：commands + events 单一注册点（gen:ipc 也用它导出 TS）。
@@ -58,6 +134,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::clear_history,
             commands::open_settings_window,
             commands::open_onboarding_window,
+            commands::complete_onboarding,
             commands::get_diagnostics,
             commands::open_log_dir,
             commands::check_update,
@@ -205,37 +282,14 @@ pub fn run() {
 
             // 开机自启（02 F-6）：启动时对齐设置，变更时跟随开关
             {
-                use tauri_plugin_autostart::ManagerExt;
-                let apply = |handle: &tauri::AppHandle, on: bool| {
-                    let mgr = handle.autolaunch();
-                    let desired = match mgr.is_enabled() {
-                        Ok(current) => match required_autostart_update(current, on) {
-                            Some(desired) => desired,
-                            None => return true,
-                        },
-                        Err(error) => {
-                            tracing::debug!(
-                                %error,
-                                "开机自启状态读取失败，尝试按配置对齐"
-                            );
-                            on
-                        }
-                    };
-                    let r = if desired { mgr.enable() } else { mgr.disable() };
-                    if let Err(e) = r {
-                        tracing::warn!("开机自启设置失败: {e}");
-                        return false;
-                    }
-                    true
-                };
                 let initial = s.general.autostart;
-                let mut applied = apply(app.handle(), initial).then_some(initial);
+                let mut applied = apply_autostart(app.handle(), initial).then_some(initial);
                 let handle = app.handle().clone();
                 let mut rx = settings.subscribe();
                 tauri::async_runtime::spawn(async move {
                     while rx.changed().await.is_ok() {
                         let on = rx.borrow_and_update().general.autostart;
-                        if applied != Some(on) && apply(&handle, on) {
+                        if applied != Some(on) && apply_autostart(&handle, on) {
                             applied = Some(on);
                         }
                     }

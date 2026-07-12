@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 已下载模型管理子页（05 §5.1）：
-// 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（硬件要求 + 本机检测 ✓/✗）+ 占用合计。
+// 已下载列表（体积/被哪些槽使用/删除警告）+ 可下载列表（硬件建议 + 本机检测 ✓/✗）+ 占用合计。
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "vue-i18n";
@@ -90,7 +90,7 @@ function usedBySlots(modelId: string): string[] {
   return out;
 }
 
-/** 行内硬件要求 + 本机检测结果（05 §5.1：Metal / Vulkan）。 */
+/** 行内硬件建议 + 本机检测结果（05 §5.1：Metal / Vulkan）。 */
 function hardwareLine(m: LocalModelInfo): string {
   const parts: string[] = [];
   if (m.requires_gpu) {
@@ -309,7 +309,7 @@ onUnmounted(() => unlisten?.());
       <Button v-if="progress[m.id] !== undefined" size="sm" @click="cancelDownload(m.id)">
         {{ t("actions.cancel") }}
       </Button>
-      <Button v-else size="sm" :disabled="!m.hardware_ok || !m.downloadable" @click="download(m.id)">
+      <Button v-else size="sm" :disabled="!m.downloadable" @click="download(m.id)">
         {{ t("settings.models.download") }}
       </Button>
     </div>

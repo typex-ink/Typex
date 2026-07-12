@@ -7,7 +7,7 @@ use crate::settings::schema::{Settings, SlotConfig};
 use crate::types::{AudioInputDevice, ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::State;
+use tauri::{Manager, State};
 use tokio::sync::Notify;
 
 type SettingsState<'a> = State<'a, Arc<SettingsService>>;
@@ -369,6 +369,20 @@ pub async fn open_onboarding_window(app: tauri::AppHandle) -> Result<(), TypexEr
         .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
 }
 
+/// 完成首次引导：主页成功显示并聚焦后才关闭引导窗口。
+#[tauri::command]
+#[specta::specta]
+pub async fn complete_onboarding(app: tauri::AppHandle) -> Result<(), TypexError> {
+    let onboarding = app
+        .get_webview_window("onboarding")
+        .ok_or_else(|| TypexError::new(ErrorCode::Internal, "onboarding window is unavailable"))?;
+    crate::app::windows::show_home(&app)
+        .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))?;
+    onboarding
+        .close()
+        .map_err(|e| TypexError::new(ErrorCode::Internal, e.to_string()))
+}
+
 /// HUD 翻译徽标点击：在最近使用的目标语言间轮换（05 §3.2）。
 #[tauri::command]
 #[specta::specta]
@@ -622,7 +636,7 @@ pub struct LocalModelInfo {
     /// 最低推荐 RAM（GiB）。
     pub min_ram_gb: u32,
     pub requires_gpu: bool,
-    /// 本机是否满足硬件要求（RAM ≥ min_ram_gb 且（不需 GPU 或有 GPU））。
+    /// 本机是否达到硬件建议（纯提示，不参与下载授权）。
     pub hardware_ok: bool,
     /// 所属推荐档位 key："light" | "standard" | "performance"。
     pub tier: String,

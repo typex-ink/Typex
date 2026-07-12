@@ -436,11 +436,11 @@ F-3 不引入新的 Provider 类型：
 
 本地模型不随安装包分发（安装包只含推理引擎，约 +30–60 MB）；由下载管理器按需获取：
 
-- **模型库清单**：内置清单随应用更新，用户导入清单位于 `{app_data_dir}/models/user-models.json`。每个模型条目 = id、显示名、用途（stt/llm）、推理引擎（sherpa/sherpa_whisper/llama）、文件列表、字节数、SHA-256、许可证、可变下载源列表、最低硬件要求（RAM/是否需 GPU 加速）。
+- **模型库清单**：内置清单随应用更新，用户导入清单位于 `{app_data_dir}/models/user-models.json`。每个模型条目 = id、显示名、用途（stt/llm）、推理引擎（sherpa/sherpa_whisper/llama）、文件列表、字节数、SHA-256、许可证、可变下载源列表、硬件建议（RAM/是否建议 GPU 加速）。
   - 内置清单（[ADR-22](08-decisions.md)）：STT = `sense-voice-small-int8` / `qwen3-asr-0.6b-q8` / `qwen3-asr-1.7b-q8` / `whisper-large-v3-int8`；LLM = `qwen3.5-0.8b-q4` / `qwen3.5-2b-q4` / `qwen3.5-4b-q4` / `qwen3.5-9b-q4` / `qwen3-14b-q4` / `qwen3-30b-a3b-q4` / `qwen3-32b-q4` / `smollm3-3b-q4` / `granite-3.3-2b-instruct-q4` / `phi-4-mini-instruct-q4`。
   - 用户导入模型 id 由 Typex 生成（`user-...`），只能显式选择到 local profile，不参与零配置兜底。
-- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3 与 14B/30B/32B LLM 属于高配手动模型，不进入自动推荐档。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。
-- **下载源**：内置模型可有 HuggingFace / ModelScope / 官方源等多个源；默认按清单顺序自动换源，可在设置-模型服务-模型管理页底部固定为 HuggingFace 或 ModelScope（没有对应源的模型会提示无可用源）。
+- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3 与 14B/30B/32B LLM 属于高配手动模型，不进入自动推荐档。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。`LocalModelInfo.hardware_ok` 只表示本机是否达到推荐条件，供 UI 显示性能警告；它不参与下载授权，wire shape 保持不变（[ADR-26](08-decisions.md)）。
+- **下载源**：内置模型可有 HuggingFace / ModelScope / 官方源等多个源；默认按清单顺序自动换源，可在设置-模型服务-模型管理页底部固定为 HuggingFace 或 ModelScope（没有对应源的模型会提示无可用源）。下载按钮只由条目是否存在远程源（`downloadable`）和当前下载状态约束；低于推荐硬件仍可直接开始下载，不增加确认框。导入模型或无远程源条目仍不可下载。
 - **下载行为**：断点续传（HTTP Range）、SHA-256 校验、失败换源重试；进度经 Tauri event 推送 UI（onboarding 第 3 步与设置-模型服务页共用同一进度组件）。
 - **导入行为**：用户可导入已下载的 LLM GGUF、llama 音频 GGUF（主模型 + `mmproj*.gguf`）或 SenseVoice/sherpa ONNX（`.onnx` + `tokens.txt`）。导入采用托管模式：优先硬链接，失败则复制到 `{app_data_dir}/models/{model_id}/`，并计算本地文件 SHA-256。Whisper / Parakeet / Moonshine 导入需要进一步区分各运行时文件结构，当前只开放内置可下载的 Whisper large-v3。
 - **存储**：`{app_data_dir}/models/{model_id}/`；设置-模型服务页显示占用体积、来源（内置/导入）、许可证、支持删除；删除被槽位引用的模型时警告。

@@ -49,6 +49,16 @@ const PROCESS_IMAGE_BUFFER_U16: usize = 32_768;
 const INK_ICON_ICO: &[u8] = include_bytes!("../../icons/icon-ink.ico");
 static CUSTOM_APP_ICONS: OnceLock<Mutex<HashMap<isize, isize>>> = OnceLock::new();
 
+/// A GUI-subsystem debug build can reuse an existing development terminal.
+pub fn attach_parent_console() {
+    use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+
+    // SAFETY: AttachConsole receives the documented parent-process sentinel and no pointers.
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalScreenPoint {
     pub x: i32,

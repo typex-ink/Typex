@@ -6,12 +6,6 @@ import { commands, type Settings } from "@/ipc/bindings";
 import HotkeyRecorder from "@/components/HotkeyRecorder.vue";
 import Onboarding from "./Onboarding.vue";
 
-const closeWindow = vi.hoisted(() => vi.fn(async () => {}));
-
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ close: closeWindow }),
-}));
-
 vi.mock("@/ipc/bindings", () => ({
   commands: {
     getSettings: vi.fn(),
@@ -28,6 +22,7 @@ vi.mock("@/ipc/bindings", () => ({
     activateProfile: vi.fn(async () => ({ status: "ok" })),
     downloadLocalModel: vi.fn(async () => ({ status: "ok" })),
     cancelLocalDownload: vi.fn(async () => ({ status: "ok" })),
+    completeOnboarding: vi.fn(async () => ({ status: "ok", data: null })),
   },
   events: {
     settingsChangedEvent: { listen: vi.fn(async () => vi.fn()) },
@@ -79,10 +74,14 @@ async function goToHotkeys(wrapper: Awaited<ReturnType<typeof mountOnboarding>>)
   await buttonByText(wrapper, "继续 →").trigger("click");
 }
 
+async function goToFinish(wrapper: Awaited<ReturnType<typeof mountOnboarding>>) {
+  await goToHotkeys(wrapper);
+  await buttonByText(wrapper, "继续 →").trigger("click");
+}
+
 describe("Onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    closeWindow.mockClear();
   });
 
   it("第 2 步以后可以回到上一步", async () => {
@@ -96,20 +95,71 @@ describe("Onboarding", () => {
     expect(wrapper.text()).not.toContain("← 上一步");
   });
 
-  it("完成时保存 onboarding_done 并关闭引导窗口", async () => {
+  it("先保存完成设置，再调用后端切换到主页", async () => {
     const wrapper = await mountOnboarding();
 
-    await buttonByText(wrapper, "开始 →").trigger("click");
-    await buttonByText(wrapper, "继续 →").trigger("click");
-    await buttonByText(wrapper, "继续 →").trigger("click");
-    await buttonByText(wrapper, "继续 →").trigger("click");
+    await goToFinish(wrapper);
     await buttonByText(wrapper, "完成").trigger("click");
     await flushPromises();
 
     const saved = vi.mocked(commands.updateSettings).mock.calls[0][0];
     expect(saved.onboarding_done).toBe(true);
     expect(saved.general.autostart).toBe(true);
-    expect(closeWindow).toHaveBeenCalledOnce();
+    expect(commands.completeOnboarding).toHaveBeenCalledOnce();
+    expect(vi.mocked(commands.updateSettings).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(commands.completeOnboarding).mock.invocationCallOrder[0]);
+  });
+
+  it("主页切换失败时保留完成页并允许重试", async () => {
+    vi.mocked(commands.completeOnboarding).mockResolvedValueOnce({
+      status: "error",
+      error: { code: "internal", message: "home window failed" },
+    });
+    const wrapper = await mountOnboarding();
+    await goToFinish(wrapper);
+
+    await buttonByText(wrapper, "完成").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("无法打开 Typex，请重试。");
+    expect(buttonByText(wrapper, "完成").attributes("disabled")).toBeUndefined();
+  });
+
+  it("设置保存失败时不调用窗口切换命令", async () => {
+    vi.mocked(commands.updateSettings).mockResolvedValueOnce({
+      status: "error",
+      error: { code: "internal", message: "settings write failed" },
+    });
+    const wrapper = await mountOnboarding();
+    await goToFinish(wrapper);
+
+    await buttonByText(wrapper, "完成").trigger("click");
+    await flushPromises();
+
+    expect(commands.completeOnboarding).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("无法打开 Typex，请重试。");
+  });
+
+  it("提交期间锁定完成按钮并忽略重复点击", async () => {
+    let releaseUpdate!: () => void;
+    vi.mocked(commands.updateSettings).mockImplementationOnce(
+      (settings) => new Promise((resolve) => {
+        releaseUpdate = () => resolve({ status: "ok", data: settings });
+      }),
+    );
+    const wrapper = await mountOnboarding();
+    await goToFinish(wrapper);
+    const finishButton = buttonByText(wrapper, "完成");
+
+    await finishButton.trigger("click");
+    expect(finishButton.text()).toBe("正在打开…");
+    expect(finishButton.attributes("disabled")).toBeDefined();
+    await finishButton.trigger("click");
+    expect(commands.updateSettings).toHaveBeenCalledOnce();
+
+    releaseUpdate();
+    await flushPromises();
+    expect(commands.completeOnboarding).toHaveBeenCalledOnce();
   });
 
   it("第 4 步可修改快捷键并同步保存翻译组合", async () => {

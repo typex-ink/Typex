@@ -8,9 +8,11 @@
 ## 1. 安装与首启
 
 - [ ] 全新机器或清理平台配置目录后安装 → 首启弹出 onboarding；macOS 与 Windows 分别使用平台标准目录
-- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 平台权限（macOS：麦克风/辅助功能/输入监听；Windows：麦克风）状态正确 → 模型直填（STT + LLM）保存成功 → 练习框能收到听写文字 → 完成
+- [ ] Onboarding 5 步全流程走通：语言切换即时生效 → 平台权限（macOS：麦克风/辅助功能/输入监听；Windows：麦克风）状态正确 → 模型直填（STT + LLM）保存成功 → 练习框能收到听写文字 → 完成后主页自动打开并获得焦点，引导窗口随后关闭
+- [ ] 模拟主页打开失败：完成按钮解除提交状态、引导页保留且显示失败提示，可再次点击重试
 - [ ] Onboarding「跳过」路径：不配模型直接走完，主界面正常、听写时报「未配置」而非崩溃
 - [ ] 完成页「登录时自动启动」勾选生效（系统设置-登录项可见 Typex）
+- [ ] 模型管理中低于 RAM/GPU 建议但有远程源的模型仍可直接开始下载；无远程源条目保持不可下载
 - [ ] 二次启动（已在运行时再次打开）唤起设置窗口而非双实例
 
 ## 2. F-1 听写验收标准
@@ -106,6 +108,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 ```
 
 - [ ] Windows 10 22H2+ 与 Windows 11 x64 构建基线通过；Rust default / `--no-default-features` 均完成 check、clippy、test
+- [ ] debug/release 与安装器内 `typex.exe` 均为 Windows GUI subsystem；开发命令从已有终端启动时日志仍可见，直接启动与登录启动均不出现 CMD 窗口
+- [ ] 开机自启启用后 HKCU Run 值为带引号的当前 EXE 完整路径；从旧 debug 或旧安装路径启动时自动修复，关闭开关会删除残留条目，一致状态下不会重复改写
 - [ ] 右 Ctrl、右 Alt、两键乱序组合、349/351 ms、toggle、Esc、漏 release 恢复均符合规格
 - [ ] 中文输入法与 AltGr 原始事件 fixture 不触发误录音、HUD 或提示音；Typex 自身 SendInput 不反向触发热键
 - [ ] WASAPI `f32/i16/u16` 转换与实际 USB 麦克风录音通过；设备拔出/切换可恢复且不崩溃
@@ -113,7 +117,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 - [ ] UIA worker 纯逻辑测试覆盖空/非空选区、不支持、COM/Internal 错误、超时熔断、队列故障和多 range/bounds；显式 harness 覆盖真实 UIA、无 TextPattern 的 Ctrl+C 后备与 bounds
 - [ ] 向管理员权限目标进程实际注入时被 UIPI 拒绝，不自动提权，结果进入剪贴板并显示 `InjectionBlocked`；这是人工边界，可选使用独立 elevated fixture，纯完整性比较单测不能替代该项
 - [ ] 记事本、Edge、VS Code、Windows Terminal 的 UIA/注入行为完成代表性人工抽测
-- [ ] NSIS 全新安装、覆盖安装、卸载、重装通过；WebView2 缺失路径由配置/受控 smoke 验证；卸载默认保留设置、历史和模型
+- [ ] 清理历史安装登记后的 NSIS 全新 GUI/静默安装默认进入 `%LOCALAPPDATA%\Programs\Typex`；覆盖升级与显式 `/D=` 自定义目录保持原路径；卸载、重装通过，WebView2 缺失路径由配置/受控 smoke 验证，卸载默认保留设置、历史和模型
 - [ ] 作为手动安装和 Tauri 2 updater 共用资产的 NSIS `.exe` 解包后，EXE 同目录包含 sherpa/ONNX 四 DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll`、`vulkan-1.dll` 与 runtime manifest，第三方许可位于 `licenses/`；相对路径与文件哈希均和 staging 一致
 - [ ] 在未预装 VC++ Redistributable、没有系统级 Vulkan loader/可用 Vulkan ICD 的干净 Windows 基线首启成功，本地模型诊断显示 CPU fallback 而不是进程装载失败
 - [ ] 每个平台的 Tauri updater artifact 都使用配置的 `TAURI_UPDATER_PUBKEY` 对 `.sig` 完成实际验签，manifest schema 校验通过；Windows manifest 直接引用 NSIS `.exe` 而非 legacy `.nsis.zip`；未接入 SignPath 时 artifact 明确标记 unsigned，不把 SHA256 或 updater 签名误称为 Authenticode
