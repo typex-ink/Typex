@@ -338,7 +338,7 @@ F-3 不引入新的 Provider 类型：
   "general": {
     "model_download_source": "auto", // auto | huggingface | modelscope；仅影响本地模型下载
     "check_updates": true,
-    "update_channel": "stable" // stable = 正式版 release；nightly = 最新 nightly build
+    "update_channel": "nightly" // 首次默认随构建版本：prerelease = nightly，纯 SemVer = stable；之后保存用户选择
   },
   "dictation": {
     "vad": {

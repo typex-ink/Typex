@@ -25,6 +25,8 @@ Typex 使用 SemVer：`MAJOR.MINOR.PATCH`。
 
 开发版只用于主干开发、测试构建和内部分发。开发版不得作为 GitHub Release 的正式发布版本，也不得标记为 `latest` 更新源。
 
+首次生成设置时，带 prerelease 后缀的开发/测试构建默认订阅 nightly 更新通道。用户之后手动选择 stable 时保留该选择，不因当前版本仍为开发版而强制改回 nightly。
+
 ## 3. 正式版号
 
 发正式版时，从当前开发版去掉 `-dev` 后缀。
@@ -40,6 +42,8 @@ Typex 使用 SemVer：`MAJOR.MINOR.PATCH`。
 | 发版后的主干开发版 | `0.1.3-dev` 或 `0.2.0-dev` |
 
 正式版 tag 必须是 `vMAJOR.MINOR.PATCH`，并且不能包含 `-dev` 或其他 prerelease 后缀。
+
+纯 `MAJOR.MINOR.PATCH` 正式构建首次生成设置时默认订阅 stable 更新通道。
 
 ## 4. 版本字段
 

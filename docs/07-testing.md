@@ -62,7 +62,7 @@
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
 | VAD 与切片（`audio/vad.rs` / `audio/pipeline.rs`） | schema v7 迁移与门限校验；能量/神经网络两条路径；Silero 初始化/推理失败降级；弱声连续 90 ms 保底与纯静音拒绝；首部 300 ms/尾部 150 ms 非对称 padding；长录音切片沿用录音快照；短音频不切、超长无静音音频强制切片 |
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
-| `settings/migrate.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak` |
+| `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含高配手动模型（Whisper large-v3、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档 |
 | 本地 llama GPU→CPU fallback | load mode；CPU 模型 `n_gpu_layers=0` 且 devices 为空、context 的 K/Q/V 与 op offload 关闭、ASR mtmd `use_gpu=false`；仅 GPU runtime 错误且 LLM 首个可见 delta 前重试一次；输入错误、CPU mode、已输出与第二次错误不重试；ASR 非流式整次重试；并发请求由 inference lease 串行且只加载一个共享 CPU 条目、fallback 前释放失败 GPU 条目、CPU 加载不持缓存锁、显式 unload 后 detached fallback 不回填、`UnloadAfterUse` 只清自己的缓存代际 |

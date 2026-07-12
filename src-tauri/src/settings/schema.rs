@@ -98,12 +98,30 @@ pub enum ProxyMode {
     Direct,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateChannel {
-    #[default]
     Stable,
     Nightly,
+}
+
+impl UpdateChannel {
+    pub fn for_app_version(version: &str) -> Self {
+        let version_without_build = version
+            .split_once('+')
+            .map_or(version, |(version, _)| version);
+        if version_without_build.contains('-') {
+            Self::Nightly
+        } else {
+            Self::Stable
+        }
+    }
+}
+
+impl Default for UpdateChannel {
+    fn default() -> Self {
+        Self::for_app_version(env!("CARGO_PKG_VERSION"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
@@ -136,7 +154,7 @@ impl Default for GeneralSettings {
             proxy_url: String::new(),
             model_download_source: ModelDownloadSource::Auto,
             check_updates: true,
-            update_channel: UpdateChannel::Stable,
+            update_channel: UpdateChannel::default(),
         }
     }
 }
@@ -416,11 +434,44 @@ mod tests {
     }
 
     #[test]
-    fn unknown_fields_do_not_break_parsing() {
+    fn unknown_fields_do_not_break_parsing_and_missing_fields_use_build_defaults() {
         let json = r#"{ "schema_version": 7, "future_field": {"x": 1} }"#;
         let s: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(s.schema_version, 7);
-        assert_eq!(s.general.update_channel, UpdateChannel::Stable);
+        assert_eq!(
+            s.general.update_channel,
+            UpdateChannel::for_app_version(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn update_channel_default_follows_app_version_channel() {
+        assert_eq!(
+            UpdateChannel::for_app_version("0.1.0-dev"),
+            UpdateChannel::Nightly
+        );
+        assert_eq!(
+            UpdateChannel::for_app_version("1.2.3-beta.1+build.7"),
+            UpdateChannel::Nightly
+        );
+        assert_eq!(
+            UpdateChannel::for_app_version("1.2.3"),
+            UpdateChannel::Stable
+        );
+        assert_eq!(
+            UpdateChannel::for_app_version("1.2.3+build.7"),
+            UpdateChannel::Stable
+        );
+    }
+
+    #[test]
+    fn explicit_update_channel_is_not_replaced_by_build_default() {
+        let json = r#"{
+            "schema_version": 7,
+            "general": { "update_channel": "stable" }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.general.update_channel, UpdateChannel::Stable);
     }
 
     #[test]

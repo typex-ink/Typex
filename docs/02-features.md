@@ -211,7 +211,7 @@
 - 托盘菜单：`复制上次结果`、`文本整理开关`、`翻译目标`、**`模型 ▸`（按 听写/文本整理/翻译/问答 分组列出兼容服务配置，点选即切，F-4 配置池的快速切换入口）**、`暂停 Typex`（临时禁用全局监听；进入暂停时静默取消当前录音，含短按 toggle，不中断已经进入转写/处理的会话）、`设置…`、`主页…`、`检查更新`、`退出`。
 - 单实例：二次启动唤起设置窗口而非新进程。
 - 开机自启：默认询问（onboarding 最后一步），可随时在设置中改；应用启动与设置变更只在系统注册状态和配置不一致时写入，已关闭且不存在注册项是正常状态，不得产生警告。Windows 注册项必须使用带引号的当前 EXE 完整路径；启用时自动修复仍指向旧 debug/安装目录的条目，关闭时删除残留条目，完全一致时不重复写注册表（[ADR-26](08-decisions.md)）。
-- 自动更新：内置 updater（GitHub Releases 渠道），默认开启检查、手动确认安装（[ADR-11](08-decisions.md)）。
+- 自动更新：内置 updater（GitHub Releases 渠道），默认开启检查、手动确认安装（[ADR-11](08-decisions.md)）。首次生成设置时，开发版（SemVer prerelease，当前为 `-dev`）默认使用 nightly 通道，纯 `MAJOR.MINOR.PATCH` 正式版默认使用 stable 通道；用户手动选择通道后按保存值检查，不由构建类型覆盖。
 - Windows 分发为 x64 NSIS 用户安装器，WebView2 使用 Evergreen Bootstrapper；保持免 UAC 的 per-user 安装。无历史安装且未用 `/D=` 指定目录时默认安装到 `%LOCALAPPDATA%\Programs\Typex`，覆盖升级与自定义目录继续原位安装，不自动搬迁。卸载默认保留设置、历史和已下载模型。Tauri updater 完整性签名与 Windows Authenticode 发布者签名相互独立（[ADR-26](08-decisions.md)）。
 
 ## F-7 历史记录与主页统计
