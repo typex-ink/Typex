@@ -62,11 +62,16 @@ describe("AssistantPage", () => {
     expect(wrapper.findAll("button").some((button) => button.text().includes("展开"))).toBe(true);
   });
 
-  it("保存问答提示词到 ask_prompt", async () => {
+  it("无选区问答提示词不暴露 selection 并保存到 ask_prompt", async () => {
     const wrapper = mountPage();
 
-    expect(wrapper.text()).toContain("问答提示词");
+    const askRow = wrapper.findAll(".frow")[1];
+    expect(askRow.text()).toContain("无选区问答提示词");
+    expect(askRow.text()).not.toContain("{selection}");
     await wrapper.findAll("button")[1].trigger("click");
+    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value).not.toContain(
+      "{selection}",
+    );
     await wrapper.find("textarea").setValue("回答：{instruction}");
     await wrapper.findAll("button").find((button) => button.text() === "保存")!.trigger("click");
 

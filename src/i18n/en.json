@@ -158,12 +158,12 @@
       "ph_missing_list": "Missing required placeholders: {list}"
     },
     "assistant": {
-      "prompt_label": "Q&A prompt (advanced)",
-      "prompt_hint": "Placeholders: {'{instruction}'} voice instruction · {'{selection}'} selected text (optional) · {'{target_app}'} target app (optional)",
+      "prompt_label": "No-selection Q&A prompt (advanced)",
+      "prompt_hint": "Placeholders: {'{instruction}'} voice question · {'{target_app}'} target app (optional)",
       "process_prompt_label": "Selected-text prompt (advanced)",
       "process_prompt_hint": "Placeholders: {'{selection}'} selected text · {'{instruction}'} voice instruction · {'{target_app}'} target app (optional); answers should start with ANSWER:",
-      "ask_prompt_label": "Q&A prompt (advanced)",
-      "ask_prompt_hint": "Placeholders: {'{instruction}'} voice instruction · {'{selection}'} selected text (optional) · {'{target_app}'} target app (optional)",
+      "ask_prompt_label": "No-selection Q&A prompt (advanced)",
+      "ask_prompt_hint": "Placeholders: {'{instruction}'} voice question · {'{target_app}'} target app (optional)",
       "ph_missing": "Missing required placeholder {ph}",
       "ph_missing_list": "Missing required placeholders: {list}"
     },
