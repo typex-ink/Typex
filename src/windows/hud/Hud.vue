@@ -330,7 +330,7 @@ async function syncHudWindowFrame(force = false) {
   overflow: hidden;
 }
 
-/* 胶囊本体（04 §5 / 05 §3.1）：高 44、全圆角、毛玻璃 */
+/* 胶囊本体（04 §5 / 05 §3.1）：高 44、全圆角、实心表面 */
 .hud {
   display: inline-flex;
   align-items: center;
@@ -339,20 +339,11 @@ async function syncHudWindowFrame(force = false) {
   padding: 8px 16px 8px 13px;
   border-radius: var(--radius-hud);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface);
   box-shadow: var(--shadow-hud);
   font-size: 12.5px;
   color: var(--text-1);
   white-space: nowrap;
-}
-
-@supports not (backdrop-filter: blur(20px)) {
-  /* 毛玻璃不可用（Linux/webkit2gtk）回退实心（04 §5） */
-  .hud {
-    background: color-mix(in srgb, var(--surface) 98%, transparent);
-  }
 }
 
 /* 录音点：--recording，1s 呼吸（04 §3 唯一彩色） */
