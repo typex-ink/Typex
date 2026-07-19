@@ -4,7 +4,7 @@ import {
   hasVoiceActivity,
   levelToVisualAmplitude,
   processingWavePhase,
-} from "./waveform-scale";
+} from "../../shared/waveform-scale";
 
 describe("HUD waveform scale", () => {
   it("keeps silence at the visual floor", () => {

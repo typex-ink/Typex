@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <!-- Quick Look emits square thumbnails. Keep the 1200x630 composition centered for a lossless crop. -->
+  <rect width="1200" height="1200" fill="#111113"/>
+  <g transform="translate(0 285)">
+  <rect x="72" y="72" width="136" height="136" rx="36" fill="#FFFFFF"/>
+  <g fill="#000000" transform="translate(92 92) scale(.09375)">
+    <rect x="196.5" y="266.5" width="79" height="158" rx="39.5"/>
+    <rect x="334.5" y="207.5" width="79" height="276" rx="39.5"/>
+    <rect x="472.5" y="148.5" width="79" height="394" rx="39.5"/>
+    <rect x="610.5" y="207.5" width="79" height="276" rx="39.5"/>
+    <rect x="748.5" y="266.5" width="79" height="158" rx="39.5"/>
+    <rect x="472.5" y="600.5" width="79" height="276" rx="39.5"/>
+  </g>
+  <text x="250" y="178" fill="#F2F2F4" font-family="Inter, Arial, sans-serif" font-size="86" font-weight="700">Typex</text>
+  <text x="76" y="335" fill="#F2F2F4" font-family="Inter, Arial, sans-serif" font-size="60" font-weight="600">Speak. It types.</text>
+  <text x="78" y="400" fill="#A2A2AA" font-family="Inter, Arial, sans-serif" font-size="28">Open-source desktop voice input.</text>
+  <rect x="76" y="478" width="620" height="82" rx="41" fill="#19191C" stroke="#68686F" stroke-width="2"/>
+  <circle cx="120" cy="519" r="9" fill="#F2555A"/>
+  <text x="145" y="528" fill="#F2F2F4" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="600">Listening</text>
+  <g fill="#F2F2F4" transform="translate(280 496)">
+    <rect x="0" y="13" width="6" height="20" rx="3"/>
+    <rect x="17" y="7" width="6" height="32" rx="3"/>
+    <rect x="34" y="0" width="6" height="46" rx="3"/>
+    <rect x="51" y="9" width="6" height="28" rx="3"/>
+    <rect x="68" y="4" width="6" height="38" rx="3"/>
+    <rect x="85" y="13" width="6" height="20" rx="3"/>
+    <rect x="102" y="8" width="6" height="30" rx="3"/>
+    <rect x="119" y="2" width="6" height="42" rx="3"/>
+    <rect x="136" y="10" width="6" height="26" rx="3"/>
+  </g>
+  <rect x="480" y="499" width="170" height="40" rx="20" fill="#232327"/>
+  <text x="523" y="527" fill="#F2F2F4" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="600">Dictation</text>
+    <text x="1010" y="548" fill="#68686F" font-family="Inter, Arial, sans-serif" font-size="22">typex.ink</text>
+  </g>
+</svg>

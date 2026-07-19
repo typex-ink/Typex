@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Canvas 波形（04 §6：60fps 仅录音时运行；80ms 电平平滑；处理中 = 五柱依次呼吸）
 import { onMounted, onUnmounted, ref, watch } from "vue";
-import { levelToVisualAmplitude, processingWavePhase } from "./waveform-scale";
+import { levelToVisualAmplitude, processingWavePhase } from "../../shared/waveform-scale";
 
 const props = defineProps<{
   levels: number[];

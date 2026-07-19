@@ -90,6 +90,11 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 
 ```
 typex/
+├── website/                    # 独立 Vue/Vite 静态官网；无 Tauri/IPC 依赖
+│   ├── public/                 # favicon、OG 图、robots.txt、sitemap.xml、字体
+│   ├── src/                    # 站点组件、类型化文案与纯逻辑
+│   ├── vite.config.ts          # base: "./"，输出 website/dist
+│   └── vitest.config.ts        # 只收集官网测试
 ├── src-tauri/                    # Rust（单 crate，见 §5.6）
 │   ├── Cargo.toml
 │   ├── tauri.conf.json           # 窗口、updater、bundle 配置
@@ -428,6 +433,14 @@ src/
 - Markdown 渲染（仅 assistant 窗口）：`markdown-it` + 白名单 sanitize；LLM 输出视为不可信内容，禁 raw HTML。
 - i18n：`vue-i18n`，key 与 Rust `ErrorCode` 对齐（`error.auth_error` …）。
 
+### 11.1 静态官网边界
+
+- `website/` 使用独立的 Vite / TypeScript / vitest 配置和 HTML 入口，只依赖 Vue、Lucide、共享的 `src/styles/tokens.css` / `assets/icon/typex.svg` 及无运行时副作用的 `src/shared/waveform-scale.ts`。不得导入 Tauri API、IPC bindings、Pinia、桌面窗口入口或桌面运行时 i18n。
+- 根脚本 `site:dev`、`site:build`、`site:test` 显式指向官网配置；现有 `pnpm dev` / `pnpm build` / `pnpm test` 的桌面含义保持不变。
+- 官网文案保存在类型化的中英文资源中，结构在编译期和单测中保持一致；语言/主题偏好使用独立的 `typex-site-*` localStorage key，不复用应用 settings schema。
+- 演示状态机与波形只消费本地确定性合成数据，不调用麦克风、IPC、GitHub API 或任何网络服务。站点运行时不得产生第三方请求。
+- 静态元数据包含 favicon、1200×630 Open Graph 图、canonical、`robots.txt` 和 `sitemap.xml`。Vite `base` 固定为 `./`，使同一 artifact 同时适配仓库 Pages 子路径和 `typex.ink`；站点不引入客户端路由。
+
 ## 12. 性能预算（发布门槛，CI 中可测项自动化）
 
 | 指标 | 预算 |
@@ -460,6 +473,7 @@ src/
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **Windows 本地 Tauri 构建**：`pnpm tauri dev/build/bundle` 统一经 `scripts/tauri.mjs` 启动。包装器只为会编译原生代码的 `dev` / `build` 命令通过 `vswhere` 初始化 MSVC x64 环境，并发现、校验 Vulkan SDK / SPIRV-Headers CMake package；`bundle` 只打包已有 EXE，原样透传官方 Tauri CLI。Cargo 产物仍使用项目默认 `src-tauri/target`，禁止重定向 `CARGO_TARGET_DIR` 或占用应用运行时 cwd。仓库级 Cargo config 只为 `x86_64-pc-windows-msvc` 固定 Ninja，并为所有 Cargo 入口注入 llama.cpp CMake project include；后者仅把 Vulkan shader generator 的 `ExternalProject` 根目录收敛到同一 Cargo `OUT_DIR` 下的 `build/ep`，避免上游默认嵌套路径超过 MSVC 限制。`llama-cpp-sys-2` 与 `sherpa-rs-sys` 的 dev package profile 关闭 debug assertions，使其 build script 与实际使用的 Release 原生库保持一致，避免错误引入 debug CRT。Windows 的 sherpa-onnx 使用上游 `download-binaries` 固定版本预编译包和内置 SHA-256 校验，避免本地 FetchContent 生成超长目录；macOS/Linux 保持原 generator 与源码构建，包装器原样透传官方 Tauri CLI。
 - **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。Windows 还必须构建 debug EXE 并验证 PE subsystem 为 GUI。NSIS smoke 必须确认默认目录 hook 已进入渲染脚本，解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 release/包内 EXE 的 GUI subsystem 与 PE import 闭包，不能只断言安装器文件存在。
+- **官网发布**：独立 Pages workflow 监听 `master` 上 `website/**`、共享 token、图标、根依赖清单与 workflow 自身，另支持 `workflow_dispatch`。job 只执行冻结依赖安装、`site:test`、`site:build`、Pages artifact 上传和 `github-pages` environment 部署；Actions 使用完整提交 SHA 固定。artifact 顶层必须是 `index.html`。workflow 不生成或提交 `CNAME`，自定义域只在 GitHub Pages 设置中配置。
 - **发布**：tag → 各平台 build job 产出唯一命名的平台 artifact 与 updater manifest fragment → publish job 校验后聚合 SHA256 和唯一 `latest.json`。Windows 使用 Tauri 2 原生 updater 格式：同一个 NSIS x64 `.exe` 同时作为手动安装和 updater 下载资产，旁边发布对应 `.exe.sig`，不生成仅供 Tauri v1 迁移的 legacy `.nsis.zip`；Windows 与 macOS 复用仓库现有 updater 密钥。构建前先从原生 release 产物、Microsoft VC tools redist 和固定版本/哈希的 Vulkan Loader 包生成 runtime staging，Tauri Windows resource map 将其安装到 EXE 同目录。Tauri `.sig` 是更新完整性签名，Authenticode 是 Windows 发布者身份，二者独立。SignPath/Authenticode 可后置，但构建链必须保留稳定签名插入点。更新通道分 stable/nightly，任何平台 fragment 不得同名覆盖或跨通道引用。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。
 - **文档同步纪律**：改动 IPC 契约、配置 schema、状态机行为时，必须同 PR 更新本章或对应章节。

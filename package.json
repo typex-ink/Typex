@@ -9,6 +9,10 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
+    "site:dev": "node website/scripts/sync-assets.mjs && vite --config website/vite.config.ts",
+    "site:build": "node website/scripts/sync-assets.mjs && vue-tsc -p website/tsconfig.json --noEmit && vite build --config website/vite.config.ts && node website/scripts/verify-build.mjs",
+    "site:preview": "vite preview --config website/vite.config.ts",
+    "site:test": "vitest run --config website/vitest.config.ts",
     "tauri": "node scripts/tauri.mjs",
     "test": "vitest run",
     "gen:ipc": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib export_bindings",
@@ -16,6 +20,8 @@
     "verify:updater-signature": "cargo run --locked --quiet --manifest-path tools/updater-signature-verifier/Cargo.toml"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@lucide/vue": "^1.24.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2",
     "@tauri-apps/plugin-dialog": "^2",

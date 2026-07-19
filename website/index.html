@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F8F8F7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="Open-source desktop AI voice input for macOS and Windows. Dictate, translate, and edit in any app with your own or local models."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Typex" />
+    <meta property="og:title" content="Typex - Speak. It types." />
+    <meta
+      property="og:description"
+      content="Open-source desktop AI voice input for macOS and Windows."
+    />
+    <meta property="og:url" content="https://typex.ink/" />
+    <meta property="og:image" content="https://typex.ink/og-typex.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Typex - Speak. It types." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://typex.ink/" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Typex - Speak. It types.</title>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        try {
+          const locale = localStorage.getItem("typex-site-locale");
+          const detected = (navigator.languages?.[0] || navigator.language || "en").toLowerCase();
+          root.lang = locale === "zh-CN" || (!locale && detected.startsWith("zh")) ? "zh-CN" : "en";
+          const theme = localStorage.getItem("typex-site-theme");
+          if (theme === "light" || theme === "dark") root.dataset.theme = theme;
+        } catch {
+          root.lang = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

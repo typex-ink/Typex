@@ -135,6 +135,19 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 
 当前不上视觉回归截图工具；替代措施：tokens.css 的 lint（禁止组件硬编码色值）+ 双主题的人工走查项（§7 清单内）。若组件库变大再评估 Storybook + 截图对比。
 
+### 5.4 静态官网
+
+官网测试由 `pnpm site:test` 独立运行，至少覆盖：
+
+- 中英文类型化文案结构一致、未知浏览器语言回退到 English。
+- 语言与主题首次选择、手动切换及 `typex-site-locale` / `typex-site-theme` 持久化。
+- GitHub、源码、许可证和两个平台下载外链；macOS / Windows 支持版本文案。
+- `prefers-reduced-motion` 下演示直接进入静态完成态，不创建循环定时器；页面隐藏、离屏和用户暂停分别停止动画。
+
+`pnpm site:build` 后必须验证 `website/dist/index.html` 位于 artifact 顶层、HTML 内部资源使用相对路径，且引用文件全部存在。站点不能通过测试访问真实网络。
+
+人工浏览器走查覆盖 `1440×900`、`1024×768`、`390×844`，中英与亮暗主题至少各覆盖一次；确认首屏露出下一节、顶栏/移动菜单不重叠、长文案不溢出、所有按钮/菜单/锚点键盘可达、`Escape` 关闭菜单、焦点环清晰、正文对比度达 WCAG AA，以及演示的播放/暂停、离屏/标签页暂停和 reduced-motion 静态降级。
+
 ## 6. 提示词回归评测（LLM 相关的特殊层）
 
 提示词（整理/翻译/处理判定）的行为无法用普通断言穷尽，但**不测就等于每次改提示词都在裸奔**：
@@ -171,6 +184,8 @@ PR / 主干 push：
 ├── build:     三平台 tauri build（PR 上仅 Linux 快检，主干全矩阵）
 └── size:      hud chunk 体积断言 · 安装包体积对照预算
 ```
+
+官网 Pages workflow 与桌面 CI 解耦，但发布前必须先执行 `site:test` 和 `site:build`，再上传 `website/dist`；不得上传仓库根目录或桌面 `dist/`。
 
 - 任何一步红 = 不可合并；flaky 测试当天处理（§1.4）。
 - Windows PR job 必须运行 Rust default 与 `--no-default-features` 两套 check/clippy/test、`pnpm gen:ipc`/build/test；Windows 自启纯逻辑单测覆盖空格路径加引号、旧 debug/安装路径修复、正确路径不写和关闭时删除残留。另构建 debug EXE 并验证为 GUI subsystem。NSIS smoke 在安装器配置变更或主干构建中运行，检查默认目录 hook 已进入渲染脚本，并解包验证 sherpa/ONNX、VC++ runtime、Vulkan loader 和 runtime manifest 位于 EXE 同目录，第三方许可位于 `licenses/`，且文件名、相对路径与哈希一致；release 与包内 EXE 均须为 GUI subsystem。内嵌的 WebView2 Evergreen Bootstrapper 必须具有有效 Microsoft Authenticode，PE import 检查必须证明默认 feature 不依赖安装目录外的非系统 DLL。Tauri 2 Windows updater 直接复用同一 NSIS `.exe`，构建验证和 publish job 下载 artifact 后都必须用 `TAURI_UPDATER_PUBKEY` 对对应 `.exe.sig` 实际验签，不能只检查签名文件存在或非空；macOS updater archive 同样验签。平台 artifact 汇总必须先拒绝重复资产名，再生成唯一 manifest。CI/测试 artifact 不执行发布。

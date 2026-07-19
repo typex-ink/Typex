@@ -6,6 +6,7 @@
 # Node
 node_modules
 dist
+/website/public/favicon.svg
 
 # 生成物
 /src/ipc/bindings.ts

@@ -13,7 +13,7 @@ import {
   type ErrorCode,
 } from "./ipc";
 import Waveform from "./Waveform.vue";
-import { hasVoiceActivity } from "./waveform-scale";
+import { hasVoiceActivity } from "../../shared/waveform-scale";
 import type { LogicalSizeLike } from "@/shared/floating-window";
 import { currentMonitor, type Monitor } from "@tauri-apps/api/window";
 // HUD 纪律：不引 vue-i18n 运行时，静态 JSON 按语言直取（文案仍单一来源）
