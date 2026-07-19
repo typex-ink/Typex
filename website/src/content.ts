@@ -275,18 +275,18 @@ export const siteCopy: Record<Locale, SiteCopy> = {
     hero: {
       tagline: "说，即所得。",
       body:
-        "按住快捷键，说出你真正想表达的内容，Typex 会把整理好的文字直接放到当前光标处。不切应用，也不需要 Typex 账号。",
+        "按住快捷键说话，Typex 会把整理好的文字直接放到光标所在的位置。不用切换应用，也不需要注册账号。",
       github: "在 GitHub 查看",
       download: "下载 Typex",
       compatibility: "支持 macOS 12+ 与 Windows 10/11 x64",
     },
     demo: {
-      title: "从随口一说，到可以直接发送。",
-      body: "Typex 边听边理解，去掉绕路和改口，再把最终表达写进你正在使用的应用。",
+      title: "从随口一说，到可以直接发送的文字。",
+      body: "Typex 边听边整理，去掉犹豫和改口的部分，把最终表达写进你正在使用的应用。",
       editorTitle: "草稿 - 项目记录",
       documentTitle: "发布进度",
-      draft: "我们嗯把发布改到周四，哦不，周五下午，然后告诉团队 Windows 版本还要再走一轮测试。",
-      result: "我们把发布改到周五下午，并告诉团队 Windows 版本还要再走一轮测试。",
+      draft: "我们，嗯，把发布改到周四——不对，周五下午，然后告诉团队 Windows 版本还要再测一轮。",
+      result: "我们把发布改到周五下午，并告诉团队 Windows 版本还要再测一轮。",
       listening: "正在听",
       polishing: "正在整理",
       typed: "已输入",
@@ -297,14 +297,14 @@ export const siteCopy: Record<Locale, SiteCopy> = {
     featuresIntro: {
       title: "安静待命，需要时才出现。",
       body:
-        "Typex 常驻托盘，在光标处工作。同一种轻量交互，可以完成听写、翻译、选区处理和完全本地的私密工作流。",
+        "Typex 常驻托盘，在光标处待命。同一种轻量交互，就能完成听写、翻译、选区处理，以及完全离线的私密工作流。",
     },
     features: [
       {
         kind: "dictation",
-        title: "自然地说，只留下真正想表达的。",
+        title: "自然地说，Typex 只留下你真正想表达的内容。",
         body:
-          "不需要先在脑中打好草稿。Typex 会去掉语气词、修正标点，并在你说到一半改口时跟上最终意图。",
+          "不用先在脑子里打好草稿。Typex 会去掉语气词、修正标点，并在你说到一半改口时，准确捕捉你的最终意图。",
         points: ["直接写入当前应用的光标位置", "自动清理语气词与中途改口"],
         visual: {
           title: "消息草稿",
@@ -319,8 +319,8 @@ export const siteCopy: Record<Locale, SiteCopy> = {
         kind: "translation",
         title: "只说一次，直接写成另一种语言。",
         body:
-          "不再来回复制粘贴。Typex 先识别你的意图，再完成翻译，并把结果放进当前工作位置。",
-        points: ["适合多语言表达与混合办公", "使用你选择的语音和语言模型"],
+          "不用再来回复制粘贴。Typex 先识别你的意图，完成翻译后，直接把结果插入你正在编辑的位置。",
+        points: ["适用于多语言口述与跨语言协作", "使用你选择的语音和语言模型"],
         visual: {
           title: "回复编辑器",
           labelA: "中文",
@@ -332,9 +332,9 @@ export const siteCopy: Record<Locale, SiteCopy> = {
       },
       {
         kind: "assistant",
-        title: "选中文字，再说它应该怎么改。",
+        title: "选中文字，说出你想怎么改。",
         body:
-          "在当前应用选中内容，然后直接口述指令。改写、总结、翻译或提问都不需要把文字搬到另一个窗口。",
+          "在当前应用里选中内容，直接说出指令。改写、总结、翻译或提问，都不用把文字搬到另一个窗口。",
         points: ["编辑型指令直接替换选中文字", "问答型指令在只读窗口显示结果"],
         visual: {
           title: "规划记录",
@@ -349,8 +349,8 @@ export const siteCopy: Record<Locale, SiteCopy> = {
         kind: "local",
         title: "自带密钥，或让整个流程留在本机。",
         body:
-          "接入 OpenAI 兼容服务、Ollama 或自建端点；需要数据不出设备时，也可以下载受支持的本地语音与语言模型。",
-        points: ["不强制注册 Typex 账号或订阅", "零遥测；本地模型让内容留在设备上"],
+          "接入 OpenAI 兼容服务、Ollama 或自建端点；也可以下载受支持的本地语音与语言模型，让数据完全留在设备上。",
+        points: ["不强制注册 Typex 账号或订阅", "无遥测收集，本地模型下内容不出设备"],
         visual: {
           title: "模型路由",
           labelA: "语音转文字",
@@ -362,7 +362,7 @@ export const siteCopy: Record<Locale, SiteCopy> = {
       },
     ],
     openSource: {
-      title: "源码可以检查，遥测无需费心关闭。",
+      title: "源码公开可查，也没有遥测需要你关闭。",
       body:
         "Typex 在公开仓库中开发。音频、选中文字和生成结果只会发往你配置的端点；使用本地模型时，它们不会离开你的设备。",
       commitments: [
