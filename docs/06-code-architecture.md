@@ -130,7 +130,7 @@ typex/
 │       ├── providers/
 │       │   ├── mod.rs            # ProviderRegistry：由配置构造 provider 实例
 │       │   ├── error.rs          # ProviderError 分类（§5.4）
-│       │   ├── http.rs           # 共享 reqwest 客户端工厂（代理/超时/重试）
+│       │   ├── http.rs           # 共享 reqwest 客户端工厂（代理/重试）
 │       │   ├── stt/
 │       │   │   ├── mod.rs        # trait SttProvider
 │       │   │   ├── openai_compat.rs
@@ -177,7 +177,8 @@ typex/
 - `main.rs` 手工装配（不引依赖注入框架）：构造 `SettingsService` → 据配置构造 `ProviderRegistry`、`AudioService`、`InjectorChain`、`SelectionReader`、`HotkeyService` → 全部交给 `Orchestrator` → `Orchestrator` 与 `SettingsService` 放入 Tauri `State`（`Arc<...>`）。
 - 服务句柄一律 `Arc<Service>`，内部可变性用 `tokio::sync::Mutex/RwLock`（跨 await）或 `parking_lot`（纯同步、短临界区）；**禁止**在持锁状态下 await 网络调用。
 - 配置热更新：`SettingsService` 变更后广播 `watch::channel`；`ProviderRegistry` 订阅并按 profile-id 惰性重建 provider 实例，其他服务各自订阅所需字段（如快捷键改绑）。
-- LLM 调用时限由 `ProviderRegistry` 按 profile 的 `timeout_ms` 统一包装，覆盖远端与本地实现以及完整流式生命周期；orchestrator 不得为整理、翻译或助手叠加功能专用总时限/idle timeout。
+- STT / LLM 调用时限由 `ProviderRegistry` 按 profile 的 `timeout_ms` 统一包装，覆盖远端与本地实现以及完整调用生命周期；orchestrator 不得为转写、整理、翻译或助手叠加功能专用总时限/idle timeout。
+- 本地 STT 的模型加载与原生推理必须进入 blocking pool，不得占用 Tokio worker。同一 provider 实例同时只允许一个原生转写任务；调用方超时或取消后，在原生库无法安全中断当前推理时，在途许可必须保留到该任务实际返回，后续重试仅异步等待许可，不得继续创建或阻塞新的运行时工作线程。
 
 ### 5.2 会话状态机（orchestrator 的核心）
 

@@ -83,6 +83,11 @@ const isNew = computed(() => !props.profile);
 const draftProfileId = props.profile?.id ?? `p-${Date.now().toString(36)}`;
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
+const timeoutHintKey = computed(() =>
+  props.capability === "stt"
+    ? "settings.profile.timeout_hint_stt"
+    : "settings.profile.timeout_hint_llm",
+);
 const canConfigureReasoning = computed(
   () =>
     props.capability !== "stt" &&
@@ -98,8 +103,8 @@ const reasoningOptions = computed(() => [
 ]);
 const timeoutMs = computed(() => {
   const seconds = Number(timeoutSeconds.value);
-  const milliseconds = seconds * 1000;
-  return Number.isInteger(seconds) && seconds > 0 && Number.isSafeInteger(milliseconds)
+  const milliseconds = Math.round(seconds * 1000);
+  return seconds > 0 && Number.isSafeInteger(milliseconds) && milliseconds / 1000 === seconds
     ? milliseconds
     : null;
 });
@@ -194,7 +199,7 @@ function applyPreset(id: string) {
 }
 
 const valid = computed(() => {
-  if (props.capability === "llm" && timeoutMs.value === null) return false;
+  if (timeoutMs.value === null) return false;
   if (isLocal.value) return !!model.value && !!label.value.trim();
   if (!label.value.trim() || !model.value.trim()) return false;
   if (isVolc.value) {
@@ -211,10 +216,7 @@ const valid = computed(() => {
 
 async function save(): Promise<string | null> {
   if (!valid.value) return null;
-  const effectiveTimeoutMs = props.capability === "llm"
-    ? timeoutMs.value
-    : (props.profile?.timeout_ms ?? DEFAULT_TIMEOUT_MS);
-  if (effectiveTimeoutMs === null) return null;
+  if (timeoutMs.value === null) return null;
   saving.value = true;
   const id = draftProfileId;
   const options = { ...(props.profile?.options ?? {}) };
@@ -236,7 +238,7 @@ async function save(): Promise<string | null> {
     credentials: props.profile?.credentials ?? {},
     extra_headers: props.profile?.extra_headers ?? {},
     extra_form: props.profile?.extra_form ?? {},
-    timeout_ms: effectiveTimeoutMs,
+    timeout_ms: timeoutMs.value,
     options,
   };
   const r = await commands.upsertProfile(profile);
@@ -344,13 +346,9 @@ onUnmounted(() => unlistenProgress?.());
     <FormRow :label="t('settings.profile.name')">
       <span class="w280"><Input v-model="label" :placeholder="t('settings.profile.name_ph')" /></span>
     </FormRow>
-    <FormRow
-      v-if="capability === 'llm'"
-      :label="t('settings.profile.timeout_seconds')"
-      :hint="t('settings.profile.timeout_hint')"
-    >
+    <FormRow :label="t('settings.profile.timeout_seconds')" :hint="t(timeoutHintKey)">
       <span class="timeout-field">
-        <Input v-model="timeoutSeconds" type="number" :min="1" :step="1" />
+        <Input v-model="timeoutSeconds" type="number" :min="0.001" :step="0.001" />
       </span>
     </FormRow>
 

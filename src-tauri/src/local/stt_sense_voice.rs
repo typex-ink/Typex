@@ -5,13 +5,15 @@
 //! 无 base_url/凭据）；错误分类只剩 InvalidRequest / 模型未下载（NotConfigured）。
 
 use crate::providers::ProviderError;
-use crate::providers::stt::{AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript};
+use crate::providers::stt::{
+    AudioInput, NativeSttJobGate, SttCapabilities, SttOptions, SttProvider, Transcript,
+};
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::{CStr, CString};
 use std::hash::{Hash, Hasher};
 use std::mem;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 struct SenseVoiceRecognizer {
     recognizer: *const sherpa_rs_sys::SherpaOnnxOfflineRecognizer,
@@ -157,7 +159,8 @@ impl Drop for LoadedSenseVoice {
 
 pub struct SenseVoiceStt {
     /// 惰性初始化：模型加载 1s 级，首次转写时才加载（录音时预热策略可后续加）
-    recognizer: Mutex<Option<LoadedSenseVoice>>,
+    recognizer: Arc<Mutex<Option<LoadedSenseVoice>>>,
+    native_jobs: NativeSttJobGate,
     model_path: PathBuf,
     tokens_path: PathBuf,
     num_threads: i32,
@@ -176,46 +179,23 @@ impl SenseVoiceStt {
     /// 导入模型使用：文件名由用户清单决定。
     pub fn from_files(model_path: PathBuf, tokens_path: PathBuf, num_threads: i32) -> Self {
         Self {
-            recognizer: Mutex::new(None),
+            recognizer: Arc::new(Mutex::new(None)),
+            native_jobs: NativeSttJobGate::new(),
             model_path,
             tokens_path,
             num_threads,
         }
     }
 
+    #[cfg(test)]
     fn ensure_loaded(&self, hotwords: Option<&str>) -> Result<(), ProviderError> {
-        let hotwords_key = hotwords
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned);
-        let mut guard = self.recognizer.lock().unwrap();
-        if guard
-            .as_ref()
-            .is_some_and(|loaded| loaded.hotwords_key == hotwords_key)
-        {
-            return Ok(());
-        }
-        let model = &self.model_path;
-        let tokens = &self.tokens_path;
-        if !model.exists() || !tokens.exists() {
-            // 模型未下载（03 §2.3 错误分类）
-            return Err(ProviderError::InvalidRequest(
-                "模型未下载：请在设置-模型服务中下载 SenseVoice".into(),
-            ));
-        }
-        let (hotwords_path, hotwords_file) = write_hotwords_file(hotwords_key.as_deref())?;
-        let recognizer = SenseVoiceRecognizer::new(
-            &model.display().to_string(),
-            &tokens.display().to_string(),
+        ensure_recognizer_loaded(
+            &self.recognizer,
+            &self.model_path,
+            &self.tokens_path,
             self.num_threads,
-            hotwords_file.as_deref(),
-        )?;
-        *guard = Some(LoadedSenseVoice {
-            recognizer,
-            hotwords_key,
-            hotwords_path,
-        });
-        Ok(())
+            hotwords,
+        )
     }
 
     /// 释放常驻内存（运行时策略切换用）。
@@ -242,13 +222,26 @@ impl SttProvider for SenseVoiceStt {
         audio: AudioInput,
         opts: SttOptions,
     ) -> Result<Transcript, ProviderError> {
-        let samples = wav_to_samples(&audio.wav_16k_mono)?;
-        self.ensure_loaded(opts.prompt.as_deref())?;
-        // 推理是 CPU 阻塞调用；trait 是 async——直接在调用方的 blocking 语境跑
-        // （orchestrator 的 STT 调用本就在 spawn 的 task 里，短音频毫秒级不成问题）
-        let mut guard = self.recognizer.lock().unwrap();
-        let loaded = guard.as_mut().expect("ensure_loaded 已初始化");
-        loaded.recognizer.transcribe(16_000, &samples)
+        let recognizer = Arc::clone(&self.recognizer);
+        let model_path = self.model_path.clone();
+        let tokens_path = self.tokens_path.clone();
+        let num_threads = self.num_threads;
+        let hotwords = opts.prompt;
+        self.native_jobs
+            .run("SenseVoice 转写任务", move || {
+                let samples = wav_to_samples(&audio.wav_16k_mono)?;
+                ensure_recognizer_loaded(
+                    &recognizer,
+                    &model_path,
+                    &tokens_path,
+                    num_threads,
+                    hotwords.as_deref(),
+                )?;
+                let mut guard = recognizer.lock().unwrap();
+                let loaded = guard.as_mut().expect("ensure_loaded 已初始化");
+                loaded.recognizer.transcribe(16_000, &samples)
+            })
+            .await
     }
 
     fn capabilities(&self) -> SttCapabilities {
@@ -258,6 +251,44 @@ impl SttProvider for SenseVoiceStt {
             supports_language: false, // SenseVoice 自动判语种
         }
     }
+}
+
+fn ensure_recognizer_loaded(
+    recognizer_slot: &Mutex<Option<LoadedSenseVoice>>,
+    model_path: &Path,
+    tokens_path: &Path,
+    num_threads: i32,
+    hotwords: Option<&str>,
+) -> Result<(), ProviderError> {
+    let hotwords_key = hotwords
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let mut guard = recognizer_slot.lock().unwrap();
+    if guard
+        .as_ref()
+        .is_some_and(|loaded| loaded.hotwords_key == hotwords_key)
+    {
+        return Ok(());
+    }
+    if !model_path.exists() || !tokens_path.exists() {
+        return Err(ProviderError::InvalidRequest(
+            "模型未下载：请在设置-模型服务中下载 SenseVoice".into(),
+        ));
+    }
+    let (hotwords_path, hotwords_file) = write_hotwords_file(hotwords_key.as_deref())?;
+    let recognizer = SenseVoiceRecognizer::new(
+        &model_path.display().to_string(),
+        &tokens_path.display().to_string(),
+        num_threads,
+        hotwords_file.as_deref(),
+    )?;
+    *guard = Some(LoadedSenseVoice {
+        recognizer,
+        hotwords_key,
+        hotwords_path,
+    });
+    Ok(())
 }
 
 fn cstring(value: &str) -> Result<CString, ProviderError> {

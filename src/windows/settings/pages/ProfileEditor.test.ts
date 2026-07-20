@@ -45,6 +45,22 @@ function llmProfile(kind: ProviderKind): ProviderProfile {
   };
 }
 
+function sttProfile(): ProviderProfile {
+  return {
+    id: "stt-openai",
+    capability: "stt",
+    kind: "openai_compat",
+    label: "Groq STT",
+    base_url: "https://api.groq.com/openai/v1",
+    model: "whisper-large-v3-turbo",
+    credentials: { api_key: "sk-existing" },
+    extra_headers: {},
+    extra_form: {},
+    timeout_ms: 30_000,
+    options: {},
+  };
+}
+
 async function saveWithReasoning(kind: ProviderKind) {
   const host = document.createElement("div");
   document.body.appendChild(host);
@@ -110,10 +126,9 @@ describe("ProfileEditor", () => {
       global: { plugins: [makeI18n("zh-CN")] },
     });
 
-    const inputs = wrapper.findAll("input");
-    await inputs[0].setValue("Test STT");
-    await inputs[1].setValue("https://api.example.com/v1");
-    await inputs[2].setValue("whisper-test");
+    await wrapper.get('input[placeholder="如 Groq · whisper-turbo"]').setValue("Test STT");
+    await wrapper.get('input[placeholder="https://api.example.com/v1"]').setValue("https://api.example.com/v1");
+    await wrapper.get('input[placeholder="模型名"]').setValue("whisper-test");
     await wrapper.find("input[type='password']").setValue("sk-test");
 
     const test = wrapper.findAll("button").find((button) => button.text().includes("测试连接"))!;
@@ -128,6 +143,32 @@ describe("ProfileEditor", () => {
     expect(new Set(savedIds).size).toBe(1);
     expect(mockActivateProfile).toHaveBeenNthCalledWith(1, "stt", savedIds[0]);
     expect(mockActivateProfile).toHaveBeenNthCalledWith(2, "stt", savedIds[0]);
+  });
+
+  it("新建 STT 档案默认 60 秒且保存编辑后的秒数", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "stt", profile: null },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const timeout = wrapper.get(".timeout-field input");
+    expect((timeout.element as HTMLInputElement).value).toBe("60");
+    expect(wrapper.text()).toContain("所有使用此档案的语音转文字请求统一生效");
+
+    await wrapper.get('input[placeholder="如 Groq · whisper-turbo"]').setValue("Test STT");
+    await wrapper.get('input[placeholder="https://api.example.com/v1"]').setValue("https://api.example.com/v1");
+    await wrapper.get('input[placeholder="模型名"]').setValue("whisper-test");
+    await wrapper.get("input[type='password']").setValue("sk-test");
+    await timeout.setValue("75");
+
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockUpsertProfile.mock.calls[0]?.[0].timeout_ms).toBe(75_000);
   });
 
   it("新建 LLM 档案默认 60 秒且保存编辑后的秒数", async () => {
@@ -173,20 +214,39 @@ describe("ProfileEditor", () => {
     expect(mockUpsertProfile.mock.calls[0]?.[0].timeout_ms).toBe(30_000);
   });
 
-  it("调用超时不是正整数或换算后超过安全整数时禁用保存", async () => {
+  it("现有毫秒级 STT 超时可显示并保存为小数秒", async () => {
+    const profile = sttProfile();
+    profile.timeout_ms = 1_500;
     const wrapper = mount(ProfileEditor, {
-      props: { capability: "llm", profile: llmProfile("responses") },
+      props: { capability: "stt", profile },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const timeout = wrapper.get(".timeout-field input");
+    expect((timeout.element as HTMLInputElement).value).toBe("1.5");
+    expect(timeout.attributes("step")).toBe("0.001");
+
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockUpsertProfile.mock.calls[0]?.[0].timeout_ms).toBe(1_500);
+  });
+
+  it("调用超时无法换算为正整数毫秒或超过安全整数时禁用保存", async () => {
+    const wrapper = mount(ProfileEditor, {
+      props: { capability: "stt", profile: sttProfile() },
       global: { plugins: [makeI18n("zh-CN")] },
     });
     const timeout = wrapper.get(".timeout-field input");
     const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
 
-    for (const invalid of ["", "0", "1.5", String(Math.floor(Number.MAX_SAFE_INTEGER / 1000) + 1)]) {
+    for (const invalid of ["", "0", "0.0001", "1.0001", String(Math.floor(Number.MAX_SAFE_INTEGER / 1000) + 1)]) {
       await timeout.setValue(invalid);
       expect(save.attributes("disabled"), `timeout=${invalid}`).toBeDefined();
     }
 
-    await timeout.setValue("30");
+    await timeout.setValue("1.001");
     expect(save.attributes("disabled")).toBeUndefined();
   });
 

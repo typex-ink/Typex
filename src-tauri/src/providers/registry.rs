@@ -9,7 +9,7 @@ use crate::providers::llm::{
     LlmProvider, TimedLlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use crate::providers::stt::{
-    SttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
+    SttProvider, TimedSttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
 };
 use crate::settings::schema::Settings;
 use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
@@ -237,9 +237,9 @@ impl ProviderRegistry {
         Ok(secret.to_string())
     }
 
-    fn http_client(&self, timeout_ms: Option<u64>) -> reqwest::Client {
+    fn http_client(&self) -> reqwest::Client {
         let s = self.settings.lock().unwrap();
-        http::build_client(s.general.proxy_mode, &s.general.proxy_url, timeout_ms)
+        http::build_client(s.general.proxy_mode, &s.general.proxy_url)
     }
 
     /// 取某槽位的 STT provider。
@@ -278,11 +278,17 @@ impl ProviderRegistry {
                 format!("{} 不是 STT 服务配置", profile.label),
             ));
         }
-        match profile.kind {
+        if profile.timeout_ms == 0 {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 的调用超时必须大于 0", profile.label),
+            ));
+        }
+        let provider: Arc<dyn SttProvider> = match profile.kind {
             ProviderKind::OpenaiCompat => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(Some(profile.timeout_ms));
-                Ok(Arc::new(
+                let client = self.http_client();
+                Arc::new(
                     OpenAiCompatStt::new(
                         client,
                         profile.base_url.clone(),
@@ -290,26 +296,32 @@ impl ProviderRegistry {
                         profile.model.clone(),
                     )
                     .with_extras(profile.extra_headers.clone(), profile.extra_form.clone()),
-                ))
+                )
             }
             ProviderKind::Volcengine => {
                 let app_key = self.resolve_secret(profile, "app_key")?;
                 let access_key = self.resolve_secret(profile, "access_token")?;
-                let client = self.http_client(Some(profile.timeout_ms));
+                let client = self.http_client();
                 let mut p =
                     VolcengineStt::new(client, profile.base_url.clone(), app_key, access_key);
                 if let Some(rid) = profile.options.get("resource_id").and_then(|v| v.as_str()) {
                     p = p.with_resource_id(rid);
                 }
-                Ok(Arc::new(p))
+                Arc::new(p)
             }
             #[cfg(feature = "local-models")]
-            ProviderKind::Local => self.build_local_stt(profile),
-            _ => Err(TypexError::new(
-                ErrorCode::InvalidRequest,
-                format!("{:?} 不是 STT 类型", profile.kind),
-            )),
-        }
+            ProviderKind::Local => self.build_local_stt(profile)?,
+            _ => {
+                return Err(TypexError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("{:?} 不是 STT 类型", profile.kind),
+                ));
+            }
+        };
+        Ok(Arc::new(TimedSttProvider::new(
+            provider,
+            Duration::from_millis(profile.timeout_ms),
+        )))
     }
 
     /// 本地 STT：按 model id 选引擎（sherpa / sherpa_whisper / llama mtmd）。
@@ -421,7 +433,7 @@ impl ProviderRegistry {
         let provider: Arc<dyn LlmProvider> = match profile.kind {
             ProviderKind::ChatCompletions => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(None);
+                let client = self.http_client();
                 Arc::new(
                     ChatCompletionsLlm::new(
                         client,
@@ -436,7 +448,7 @@ impl ProviderRegistry {
             }
             ProviderKind::Responses => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(None);
+                let client = self.http_client();
                 Arc::new(
                     ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
                         .with_headers(profile.extra_headers.clone())
@@ -548,6 +560,19 @@ mod tests {
         let a = reg.stt_for(SlotKind::Stt).unwrap();
         let b = reg.stt_for(SlotKind::Stt).unwrap();
         assert!(Arc::ptr_eq(&a, &b)); // 缓存命中
+    }
+
+    #[test]
+    fn zero_stt_timeout_is_rejected_at_provider_boundary() {
+        let reg = setup();
+        let mut p = profile("invalid", ProviderKind::OpenaiCompat);
+        p.timeout_ms = 0;
+
+        let err = match reg.build_stt(&p) {
+            Err(err) => err,
+            Ok(_) => panic!("零超时不应构建 STT provider"),
+        };
+        assert_eq!(err.code, ErrorCode::InvalidRequest);
     }
 
     #[test]

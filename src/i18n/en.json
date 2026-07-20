@@ -188,7 +188,8 @@
       "name": "Name",
       "name_ph": "e.g. Groq · whisper-turbo",
       "timeout_seconds": "Call timeout (seconds)",
-      "timeout_hint": "Maximum time from starting a call until the complete result returns; shared by cleanup, translation, and Q&A when they use this profile",
+      "timeout_hint_stt": "Maximum time from starting speech recognition until the complete transcript returns; applies to every speech-to-text call using this profile",
+      "timeout_hint_llm": "Maximum time from starting an LLM call until the complete result returns; shared by cleanup, translation, and Q&A when they use this profile",
       "endpoint": "Endpoint",
       "endpoint_hint": "Leave empty to use the official endpoint openspeech.bytedance.com",
       "endpoint_ph": "(official endpoint by default)",
@@ -225,7 +226,7 @@
       "test_pass": "✓ Passed · {ms}ms",
       "err_auth_error": "Authentication or access denied (401/403) — check the key, account permissions, or client group",
       "err_network_error": "Cannot connect — check your network and endpoint",
-      "err_timeout": "Timed out — the endpoint may be unreachable",
+      "err_timeout": "Call exceeded the configured timeout",
       "err_invalid_request": "Rejected (404/400) — check the base URL and model name",
       "err_server_error": "Server error (5xx) — try again later",
       "err_not_configured": "Not ready — model not downloaded or local models disabled"

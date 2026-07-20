@@ -188,7 +188,8 @@
       "name": "名称",
       "name_ph": "如 Groq · whisper-turbo",
       "timeout_seconds": "调用超时（秒）",
-      "timeout_hint": "从调用开始到完整结果返回的最长时间；整理、翻译和问答共用此档案时统一生效",
+      "timeout_hint_stt": "从语音转文字调用开始到完整转写返回的最长时间；所有使用此档案的语音转文字请求统一生效",
+      "timeout_hint_llm": "从大语言模型调用开始到完整结果返回的最长时间；整理、翻译和问答共用此档案时统一生效",
       "endpoint": "端点",
       "endpoint_hint": "留空使用官方端点 openspeech.bytedance.com",
       "endpoint_ph": "（默认官方端点）",
@@ -225,7 +226,7 @@
       "test_pass": "✓ 测试通过 · {ms}ms",
       "err_auth_error": "鉴权或访问被拒（401/403）——请检查密钥、账户权限或客户端分组",
       "err_network_error": "无法连接——请检查网络与端点地址",
-      "err_timeout": "响应超时——端点可能不可达",
+      "err_timeout": "调用超过配置时限",
       "err_invalid_request": "请求被拒（404/400）——请检查 Base URL 与模型名",
       "err_server_error": "服务端错误（5xx）——稍后再试",
       "err_not_configured": "未就绪——模型未下载或本地模型未启用"

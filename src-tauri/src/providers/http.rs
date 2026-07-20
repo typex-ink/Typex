@@ -6,17 +6,9 @@ use std::time::Duration;
 
 /// 按代理设置构造客户端（06 §9：默认跟随系统代理）。
 ///
-/// STT 可直接使用 HTTP 总时限；LLM 的完整流时限由统一 Provider 包装层执行，
-/// 因而传 `None`，避免 adapter 与功能层各自维护 deadline。
-pub fn build_client(
-    proxy_mode: ProxyMode,
-    proxy_url: &str,
-    timeout_ms: Option<u64>,
-) -> reqwest::Client {
+/// STT/LLM 的完整调用时限由统一 Provider 包装层执行，HTTP adapter 不另设总时限。
+pub fn build_client(proxy_mode: ProxyMode, proxy_url: &str) -> reqwest::Client {
     let mut b = reqwest::Client::builder();
-    if let Some(timeout_ms) = timeout_ms {
-        b = b.timeout(Duration::from_millis(timeout_ms));
-    }
     match proxy_mode {
         ProxyMode::System => {} // reqwest 默认读系统代理环境变量
         ProxyMode::Direct => b = b.no_proxy(),

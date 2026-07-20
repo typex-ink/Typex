@@ -14,7 +14,8 @@ use crate::local::llm_llama::{
 };
 use crate::providers::ProviderError;
 use crate::providers::stt::{
-    AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript, transcript_from_provider_text,
+    AudioInput, NativeSttJobGate, SttCapabilities, SttOptions, SttProvider, Transcript,
+    transcript_from_provider_text,
 };
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::{LlamaChatMessage, LlamaModel};
@@ -43,6 +44,7 @@ struct LoadedAsr {
 pub struct QwenAsrStt {
     /// 惰性初始化：模型加载秒级，首次转写时才加载。
     state: Arc<InferenceModelCache<LoadedAsr>>,
+    native_jobs: NativeSttJobGate,
     model_path: PathBuf,
     mmproj_path: PathBuf,
     n_threads: i32,
@@ -54,6 +56,7 @@ impl QwenAsrStt {
     pub fn new(model_path: PathBuf, mmproj_path: PathBuf, n_threads: i32) -> Self {
         Self {
             state: Arc::new(InferenceModelCache::new()),
+            native_jobs: NativeSttJobGate::new(),
             model_path,
             mmproj_path,
             n_threads,
@@ -257,45 +260,45 @@ impl SttProvider for QwenAsrStt {
         audio: AudioInput,
         opts: SttOptions,
     ) -> Result<Transcript, ProviderError> {
-        let samples = wav_to_samples(&audio.wav_16k_mono)?;
         let state = Arc::clone(&self.state);
         let model_path = self.model_path.clone();
         let mmproj_path = self.mmproj_path.clone();
         let n_threads = self.n_threads;
         let dictionary_prompt = opts.prompt;
-        // 推理是秒级 CPU/GPU 阻塞调用：挪到 blocking 线程池，别占 async 线程
-        let text = tokio::task::spawn_blocking(move || {
-            let lease = state.acquire();
-            let initial_model = lease.get_or_try_init(|| {
-                load_asr_with_cpu_fallback(&model_path, &mmproj_path, n_threads)
-            })?;
-            execute_runtime_with_cpu_fallback(
-                initial_model,
-                |loaded| loaded.mode(),
-                |loaded| {
-                    transcribe_blocking(
-                        loaded.value(),
-                        loaded.mode(),
-                        &samples,
-                        dictionary_prompt.as_deref(),
-                    )
-                },
-                |failed| {
-                    tracing::warn!(
-                        component = "local_asr",
-                        from = "gpu",
-                        to = "cpu",
-                        "local ASR decode failed; retrying the full transcription once"
-                    );
-                    lease.replace_gpu_with_cpu(failed, || {
-                        load_asr_cpu(&model_path, &mmproj_path, n_threads)
-                    })
-                },
-            )
-            .result
-        })
-        .await
-        .map_err(|_| ProviderError::InvalidRequest("Qwen3-ASR 转写线程异常".into()))??;
+        let text = self
+            .native_jobs
+            .run("Qwen3-ASR 转写任务", move || {
+                let samples = wav_to_samples(&audio.wav_16k_mono)?;
+                let lease = state.acquire();
+                let initial_model = lease.get_or_try_init(|| {
+                    load_asr_with_cpu_fallback(&model_path, &mmproj_path, n_threads)
+                })?;
+                execute_runtime_with_cpu_fallback(
+                    initial_model,
+                    |loaded| loaded.mode(),
+                    |loaded| {
+                        transcribe_blocking(
+                            loaded.value(),
+                            loaded.mode(),
+                            &samples,
+                            dictionary_prompt.as_deref(),
+                        )
+                    },
+                    |failed| {
+                        tracing::warn!(
+                            component = "local_asr",
+                            from = "gpu",
+                            to = "cpu",
+                            "local ASR decode failed; retrying the full transcription once"
+                        );
+                        lease.replace_gpu_with_cpu(failed, || {
+                            load_asr_cpu(&model_path, &mmproj_path, n_threads)
+                        })
+                    },
+                )
+                .result
+            })
+            .await?;
         Ok(transcript_from_provider_text(text, None))
     }
 

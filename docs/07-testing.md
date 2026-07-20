@@ -77,10 +77,11 @@
 
 对 `openai_compat` / `volcengine` / `chat_completions` / `responses` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
 
-- 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、multipart 字段完整性、自定义 extra_headers/extra_form 透传、超时设置生效。
+- 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、multipart 字段完整性、自定义 extra_headers/extra_form 透传。
 - 响应：正常 JSON；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射。
 - 错误与重试：401 → `auth_error` 且**不重试**；429/503 → 退避重试 2 次后放弃；请求体在重试间不被消耗（multipart body 可重放）。
-- 慢响应：LLM profile 的单一 `timeout_ms` 对整理、翻译、助手、连接测试及本地/远端完整流统一生效；mock 延迟 > timeout → `timeout` 分类，持续输出 delta 也不得重置总时限。
+- 慢响应：STT / LLM profile 的单一 `timeout_ms` 对连接测试及所有使用该档案的功能统一生效；本地/远端调用延迟 > timeout → `timeout` 分类，LLM 持续输出 delta 也不得重置总时限。该契约由 Provider 包装层测试，不由 HTTP adapter 的 reqwest 超时模拟代替。
+- 本地 STT 阻塞隔离：Whisper / SenseVoice / Qwen3-ASR 的原生推理不占用 Tokio worker；超时后原生任务尚未返回时，重试只异步等待同一在途许可，不会启动第二个原生任务或阻塞运行时。
 
 **契约快照**：每个 adapter 把「构造出的完整 HTTP 请求」序列化为快照文件（`insta` crate）。厂商格式是外部契约，任何无意的请求变化都会在 diff 中显形——这对 AI 改代码尤其重要（AI 很容易「顺手优化」请求结构）。
 
