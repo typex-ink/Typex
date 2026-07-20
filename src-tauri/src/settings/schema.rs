@@ -8,7 +8,7 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
 pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
@@ -416,6 +416,36 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn provider_timeout_uses_default_only_when_missing() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "profiles": [
+                {
+                    "id": "missing",
+                    "capability": "llm",
+                    "kind": "chat_completions",
+                    "label": "Missing",
+                    "model": "m"
+                },
+                {
+                    "id": "explicit",
+                    "capability": "llm",
+                    "kind": "chat_completions",
+                    "label": "Explicit",
+                    "model": "m",
+                    "timeout_ms": 30_000
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            settings.profiles[0].timeout_ms,
+            crate::types::DEFAULT_PROVIDER_TIMEOUT_MS
+        );
+        assert_eq!(settings.profiles[1].timeout_ms, 30_000);
     }
 
     #[test]

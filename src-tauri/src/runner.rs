@@ -250,7 +250,7 @@ pub fn run() {
                         credentials: [("api_key".to_string(), key.trim().to_string())].into(),
                         extra_headers: Default::default(),
                         extra_form: Default::default(),
-                        timeout_ms: 30_000,
+                        timeout_ms: crate::types::DEFAULT_PROVIDER_TIMEOUT_MS,
                         options: Default::default(),
                     });
                     st.slots.insert(

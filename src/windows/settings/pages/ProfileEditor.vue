@@ -42,6 +42,7 @@ const ERROR_KEYS: Record<string, string> = {
 };
 
 const presets = presetsForCapability(props.capability);
+const DEFAULT_TIMEOUT_MS = 60_000;
 const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
 type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
@@ -67,6 +68,7 @@ const label = ref(props.profile?.label ?? "");
 const baseUrl = ref(props.profile?.base_url ?? "");
 const model = ref(props.profile?.model ?? "");
 const kind = ref(props.profile?.kind ?? (props.capability === "stt" ? "openai_compat" : "chat_completions"));
+const timeoutSeconds = ref<string | number>((props.profile?.timeout_ms ?? DEFAULT_TIMEOUT_MS) / 1000);
 const apiKey = ref("");
 // volcengine 双凭据（03 §2.2）
 const appKey = ref("");
@@ -94,6 +96,13 @@ const reasoningOptions = computed(() => [
   { value: "high", label: t("settings.profile.reasoning_high") },
   { value: "xhigh", label: t("settings.profile.reasoning_xhigh") },
 ]);
+const timeoutMs = computed(() => {
+  const seconds = Number(timeoutSeconds.value);
+  const milliseconds = seconds * 1000;
+  return Number.isInteger(seconds) && seconds > 0 && Number.isSafeInteger(milliseconds)
+    ? milliseconds
+    : null;
+});
 function hasStoredSecret(value: string | undefined): boolean {
   return !!value?.trim() && !value.trim().startsWith("keyring://");
 }
@@ -185,6 +194,7 @@ function applyPreset(id: string) {
 }
 
 const valid = computed(() => {
+  if (props.capability === "llm" && timeoutMs.value === null) return false;
   if (isLocal.value) return !!model.value && !!label.value.trim();
   if (!label.value.trim() || !model.value.trim()) return false;
   if (isVolc.value) {
@@ -201,6 +211,10 @@ const valid = computed(() => {
 
 async function save(): Promise<string | null> {
   if (!valid.value) return null;
+  const effectiveTimeoutMs = props.capability === "llm"
+    ? timeoutMs.value
+    : (props.profile?.timeout_ms ?? DEFAULT_TIMEOUT_MS);
+  if (effectiveTimeoutMs === null) return null;
   saving.value = true;
   const id = draftProfileId;
   const options = { ...(props.profile?.options ?? {}) };
@@ -222,7 +236,7 @@ async function save(): Promise<string | null> {
     credentials: props.profile?.credentials ?? {},
     extra_headers: props.profile?.extra_headers ?? {},
     extra_form: props.profile?.extra_form ?? {},
-    timeout_ms: props.profile?.timeout_ms ?? 30000,
+    timeout_ms: effectiveTimeoutMs,
     options,
   };
   const r = await commands.upsertProfile(profile);
@@ -329,6 +343,15 @@ onUnmounted(() => unlistenProgress?.());
     </FormRow>
     <FormRow :label="t('settings.profile.name')">
       <span class="w280"><Input v-model="label" :placeholder="t('settings.profile.name_ph')" /></span>
+    </FormRow>
+    <FormRow
+      v-if="capability === 'llm'"
+      :label="t('settings.profile.timeout_seconds')"
+      :hint="t('settings.profile.timeout_hint')"
+    >
+      <span class="timeout-field">
+        <Input v-model="timeoutSeconds" type="number" :min="1" :step="1" />
+      </span>
     </FormRow>
 
     <!-- 本地档案编辑态（05 §5.1）：模型下拉 + 加载策略；无端点/密钥 -->
@@ -444,6 +467,10 @@ onUnmounted(() => unlistenProgress?.());
 }
 .w280 {
   width: 280px;
+  display: inline-block;
+}
+.timeout-field {
+  width: 120px;
   display: inline-block;
 }
 .local-model {

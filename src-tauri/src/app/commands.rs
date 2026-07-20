@@ -118,6 +118,22 @@ fn profile_kind_matches_capability(profile: &ProviderProfile) -> bool {
     }
 }
 
+fn validate_profile(profile: &ProviderProfile) -> Result<(), TypexError> {
+    if !profile_kind_matches_capability(profile) {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            format!("{:?} 与 {:?} 不兼容", profile.kind, profile.capability),
+        ));
+    }
+    if profile.timeout_ms == 0 {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            "模型服务调用超时必须大于 0",
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_profile_compatible(slot: SlotKind, profile: &ProviderProfile) -> Result<(), TypexError> {
     if profile.capability != slot.capability() {
         return Err(TypexError::new(
@@ -134,12 +150,7 @@ pub fn upsert_profile(
     settings: SettingsState<'_>,
     profile: ProviderProfile,
 ) -> Result<Settings, TypexError> {
-    if !profile_kind_matches_capability(&profile) {
-        return Err(TypexError::new(
-            ErrorCode::InvalidRequest,
-            format!("{:?} 与 {:?} 不兼容", profile.kind, profile.capability),
-        ));
-    }
+    validate_profile(&profile)?;
     settings.mutate(|s| {
         s.profiles.retain(|p| p.id != profile.id);
         s.profiles.push(profile.clone());
@@ -1073,6 +1084,17 @@ mod tests {
             ProviderCapability::Stt,
             ProviderKind::ChatCompletions,
         )));
+    }
+
+    #[test]
+    fn zero_profile_timeout_is_rejected() {
+        let mut profile = profile(ProviderCapability::Llm, ProviderKind::Responses);
+        profile.timeout_ms = 0;
+
+        assert_eq!(
+            validate_profile(&profile).unwrap_err().code,
+            ErrorCode::InvalidRequest
+        );
     }
 
     #[test]

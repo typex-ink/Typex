@@ -152,7 +152,7 @@ hidden ─按键按下─▶ recording ─松开─▶ processing ─▶ success
 ```
 
 - 页面分两段：上方「功能分配」每个功能槽位一张 `ProviderCard`，只负责显示/切换当前服务；下方「配置池」列出全部 STT / LLM 服务配置，负责新建、编辑、测试、删除。配置池放在页面底部，避免遮挡最常用的功能分配。
-- 「编辑」进入**编辑子页**（同一内容区内切换，顶部「← 模型服务」返回链接；保存/删除档案后自动返回列表；有未保存修改时离开需确认）：预设下拉（OpenAI/Groq/SiliconFlow/火山·豆包/DeepSeek/OpenRouter/Ollama/自定义，仅作表单填充、无推荐标注）→ 按 `capability/kind` 动态渲染字段（STT：openai_compat Base URL/模型/密钥 或 volcengine AppKey/AccessToken/ResourceId；LLM：Chat Completions / Responses；所有 LLM 档案额外显示「思考等级」下拉，默认“关闭”，选项为关闭/最小/低/中/高/极高；本地与 Qwen 兼容端点按开关语义处理）。「已下载模型」管理页同为子页，同样以「← 模型服务」返回。
+- 「编辑」进入**编辑子页**（同一内容区内切换，顶部「← 模型服务」返回链接；保存/删除档案后自动返回列表；有未保存修改时离开需确认）：预设下拉（OpenAI/Groq/SiliconFlow/火山·豆包/DeepSeek/OpenRouter/Ollama/自定义，仅作表单填充、无推荐标注）→ 按 `capability/kind` 动态渲染字段（STT：openai_compat Base URL/模型/密钥 或 volcengine AppKey/AccessToken/ResourceId；LLM：Chat Completions / Responses；所有 LLM 档案额外显示「调用超时（秒）」数值输入，默认 60 秒，以及「思考等级」下拉，默认“关闭”，选项为关闭/最小/低/中/高/极高；本地与 Qwen 兼容端点按开关语义处理）。「已下载模型」管理页同为子页，同样以「← 模型服务」返回。
 - **「切换 ▾」= 从服务池选择兼容配置（[ADR-21](08-decisions.md)）**：下拉列出该功能可用的服务配置（✓ 标当前）+「新建配置…」；新建不覆盖旧档案，切换即时生效。同一组配置也出现在托盘「模型 ▸」子菜单中（快速切换，不用打开设置）。
 - 新建配置在同一次编辑流程内执行「测试连接」和「保存」时必须复用同一个档案 ID；测试后保存只更新该档案并完成槽位分配，不得向配置池追加内容相同的副本。
 - 密钥输入用 `SecretInput`（默认掩码、可见性切换、粘贴按钮）；保存后随 profile 写入 `settings.json` 的 `credentials` 字段，诊断包与日志必须脱敏。

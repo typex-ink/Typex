@@ -187,6 +187,8 @@
       "preset_self_hosted": "Ollama / self-hosted",
       "name": "Name",
       "name_ph": "e.g. Groq · whisper-turbo",
+      "timeout_seconds": "Call timeout (seconds)",
+      "timeout_hint": "Maximum time from starting a call until the complete result returns; shared by cleanup, translation, and Q&A when they use this profile",
       "endpoint": "Endpoint",
       "endpoint_hint": "Leave empty to use the official endpoint openspeech.bytedance.com",
       "endpoint_ph": "(official endpoint by default)",

@@ -187,6 +187,8 @@
       "preset_self_hosted": "Ollama / 自建",
       "name": "名称",
       "name_ph": "如 Groq · whisper-turbo",
+      "timeout_seconds": "调用超时（秒）",
+      "timeout_hint": "从调用开始到完整结果返回的最长时间；整理、翻译和问答共用此档案时统一生效",
       "endpoint": "端点",
       "endpoint_hint": "留空使用官方端点 openspeech.bytedance.com",
       "endpoint_ph": "（默认官方端点）",

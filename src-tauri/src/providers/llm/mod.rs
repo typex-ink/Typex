@@ -5,6 +5,8 @@ pub mod responses;
 
 use super::ProviderError;
 use futures_util::stream::BoxStream;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct Msg {
@@ -35,6 +37,49 @@ pub trait LlmProvider: Send + Sync {
     /// 单轮任务型调用；流式返回 delta（03 §3）。
     fn complete(&self, req: LlmRequest) -> BoxStream<'static, Result<LlmDelta, ProviderError>>;
     fn capabilities(&self) -> LlmCapabilities;
+}
+
+/// 为一个模型服务的所有调用统一施加 profile 总时限。
+///
+/// deadline 覆盖从调用流首次轮询到完整流结束；收到 delta 不会重置计时。
+pub struct TimedLlmProvider {
+    inner: Arc<dyn LlmProvider>,
+    timeout: Duration,
+}
+
+impl TimedLlmProvider {
+    pub fn new(inner: Arc<dyn LlmProvider>, timeout: Duration) -> Self {
+        Self { inner, timeout }
+    }
+}
+
+impl LlmProvider for TimedLlmProvider {
+    fn complete(&self, req: LlmRequest) -> BoxStream<'static, Result<LlmDelta, ProviderError>> {
+        use futures_util::StreamExt;
+
+        let mut stream = self.inner.complete(req);
+        let timeout = self.timeout;
+        async_stream::try_stream! {
+            let deadline = tokio::time::Instant::now()
+                .checked_add(timeout)
+                .ok_or_else(|| ProviderError::InvalidRequest("模型服务调用超时过大".into()))?;
+            loop {
+                let next = match tokio::time::timeout_at(deadline, stream.next()).await {
+                    Ok(next) => next,
+                    Err(_) => Err(ProviderError::Timeout)?,
+                };
+                match next {
+                    Some(delta) => yield delta?,
+                    None => break,
+                }
+            }
+        }
+        .boxed()
+    }
+
+    fn capabilities(&self) -> LlmCapabilities {
+        self.inner.capabilities()
+    }
 }
 
 const THINK_OPEN: &str = "<think>";
@@ -157,6 +202,76 @@ pub async fn collect_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::StreamExt;
+    use futures_util::stream;
+
+    struct FakeLlm {
+        stream: std::sync::Mutex<Option<BoxStream<'static, Result<LlmDelta, ProviderError>>>>,
+    }
+
+    impl FakeLlm {
+        fn new(stream: BoxStream<'static, Result<LlmDelta, ProviderError>>) -> Self {
+            Self {
+                stream: std::sync::Mutex::new(Some(stream)),
+            }
+        }
+    }
+
+    impl LlmProvider for FakeLlm {
+        fn complete(
+            &self,
+            _req: LlmRequest,
+        ) -> BoxStream<'static, Result<LlmDelta, ProviderError>> {
+            self.stream.lock().unwrap().take().unwrap()
+        }
+
+        fn capabilities(&self) -> LlmCapabilities {
+            LlmCapabilities { streaming: true }
+        }
+    }
+
+    fn request() -> LlmRequest {
+        LlmRequest {
+            system: String::new(),
+            messages: vec![],
+            temperature: 0.0,
+            max_tokens: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn profile_timeout_covers_the_complete_stream() {
+        let partial = stream::once(async {
+            Ok(LlmDelta {
+                text: "partial".into(),
+            })
+        });
+        let never_finishes = partial.chain(stream::pending()).boxed();
+        let provider = TimedLlmProvider::new(
+            Arc::new(FakeLlm::new(never_finishes)),
+            Duration::from_millis(1),
+        );
+        let mut stream = provider.complete(request());
+
+        assert_eq!(stream.next().await.unwrap().unwrap().text, "partial");
+        assert!(matches!(
+            stream.next().await,
+            Some(Err(ProviderError::Timeout))
+        ));
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn profile_timeout_allows_a_completed_stream() {
+        let completed = stream::iter([Ok(LlmDelta {
+            text: "done".into(),
+        })])
+        .boxed();
+        let provider =
+            TimedLlmProvider::new(Arc::new(FakeLlm::new(completed)), Duration::from_secs(60));
+
+        assert_eq!(collect_text(&provider, request()).await.unwrap(), "done");
+    }
 
     #[test]
     fn thinking_filter_strips_complete_block() {

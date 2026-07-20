@@ -167,7 +167,7 @@ async function adoptLocalProfiles() {
       id: `local-${stt.id}`, capability: "stt", kind: "local",
       label: t("onboarding.local_profile_stt"), base_url: "",
       model: stt.id, credentials: {}, extra_headers: {}, extra_form: {},
-      timeout_ms: 30000, options: {},
+      timeout_ms: 60000, options: {},
     });
     await commands.activateProfile("stt", `local-${stt.id}`);
   }
@@ -176,7 +176,7 @@ async function adoptLocalProfiles() {
       id: `local-${llm.id}`, capability: "llm", kind: "local",
       label: t("onboarding.local_profile_llm"), base_url: "",
       model: llm.id, credentials: {}, extra_headers: {}, extra_form: {},
-      timeout_ms: 30000, options: {},
+      timeout_ms: 60000, options: {},
     });
     for (const slot of ["polish", "translate"] as const) {
       await commands.activateProfile(slot, `local-${llm.id}`);
@@ -203,7 +203,7 @@ async function saveModels(): Promise<boolean> {
         id: "onboarding-stt", capability: "stt", kind: "openai_compat",
         label: t("onboarding.stt_profile_label"), base_url: sttUrl.value.trim().replace(/\/+$/, ""),
         model: sttModel.value.trim(), credentials: {},
-        extra_headers: {}, extra_form: {}, timeout_ms: 30000, options: {},
+        extra_headers: {}, extra_form: {}, timeout_ms: 60000, options: {},
       });
       await commands.setProfileSecret("onboarding-stt", "api_key", sttKey.value.trim());
       await commands.activateProfile("stt", "onboarding-stt");
@@ -215,7 +215,7 @@ async function saveModels(): Promise<boolean> {
         kind: "chat_completions", label: t("onboarding.llm_profile_label"),
         base_url: llmUrl.value.trim().replace(/\/+$/, ""),
         model: llmModel.value.trim(), credentials: {},
-        extra_headers: {}, extra_form: {}, timeout_ms: 30000, options: {},
+        extra_headers: {}, extra_form: {}, timeout_ms: 60000, options: {},
       });
       await commands.setProfileSecret("onboarding-llm", "api_key", llmKey.value.trim());
       for (const slot of ["polish", "translate", "assistant"] as const) {

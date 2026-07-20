@@ -177,6 +177,7 @@ typex/
 - `main.rs` 手工装配（不引依赖注入框架）：构造 `SettingsService` → 据配置构造 `ProviderRegistry`、`AudioService`、`InjectorChain`、`SelectionReader`、`HotkeyService` → 全部交给 `Orchestrator` → `Orchestrator` 与 `SettingsService` 放入 Tauri `State`（`Arc<...>`）。
 - 服务句柄一律 `Arc<Service>`，内部可变性用 `tokio::sync::Mutex/RwLock`（跨 await）或 `parking_lot`（纯同步、短临界区）；**禁止**在持锁状态下 await 网络调用。
 - 配置热更新：`SettingsService` 变更后广播 `watch::channel`；`ProviderRegistry` 订阅并按 profile-id 惰性重建 provider 实例，其他服务各自订阅所需字段（如快捷键改绑）。
+- LLM 调用时限由 `ProviderRegistry` 按 profile 的 `timeout_ms` 统一包装，覆盖远端与本地实现以及完整流式生命周期；orchestrator 不得为整理、翻译或助手叠加功能专用总时限/idle timeout。
 
 ### 5.2 会话状态机（orchestrator 的核心）
 

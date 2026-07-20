@@ -98,7 +98,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 9);
+        assert_eq!(svc.get().schema_version, schema::CURRENT_SCHEMA_VERSION);
 
         svc.mutate(|s| s.general.autostart = false).unwrap();
         let svc2 = SettingsService::load(dir.clone());
@@ -112,7 +112,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
         let svc = SettingsService::load(dir.clone());
-        assert_eq!(svc.get().schema_version, 9);
+        assert_eq!(svc.get().schema_version, schema::CURRENT_SCHEMA_VERSION);
         assert!(dir.join("settings.json.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -145,10 +145,70 @@ mod tests {
 
         let svc = SettingsService::load(dir.clone());
         let s = svc.get();
-        assert_eq!(s.schema_version, 9);
+        assert_eq!(s.schema_version, schema::CURRENT_SCHEMA_VERSION);
         assert_eq!(
             s.profiles[0].capability,
             crate::types::ProviderCapability::Llm
+        );
+        assert_eq!(
+            s.profiles[0].timeout_ms,
+            crate::types::DEFAULT_PROVIDER_TIMEOUT_MS
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_v9_upgrades_legacy_timeout_and_preserves_custom_values() {
+        let dir =
+            std::env::temp_dir().join(format!("typex-test-timeout-migrate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            r#"{
+                "schema_version": 9,
+                "profiles": [
+                    {
+                        "id": "legacy-default",
+                        "capability": "llm",
+                        "kind": "chat_completions",
+                        "label": "Legacy default",
+                        "model": "m",
+                        "timeout_ms": 30000
+                    },
+                    {
+                        "id": "custom",
+                        "capability": "llm",
+                        "kind": "chat_completions",
+                        "label": "Custom",
+                        "model": "m",
+                        "timeout_ms": 45000
+                    },
+                    {
+                        "id": "missing",
+                        "capability": "llm",
+                        "kind": "chat_completions",
+                        "label": "Missing",
+                        "model": "m"
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let settings = SettingsService::load(dir.clone()).get();
+        assert_eq!(settings.schema_version, schema::CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            settings
+                .profiles
+                .iter()
+                .map(|profile| profile.timeout_ms)
+                .collect::<Vec<_>>(),
+            vec![
+                crate::types::DEFAULT_PROVIDER_TIMEOUT_MS,
+                45_000,
+                crate::types::DEFAULT_PROVIDER_TIMEOUT_MS,
+            ]
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -176,7 +236,7 @@ mod tests {
         .unwrap();
 
         let settings = SettingsService::load(dir.clone()).get();
-        assert_eq!(settings.schema_version, 9);
+        assert_eq!(settings.schema_version, schema::CURRENT_SCHEMA_VERSION);
         assert_eq!(settings.hotkeys.dictation, ["ControlRight", "Digit1"]);
         assert_eq!(settings.hotkeys.assistant, ["AltRight", "KeyA"]);
         assert_eq!(
@@ -211,7 +271,7 @@ mod tests {
         .unwrap();
 
         let settings = SettingsService::load(dir.clone()).get();
-        assert_eq!(settings.schema_version, 9);
+        assert_eq!(settings.schema_version, schema::CURRENT_SCHEMA_VERSION);
         assert_eq!(settings.hotkeys.dictation, ["ControlRight"]);
         assert_eq!(settings.hotkeys.assistant, ["AltRight"]);
         assert_eq!(settings.hotkeys.translation, ["F13", "Menu"]);

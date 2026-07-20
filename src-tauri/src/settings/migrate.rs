@@ -5,9 +5,11 @@ use crate::{
         CURRENT_SCHEMA_VERSION, VAD_ENERGY_THRESHOLD_MAX, VAD_ENERGY_THRESHOLD_MIN,
         VAD_NEURAL_THRESHOLD_MAX, VAD_NEURAL_THRESHOLD_MIN,
     },
-    types::{derive_translation_chord, normalize_hotkey_chord},
+    types::{DEFAULT_PROVIDER_TIMEOUT_MS, derive_translation_chord, normalize_hotkey_chord},
 };
 use serde_json::Value;
+
+const LEGACY_PROVIDER_TIMEOUT_MS: u64 = 30_000;
 
 pub fn migrate(mut value: Value) -> Value {
     let version = value
@@ -25,6 +27,9 @@ pub fn migrate(mut value: Value) -> Value {
     if version < 9 {
         migrate_v8_to_v9(&mut value);
     }
+    if version < 10 {
+        migrate_v9_to_v10(&mut value);
+    }
     normalize_hotkey_ids(&mut value, version < 8);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
@@ -34,6 +39,23 @@ pub fn migrate(mut value: Value) -> Value {
         );
     }
     value
+}
+
+fn migrate_v9_to_v10(value: &mut Value) {
+    let Some(profiles) = value.get_mut("profiles").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for profile in profiles {
+        let Some(profile) = profile.as_object_mut() else {
+            continue;
+        };
+        if profile.get("timeout_ms").and_then(Value::as_u64) == Some(LEGACY_PROVIDER_TIMEOUT_MS) {
+            profile.insert(
+                "timeout_ms".into(),
+                Value::Number(DEFAULT_PROVIDER_TIMEOUT_MS.into()),
+            );
+        }
+    }
 }
 
 fn migrate_v8_to_v9(value: &mut Value) {
@@ -243,7 +265,7 @@ mod tests {
         });
 
         let migrated = migrate(value);
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(migrated["profiles"][0]["capability"], "stt");
         assert_eq!(migrated["profiles"][1]["capability"], "llm");
         assert!(migrated["profiles"][0].get("slots").is_none());
@@ -302,7 +324,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(migrated["dictation"]["microphone"], "USB Microphone");
     }
 
@@ -319,7 +341,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["ControlRight", "Digit1"])
@@ -363,7 +385,7 @@ mod tests {
     #[test]
     fn current_schema_normalizes_and_preserves_independent_translation() {
         let value = serde_json::json!({
-            "schema_version": 9,
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "hotkeys": {
                 "dictation": ["Return"],
                 "assistant": ["ContextMenu"],
@@ -373,7 +395,7 @@ mod tests {
 
         let migrated = migrate(value);
 
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(
             migrated["hotkeys"]["dictation"],
             serde_json::json!(["Enter"])
@@ -395,7 +417,7 @@ mod tests {
             "dictation": { "polish_enabled": false }
         }));
 
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(migrated["dictation"]["polish_enabled"], false);
         assert_eq!(migrated["dictation"]["vad"]["mode"], "neural");
         assert_eq!(migrated["dictation"]["vad"]["energy_threshold"], 0.010);
@@ -442,7 +464,7 @@ mod tests {
             }
         }));
 
-        assert_eq!(migrated["schema_version"], 9);
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
         assert_eq!(migrated["dictation"]["polish_enabled"], false);
         assert_eq!(migrated["translation"]["source_language"], "日本語");
         assert_eq!(migrated["dictation"]["polish_system_prompt"], "");
@@ -480,5 +502,35 @@ mod tests {
             "custom process"
         );
         assert_eq!(migrated["assistant"]["ask_system_prompt"], "custom ask");
+    }
+
+    #[test]
+    fn v9_default_provider_timeout_upgrades_and_custom_value_is_preserved() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 9,
+            "profiles": [
+                { "id": "legacy-default", "timeout_ms": 30_000 },
+                { "id": "custom", "timeout_ms": 45_000 },
+                { "id": "missing" }
+            ]
+        }));
+
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            migrated["profiles"][0]["timeout_ms"],
+            DEFAULT_PROVIDER_TIMEOUT_MS
+        );
+        assert_eq!(migrated["profiles"][1]["timeout_ms"], 45_000);
+        assert!(migrated["profiles"][2].get("timeout_ms").is_none());
+    }
+
+    #[test]
+    fn current_schema_preserves_explicit_30_second_timeout() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "profiles": [{ "id": "explicit", "timeout_ms": 30_000 }]
+        }));
+
+        assert_eq!(migrated["profiles"][0]["timeout_ms"], 30_000);
     }
 }

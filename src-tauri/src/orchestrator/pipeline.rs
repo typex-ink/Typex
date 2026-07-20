@@ -11,7 +11,6 @@ use crate::providers::llm::{collect_text, prompt};
 use crate::settings::schema::Settings;
 use crate::types::{SessionMode, SlotKind};
 use std::sync::Arc;
-use std::time::Duration;
 
 /// 处理阶段的结果。
 pub enum ProcessOutcome {
@@ -20,9 +19,6 @@ pub enum ProcessOutcome {
     Degraded(String),
     Failed(TypexError),
 }
-
-/// 整理层延迟预算（02 F-9：≤ 500ms 推荐轻量模型；超时降级取 8s 硬上限）
-const POLISH_TIMEOUT: Duration = Duration::from_secs(8);
 
 pub struct PreparedTranscript {
     pub text: String,
@@ -101,24 +97,17 @@ pub async fn prepare_transcript(
         content,
         0.2,
     );
-    match tokio::time::timeout(POLISH_TIMEOUT, collect_text(llm.as_ref(), req)).await {
-        Ok(Ok(text)) if !text.trim().is_empty() => PreparedTranscript {
+    match collect_text(llm.as_ref(), req).await {
+        Ok(text) if !text.trim().is_empty() => PreparedTranscript {
             text: text.trim().to_string(),
             degraded: false,
         },
-        Ok(Ok(_)) => PreparedTranscript {
+        Ok(_) => PreparedTranscript {
             text: transcript,
             degraded: true,
         },
-        Ok(Err(e)) => {
+        Err(e) => {
             tracing::warn!("整理失败降级直通: {e}");
-            PreparedTranscript {
-                text: transcript,
-                degraded: true,
-            }
-        }
-        Err(_) => {
-            tracing::warn!("整理超时降级直通");
             PreparedTranscript {
                 text: transcript,
                 degraded: true,

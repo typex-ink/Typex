@@ -45,8 +45,8 @@
 - 失败恢复：Transcribing 失败 → `recoverable_payload` 含音频；Processing 失败 → 含转写稿且 Effect 提供「复制原文」；重试从正确的 stage 恢复而非从头。
 - 录音失败：Recording 中收到启动失败或运行时设备拔出 → `Failed(Recording)`，Effect 含 `CancelRecording` + 错误反馈；Retry → 同一模式重新 `StartRecording`，不得进入 STT/Injecting。
 - **session_id 竞态**：携带旧 session_id 的 SttResult/LlmDelta 到达 → 被丢弃，状态零变化（这是防「上一句注入到下一句」的核心测试）。
-- 整理层降级：听写中 Polish 超时/报错 → 注入原始转写 + `EmitUi(unpolished)`。
-- 共享预整理：翻译/助手在 `polish_enabled=true` 时先使用文本整理 system prompt + 固定 XML user message；`polish_enabled=false` 时跳过；整理超时/报错/未配置时直通原始转写继续下游。
+- 整理层降级：听写中 Polish 收到 profile 全局调用超时/报错 → 注入原始转写 + `EmitUi(unpolished)`；不得存在独立的整理总时限。
+- 共享预整理：翻译/助手在 `polish_enabled=true` 时先使用文本整理 system prompt + 固定 XML user message；`polish_enabled=false` 时跳过；整理收到 profile 全局调用超时/报错/未配置时直通原始转写继续下游。
 - 翻译降级：STT 成功翻译失败 → Failed 且提供「注入原文」Effect。
 - 取消后迟到的回调：Cancel 后 RecordingFinished/SttResult/ProcessResult/AssistantHandedOff/InjectDone 到达 → 丢弃，且不得启动下游、弹窗或写历史。
 - 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff(Some(answer))`（完整成功回答）→ Idle + 释放音频并写助手历史；`AssistantHandedOff(None)`（弹窗终态错误）不写历史；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
@@ -62,14 +62,14 @@
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
 | VAD 与切片（`audio/vad.rs` / `audio/pipeline.rs`） | schema v7 迁移与门限校验；能量/神经网络两条路径；Silero 初始化/推理失败降级；弱声连续 90 ms 保底与纯静音拒绝；首部 300 ms/尾部 150 ms 非对称 padding；长录音切片沿用录音快照；短音频不切、超长无静音音频强制切片 |
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
-| `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言，含 v7→v8 按旧规则生成翻译 chord、v8 三组独立持久化、v8→v9 丢弃四个旧自定义模板并初始化四个 system prompt 字段；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
+| `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言，含 v7→v8 按旧规则生成翻译 chord、v8 三组独立持久化、v8→v9 丢弃四个旧自定义模板并初始化四个 system prompt 字段、v9→v10 把旧 UI 默认的 30 秒 profile 时限提升为 60 秒且保留其他显式值；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含高配手动模型（Whisper large-v3、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档 |
 | 本地 llama GPU→CPU fallback | load mode；CPU 模型 `n_gpu_layers=0` 且 devices 为空、context 的 K/Q/V 与 op offload 关闭、ASR mtmd `use_gpu=false`；仅 GPU runtime 错误且 LLM 首个可见 delta 前重试一次；输入错误、CPU mode、已输出与第二次错误不重试；ASR 非流式整次重试；并发请求由 inference lease 串行且只加载一个共享 CPU 条目、fallback 前释放失败 GPU 条目、CPU 加载不持缓存锁、显式 unload 后 detached fallback 不回填、`UnloadAfterUse` 只清自己的缓存代际 |
 | 剪贴板事务与 Windows 空选区判定（`inject/paste.rs` / `inject/windows.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；取消先赢时恢复且 SendInput/后备注入调用为 0，提交先赢时取消失败且只完成一次；恢复失败不吞注入成功的结果；原多格式快照完整传递；用户/剪贴板管理器中途改变 sequence/owner 时不覆盖；同一非空 owner 分批发布格式导致 sequence 连续变化时接受最终原子载荷并更新恢复基线；复制文本与旧值相同仍按 sequence 识别；sequence 相同与 `u32` 回绕边界；`vscode-editor-data` 缺失、合法 JSON true/false、损坏/字段类型错误/超大 metadata、尾随 NUL 与 Unicode 文本。只有可可靠证明的空选区才返回 `None`，未知情况保留文本 |
 | PromptKit 消息构造 | 四类内置 system prompt 静态约束；四类固定 XML user message 的元素顺序、可选元素省略和动态值转义；`ANSWER:` 前缀解析 |
 | F-10 词典 | settings 迁移与规范化；STT prompt / 火山 corpus / 本地 hotwords 注入；空词典时 LLM `<dictionary>` 元素省略，词条中的 XML 控制字符只作为文本数据 |
-| 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误 |
+| 助手改写/回答分流（`orchestrator/assistant.rs`） | 流首部前缀嗅探：`ANSWER:` 前缀（含前导空白、跨 chunk 切分）→ 回答型（呼出弹窗 + 流式）；无前缀 → 改写型静默收全文；无选区恒为回答型；空输出 → 错误；Provider 超时事件在弹窗呼出前走 HUD、呼出后在弹窗内展示，助手层无独立 idle timeout |
 
 ## 4. Rust 集成测试（`src-tauri/tests/`）
 
@@ -80,7 +80,7 @@
 - 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、multipart 字段完整性、自定义 extra_headers/extra_form 透传、超时设置生效。
 - 响应：正常 JSON；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射。
 - 错误与重试：401 → `auth_error` 且**不重试**；429/503 → 退避重试 2 次后放弃；请求体在重试间不被消耗（multipart body 可重放）。
-- 慢响应：mock 延迟 > timeout → `timeout` 分类。
+- 慢响应：LLM profile 的单一 `timeout_ms` 对整理、翻译、助手、连接测试及本地/远端完整流统一生效；mock 延迟 > timeout → `timeout` 分类，持续输出 delta 也不得重置总时限。
 
 **契约快照**：每个 adapter 把「构造出的完整 HTTP 请求」序列化为快照文件（`insta` crate）。厂商格式是外部契约，任何无意的请求变化都会在 diff 中显形——这对 AI 改代码尤其重要（AI 很容易「顺手优化」请求结构）。
 

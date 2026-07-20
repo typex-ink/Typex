@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+pub const DEFAULT_PROVIDER_TIMEOUT_MS: u64 = 60_000;
+
 /// 四个模型槽位（02 F-4）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -100,5 +102,36 @@ pub struct ProviderProfile {
 }
 
 fn default_timeout_ms() -> u64 {
-    30_000
+    DEFAULT_PROVIDER_TIMEOUT_MS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile_json(timeout_ms: Option<u64>) -> serde_json::Value {
+        let mut profile = serde_json::json!({
+            "id": "llm",
+            "capability": "llm",
+            "kind": "chat_completions",
+            "label": "LLM",
+            "model": "model"
+        });
+        if let Some(timeout_ms) = timeout_ms {
+            profile["timeout_ms"] = timeout_ms.into();
+        }
+        profile
+    }
+
+    #[test]
+    fn missing_timeout_uses_current_default() {
+        let profile: ProviderProfile = serde_json::from_value(profile_json(None)).unwrap();
+        assert_eq!(profile.timeout_ms, DEFAULT_PROVIDER_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn explicit_timeout_is_preserved() {
+        let profile: ProviderProfile = serde_json::from_value(profile_json(Some(30_000))).unwrap();
+        assert_eq!(profile.timeout_ms, 30_000);
+    }
 }

@@ -1,6 +1,17 @@
 <script setup lang="ts">
-const model = defineModel<string>({ required: true });
-defineProps<{ placeholder?: string; disabled?: boolean; mono?: boolean }>();
+const model = defineModel<string | number>({ required: true });
+withDefaults(
+  defineProps<{
+    placeholder?: string;
+    disabled?: boolean;
+    mono?: boolean;
+    type?: "text" | "number";
+    min?: number;
+    max?: number;
+    step?: number;
+  }>(),
+  { type: "text" },
+);
 </script>
 
 <template>
@@ -8,6 +19,10 @@ defineProps<{ placeholder?: string; disabled?: boolean; mono?: boolean }>();
     v-model="model"
     class="input"
     :class="{ mono }"
+    :type="type"
+    :min="min"
+    :max="max"
+    :step="step"
     :placeholder="placeholder"
     :disabled="disabled"
     spellcheck="false"

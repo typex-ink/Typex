@@ -6,7 +6,7 @@
 use crate::error::{ErrorCode, Result, TypexError};
 use crate::providers::http;
 use crate::providers::llm::{
-    LlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
+    LlmProvider, TimedLlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use crate::providers::stt::{
     SttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
@@ -15,6 +15,7 @@ use crate::settings::schema::Settings;
 use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub struct ProviderRegistry {
     /// profile-id → 已构建实例
@@ -202,7 +203,7 @@ impl ProviderRegistry {
             credentials: HashMap::new(),
             extra_headers: HashMap::new(),
             extra_form: HashMap::new(),
-            timeout_ms: 120_000,
+            timeout_ms: crate::types::DEFAULT_PROVIDER_TIMEOUT_MS,
             options: HashMap::new(),
         })
     }
@@ -236,7 +237,7 @@ impl ProviderRegistry {
         Ok(secret.to_string())
     }
 
-    fn http_client(&self, timeout_ms: u64) -> reqwest::Client {
+    fn http_client(&self, timeout_ms: Option<u64>) -> reqwest::Client {
         let s = self.settings.lock().unwrap();
         http::build_client(s.general.proxy_mode, &s.general.proxy_url, timeout_ms)
     }
@@ -280,7 +281,7 @@ impl ProviderRegistry {
         match profile.kind {
             ProviderKind::OpenaiCompat => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(profile.timeout_ms);
+                let client = self.http_client(Some(profile.timeout_ms));
                 Ok(Arc::new(
                     OpenAiCompatStt::new(
                         client,
@@ -294,7 +295,7 @@ impl ProviderRegistry {
             ProviderKind::Volcengine => {
                 let app_key = self.resolve_secret(profile, "app_key")?;
                 let access_key = self.resolve_secret(profile, "access_token")?;
-                let client = self.http_client(profile.timeout_ms);
+                let client = self.http_client(Some(profile.timeout_ms));
                 let mut p =
                     VolcengineStt::new(client, profile.base_url.clone(), app_key, access_key);
                 if let Some(rid) = profile.options.get("resource_id").and_then(|v| v.as_str()) {
@@ -411,11 +412,17 @@ impl ProviderRegistry {
                 format!("{} 不是 LLM 服务配置", profile.label),
             ));
         }
-        match profile.kind {
+        if profile.timeout_ms == 0 {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 的调用超时必须大于 0", profile.label),
+            ));
+        }
+        let provider: Arc<dyn LlmProvider> = match profile.kind {
             ProviderKind::ChatCompletions => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(profile.timeout_ms);
-                Ok(Arc::new(
+                let client = self.http_client(None);
+                Arc::new(
                     ChatCompletionsLlm::new(
                         client,
                         profile.base_url.clone(),
@@ -425,16 +432,16 @@ impl ProviderRegistry {
                     .with_headers(profile.extra_headers.clone())
                     .with_thinking(chat_completions_thinking_option(profile))
                     .with_reasoning_effort(chat_completions_reasoning_effort(profile)),
-                ))
+                )
             }
             ProviderKind::Responses => {
                 let key = self.resolve_secret(profile, "api_key")?;
-                let client = self.http_client(profile.timeout_ms);
-                Ok(Arc::new(
+                let client = self.http_client(None);
+                Arc::new(
                     ResponsesLlm::new(client, profile.base_url.clone(), key, profile.model.clone())
                         .with_headers(profile.extra_headers.clone())
                         .with_reasoning_effort(profile_reasoning_effort(profile)),
-                ))
+                )
             }
             #[cfg(feature = "local-models")]
             ProviderKind::Local => {
@@ -467,16 +474,22 @@ impl ProviderRegistry {
                     Some("unload_after_use") => llm_llama::LoadPolicy::UnloadAfterUse,
                     _ => llm_llama::LoadPolicy::Resident,
                 };
-                Ok(Arc::new(
+                Arc::new(
                     llm_llama::LlamaLlm::new(gguf, policy)
                         .with_thinking(profile_enable_thinking(profile)),
-                ))
+                )
             }
-            _ => Err(TypexError::new(
-                ErrorCode::InvalidRequest,
-                format!("{:?} 不是 LLM 类型", profile.kind),
-            )),
-        }
+            _ => {
+                return Err(TypexError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("{:?} 不是 LLM 类型", profile.kind),
+                ));
+            }
+        };
+        Ok(Arc::new(TimedLlmProvider::new(
+            provider,
+            Duration::from_millis(profile.timeout_ms),
+        )))
     }
 }
 

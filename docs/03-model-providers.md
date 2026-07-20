@@ -347,7 +347,7 @@ F-3 不引入新的 Provider 类型：
 - **F-3a 文本处理** = `LlmProvider.complete(system prompt + selection_processing_request XML)` 一次调用；「替换选区」是 Rust 注入服务在**收到完整结果后**执行的本地动作，不是模型工具。
 - **F-3b 无选区问答** = 同一 trait 的另一组 system prompt + `question_request` XML，流式渲染到回答弹窗；有选区的提问仍走 F-3a 请求并由 `ANSWER:` 分流。
 - 单轮语义：请求内不携带历史消息。
-- 助手流式调用有 45 秒 idle timeout：弹窗已呼出时超时在弹窗内展示错误；弹窗尚未呼出（选区处理仍在判定 `ANSWER:` 前缀）时超时走 HUD 失败态。
+- 助手流式调用只使用当前问答模型 profile 的 `timeout_ms` 总时限，不设置独立 idle timeout；弹窗已呼出时超时在弹窗内展示错误，弹窗尚未呼出（选区处理仍在判定 `ANSWER:` 前缀）时超时走 HUD 失败态。
 
 ### 4.1 已评估并否决的方案（背景记录，详见 [ADR-1](08-decisions.md)）
 
@@ -374,7 +374,7 @@ F-3 不引入新的 Provider 类型：
 
 ```jsonc
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
@@ -417,7 +417,7 @@ F-3 不引入新的 Provider 类型：
       "base_url": "https://api.groq.com/openai/v1",
       "model": "whisper-large-v3-turbo",
       "credentials": { "api_key": "sk-..." },
-      "extra_headers": {}, "extra_form": {}, "timeout_ms": 30000,
+      "extra_headers": {}, "extra_form": {}, "timeout_ms": 60000,
       "options": { "language": "auto", "temperature": 0 }
     },
     {
@@ -434,14 +434,14 @@ F-3 不引入新的 Provider 类型：
     {
       "id": "deepseek", "capability": "llm", "kind": "chat_completions",
       "label": "DeepSeek V3",
-      "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat",
+      "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "timeout_ms": 60000,
       "credentials": { "api_key": "sk-..." },
       "options": { "temperature": 0.2 }
     },
     {
       "id": "openai-gpt", "capability": "llm", "kind": "responses",
       "label": "OpenAI · gpt-5",
-      "base_url": "https://api.openai.com/v1", "model": "gpt-5",
+      "base_url": "https://api.openai.com/v1", "model": "gpt-5", "timeout_ms": 60000,
       "credentials": { "api_key": "sk-..." }
     },
     {
@@ -453,7 +453,7 @@ F-3 不引入新的 Provider 类型：
     {
       "id": "local-qwen", "capability": "llm", "kind": "local",
       "label": "本地 · Qwen3.5-2B",
-      "model": "qwen3.5-2b-q4",
+      "model": "qwen3.5-2b-q4", "timeout_ms": 60000,
       "options": { "preload": "on_record" }    // resident | on_record
     }
   ]
@@ -466,6 +466,8 @@ F-3 不引入新的 Provider 类型：
 - schema v7 为 `dictation.vad` 增加双路径配置。所有旧版本统一迁移为 `mode: neural`，两个门限独立保存；后端拒绝非有限值或越界值。磁盘中只有 VAD 子配置无效时，仅恢复 `dictation.vad` 默认值，其他设置必须保留。
 - schema v8 将 `hotkeys.translation` 从派生值改为独立完整 chord。v7 及更旧配置升级时仍按旧规则把听写与助手 chord 有序去重合并为翻译 chord，保持当前行为；v8 起三组 chord 分别归一化和持久化，修改任一项不再重算另外两项。
 - schema v9 以四个 `*_system_prompt` 字段替换旧的 `polish_prompt` / `translate_prompt` / `process_prompt` / `ask_prompt` 模板字段。应用尚未发布，不兼容旧自定义模板：v8 及更旧配置升级时删除旧字段并把新字段置空，直接使用当前内置 system prompt。固定 XML user message 不进入配置 schema。
+- schema v10 将 profile 调用超时默认值从 30 秒提高到 60 秒；迁移时把旧版 UI 自动写入的 `timeout_ms=30000` 更新为 `60000`，其他显式值保持不变。
+- LLM profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`；从调用开始计时，覆盖连接、请求发送、首 token 等待与完整流式响应接收。本地与远端 LLM 使用相同语义；同一 profile 被整理、翻译、助手和连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。

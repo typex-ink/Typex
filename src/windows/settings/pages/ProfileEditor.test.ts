@@ -130,6 +130,66 @@ describe("ProfileEditor", () => {
     expect(mockActivateProfile).toHaveBeenNthCalledWith(2, "stt", savedIds[0]);
   });
 
+  it("新建 LLM 档案默认 60 秒且保存编辑后的秒数", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "llm", profile: null },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const timeout = wrapper.get(".timeout-field input");
+    expect((timeout.element as HTMLInputElement).value).toBe("60");
+
+    await wrapper.get('input[placeholder="如 Groq · whisper-turbo"]').setValue("Test LLM");
+    await wrapper.get('input[placeholder="https://api.example.com/v1"]').setValue("https://api.example.com/v1");
+    await wrapper.get('input[placeholder="模型名"]').setValue("test-model");
+    await wrapper.get("input[type='password']").setValue("sk-test");
+    await timeout.setValue("75");
+
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockUpsertProfile.mock.calls[0]?.[0].timeout_ms).toBe(75_000);
+  });
+
+  it("现有本地 LLM 档案显示并保留 30 秒调用超时", async () => {
+    const profile = llmProfile("local");
+    profile.credentials = {};
+    const wrapper = mount(ProfileEditor, {
+      props: { capability: "llm", profile },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const timeout = wrapper.get(".timeout-field input");
+    expect((timeout.element as HTMLInputElement).value).toBe("30");
+
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockUpsertProfile.mock.calls[0]?.[0].timeout_ms).toBe(30_000);
+  });
+
+  it("调用超时不是正整数或换算后超过安全整数时禁用保存", async () => {
+    const wrapper = mount(ProfileEditor, {
+      props: { capability: "llm", profile: llmProfile("responses") },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+    const timeout = wrapper.get(".timeout-field input");
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+
+    for (const invalid of ["", "0", "1.5", String(Math.floor(Number.MAX_SAFE_INTEGER / 1000) + 1)]) {
+      await timeout.setValue(invalid);
+      expect(save.attributes("disabled"), `timeout=${invalid}`).toBeDefined();
+    }
+
+    await timeout.setValue("30");
+    expect(save.attributes("disabled")).toBeUndefined();
+  });
+
   it("Responses 档案可保存思考等级", async () => {
     await saveWithReasoning("responses");
 
