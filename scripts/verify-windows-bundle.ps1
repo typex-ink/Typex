@@ -242,11 +242,17 @@ $installerScriptText = Get-Content -Raw -LiteralPath $installerScript
 $installerHookPath = Join-Path $tauriDir "windows\installer-hooks.nsh"
 Assert-Exists $installerHookPath
 $installerHookText = Get-Content -Raw -LiteralPath $installerHookPath
+$tauriConfigPath = Join-Path $tauriDir "tauri.conf.json"
+Assert-Exists $tauriConfigPath
+$tauriConfig = Get-Content -Raw -LiteralPath $tauriConfigPath | ConvertFrom-Json
 if (-not $installerScriptText.Contains([IO.Path]::GetFileName($installerHookPath))) {
     throw "Rendered NSIS script does not include the Typex installer hook"
 }
 if (-not $installerScriptText.Contains('!define INSTALLMODE "currentUser"')) {
     throw "Rendered NSIS script must retain the currentUser install mode"
+}
+if ($tauriConfig.plugins.updater.windows.installMode -ne "passive") {
+    throw "Windows updater must retain passive mode so a required UAC prompt can be shown"
 }
 foreach ($token in @(
     '$INSTDIR == "$LOCALAPPDATA\${PRODUCTNAME}"',
@@ -256,6 +262,19 @@ foreach ($token in @(
 )) {
     if (-not $installerHookText.Contains($token)) {
         throw "Installer hook is missing the default-directory constraint: $token"
+    }
+}
+foreach ($token in @(
+    'GetTempFileName $R8 "$INSTDIR"',
+    'Delete "$R8"',
+    '${GetOptions} $CMDLINE "/TYPEX-ELEVATED" $R9',
+    '${GetParameters} $R9',
+    'StrCpy $R9 "/TYPEX-ELEVATED $R9 /D=$INSTDIR"',
+    'ExecShell "runas" "$EXEPATH" "$R9"',
+    'SetErrorLevel 1223'
+)) {
+    if (-not $installerHookText.Contains($token)) {
+        throw "Installer hook is missing the conditional-elevation constraint: $token"
     }
 }
 foreach ($name in @("typex.exe") + @($expectedInstalled.Keys)) {

@@ -167,3 +167,9 @@
 - **快捷键决策**：schema v8 保持 `hotkeys` 字段形状不变，但三组 chord 从此分别归一化和持久化。v7 及更旧配置升级时按旧规则重建翻译 chord，保持既有行为。三组必须非空；听写与助手不得相同或互含，翻译不得等于或成为听写/助手的子集；听写/助手成为翻译的严格子集合法，以保留默认三角方案和录音中升级语义。
 - **Esc 决策**：orchestrator 的线程安全门闩按当前 `session_id` 发布取消权；Injecting 与现有 `InjectionLatch` 共用提交竞争。只有首次 keydown 成功认领时才发送一次带会话 ID 的事件，并由 Windows 低级钩子或 macOS grab event tap 吞掉这一物理序列的 down/repeat/up；认领失败以及其他键鼠事件完整放行。Linux 暂维持 listen-only。
 - **平台义务**：Windows 保留 AltGr、75 ms 候选流、右 Alt keyup 与 `LLKHF_INJECTED` 规则；macOS vendored rdev 的 grab event tap 必须像 listen tap 一样在系统超时或用户输入禁用后自动恢复。
+
+### ADR-28 · 更新安装器仅在目标不可写时请求管理员权限（2026-07-23）
+
+- **背景**：ADR-26 的 `currentUser` 与 `%LOCALAPPDATA%\Programs\Typex` 默认路径能让绝大多数 Windows 安装和更新免 UAC，但历史安装或用户显式选择的路径可能位于 `C:\` 根目录等受保护位置。Tauri updater 以普通 `open` 动词启动 `currentUser` NSIS；该安装器清单不会自行提权，因而下载与验签成功后仍会在覆盖文件时失败。macOS updater 已具备普通替换失败后再认证的路径，平台行为需要统一为最小权限语义。
+- **决策**：保留 NSIS `currentUser` 和稳定原位升级，不改为每次启动就弹 UAC 的 `perMachine` / `both`。所有平台 updater 先用当前权限；仅在目标不可写时申请平台原生管理员权限。Windows 固定 `passive` 更新模式，在 installer hook 已确定最终 `$INSTDIR` 后创建并删除临时文件作写权限探测；失败时以 `runas` 重启同一个已通过 Tauri 签名校验的安装器，完整保留 updater 参数并把最终 `/D=$INSTDIR` 放在命令行末尾。提升后的重入仍不可写则直接失败，禁止循环。macOS 延续 `PermissionDenied` 后 Apple 管理员认证；Linux 后端正式支持 updater 时必须采用等价策略。
+- **安全与体验边界**：按需提权只属于短生命周期安装器，不改变 Typex 应用清单、注入权限或 UIPI 降级策略。可写目录不得出现 UAC；提升安装完成后通过 Tauri NSIS `RunAsUser` 以普通用户重启应用。拒绝 UAC、认证失败或提升后仍不可写时不得留下半更新版本，旧版本必须仍可启动。此决策仅收窄 ADR-26 “免 UAC”的表述，不改变默认目录和不迁移历史路径的决定。

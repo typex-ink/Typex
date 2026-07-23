@@ -167,7 +167,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 3. 注入矩阵：受控 harness + 平台代表应用（Windows 为记事本/Edge/VS Code/Windows Terminal）× 中英文；微信/Slack/Word 等非阻塞抽测
 4. 错误注入：断网、错密钥、慢网（系统级限速）、无麦克风权限
 5. 深浅主题走查 + reduced-motion
-6. 更新：从上一版本升级、设置迁移
+6. 更新：从上一版本升级、设置迁移；可写安装目录不请求管理员权限，受保护目录仅在写探测失败后请求平台原生授权，拒绝授权时旧版本保持可启动
 7. 资源：空闲内存/CPU 实测对照 [06 §12 预算](06-code-architecture.md)
 8. 起音与让路：Windows 按下后立即发音、轻声起音、Ctrl+C、AltGr、纯静音和长录音；确认普通组合键无 HUD/提示音/电平/历史/Provider 副作用
 
@@ -189,7 +189,7 @@ PR / 主干 push：
 官网 Pages workflow 与桌面 CI 解耦，但发布前必须先执行 `site:test` 和 `site:build`，再上传 `website/dist`；不得上传仓库根目录或桌面 `dist/`。
 
 - 任何一步红 = 不可合并；flaky 测试当天处理（§1.4）。
-- Windows PR job 必须运行 Rust default 与 `--no-default-features` 两套 check/clippy/test、`pnpm gen:ipc`/build/test；Windows 自启纯逻辑单测覆盖空格路径加引号、旧 debug/安装路径修复、正确路径不写和关闭时删除残留。另构建 debug EXE 并验证为 GUI subsystem。NSIS smoke 在安装器配置变更或主干构建中运行，检查默认目录 hook 已进入渲染脚本，并解包验证 sherpa/ONNX、VC++ runtime、Vulkan loader 和 runtime manifest 位于 EXE 同目录，第三方许可位于 `licenses/`，且文件名、相对路径与哈希一致；release 与包内 EXE 均须为 GUI subsystem。内嵌的 WebView2 Evergreen Bootstrapper 必须具有有效 Microsoft Authenticode，PE import 检查必须证明默认 feature 不依赖安装目录外的非系统 DLL。Tauri 2 Windows updater 直接复用同一 NSIS `.exe`，构建验证和 publish job 下载 artifact 后都必须用 `TAURI_UPDATER_PUBKEY` 对对应 `.exe.sig` 实际验签，不能只检查签名文件存在或非空；macOS updater archive 同样验签。平台 artifact 汇总必须先拒绝重复资产名，再生成唯一 manifest。CI/测试 artifact 不执行发布。
+- Windows PR job 必须运行 Rust default 与 `--no-default-features` 两套 check/clippy/test、`pnpm gen:ipc`/build/test；Windows 自启纯逻辑单测覆盖空格路径加引号、旧 debug/安装路径修复、正确路径不写和关闭时删除残留。另构建 debug EXE 并验证为 GUI subsystem。NSIS smoke 在安装器配置变更或主干构建中运行，检查默认目录与按需提权 hook 已进入渲染脚本，updater 为 `passive`，并静态约束最终 `$INSTDIR` 临时文件创建/删除探测、`runas`、重入保护、`${GetParameters}` 和末尾 `/D=$INSTDIR`；解包验证 sherpa/ONNX、VC++ runtime、Vulkan loader 和 runtime manifest 位于 EXE 同目录，第三方许可位于 `licenses/`，且文件名、相对路径与哈希一致；release 与包内 EXE 均须为 GUI subsystem。内嵌的 WebView2 Evergreen Bootstrapper 必须具有有效 Microsoft Authenticode，PE import 检查必须证明默认 feature 不依赖安装目录外的非系统 DLL。Tauri 2 Windows updater 直接复用同一 NSIS `.exe`，构建验证和 publish job 下载 artifact 后都必须用 `TAURI_UPDATER_PUBKEY` 对对应 `.exe.sig` 实际验签，不能只检查签名文件存在或非空；macOS updater archive 同样验签。平台 artifact 汇总必须先拒绝重复资产名，再生成唯一 manifest。CI/测试 artifact 不执行发布。
 - `cargo audit` / `npm audit` 每周定时任务 + release 前强制。
 
 ## 9. AI 辅助开发的专项纪律

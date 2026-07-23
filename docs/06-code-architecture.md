@@ -276,13 +276,14 @@ pub enum SessionPhase {
 4. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
 5. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
 6. **X11 组合键 release 事件顺序 bug**（global-hotkey#39）→ 用 rdev 自维护按键状态，不依赖热键 API 的 release。
-7. **Windows UIPI**：目标窗口是更高完整性进程时 SendInput 被拦截 → 预先比较完整性级别并检查发送计数；失败后把完整结果留在剪贴板并提示手动粘贴。Typex 不自动提权，也不建议长期以管理员身份运行。
+7. **Windows UIPI**：目标窗口是更高完整性进程时 SendInput 被拦截 → 预先比较完整性级别并检查发送计数；失败后把完整结果留在剪贴板并提示手动粘贴。Typex 应用进程不自动提权，也不建议长期以管理员身份运行；安装更新时的短生命周期按需提权例外见第 14 条。
 8. **webkit2gtk**：NVIDIA 驱动下白屏/崩溃 → 启动时探测并自动注入 `WEBKIT_DISABLE_DMABUF_RENDERER=1`；仅支持 webkit2gtk-4.1 的发行版（Ubuntu 22.04+）。
 9. **剪贴板恢复不保真**（arboard 仅文本/图片）→ 设置页明示；与剪贴板管理器可能互相干扰记录中间内容。
 10. **Windows 混合 DPI 与负坐标**：HUD/回答窗定位统一以目标 HWND 的 monitor work area 为源，在物理/逻辑坐标边界显式换算；禁止用 HUD 自身 monitor 推断目标屏幕。
 11. **Windows 原生运行库不能依赖开发机环境**：默认 feature 的 EXE 硬链接 sherpa/ONNX、MSVC C++/OpenMP runtime 与 Vulkan loader；NSIS 必须把四个 sherpa/ONNX DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll` 和 `vulkan-1.dll` 放在 EXE 同目录。Vulkan loader 存在但没有可用 ICD/GPU 时直接加载 CPU 模型；GPU 模型已加载后的 context/decode 错误仅在无可见输出时从头 CPU 重试一次。不得因缺少 loader 在进程装载阶段退出，也不得在 LLM 已流式输出后重放造成重复文本。
 12. **Windows 启动不得闪控制台**：debug/release EXE 均使用 GUI subsystem；debug 仅尝试附着已有父控制台以保留开发日志，失败即静默继续，禁止创建新控制台。登录自启的 HKCU Run 命令固定为带引号的当前 EXE 完整路径，启动对账必须修复旧路径且保持一致状态幂等（[ADR-26](08-decisions.md)）。
 13. **Windows 安装路径不主动迁移**：NSIS 保持 `currentUser`；仅当没有历史卸载/产品登记、`$INSTDIR` 仍是 Tauri 原默认值时，installer hook 改用 `%LOCALAPPDATA%\Programs\Typex`。历史安装位置与显式 `/D=` 优先，GUI 与静默安装使用同一判断（[ADR-26](08-decisions.md)）。
+14. **更新安装器按需提权**：各平台 updater 先以当前用户权限更新，仅当安装目标确实不可写时调用平台原生管理员认证。Windows updater 固定使用可交互的 `passive` 模式；NSIS hook 在最终 `$INSTDIR` 做临时文件创建/删除探测，可写则原权限继续，不可写才以 `runas` 重启同一个已验签安装器，并把原参数与最终 `/D=$INSTDIR` 传给提升后的进程。内部重入标记必须阻止无限提权循环；UAC 取消或提升后仍不可写时不得覆盖旧版本。NSIS 完成后使用 Tauri 的 `RunAsUser` 以普通用户重启 Typex，不得把应用进程永久提升。macOS 由 updater 在普通替换返回 `PermissionDenied` 后请求管理员认证；Linux 平台落地时沿用同一最小权限原则（[ADR-28](08-decisions.md)）。
 
 ### 7.3 快捷键（push-to-talk 细节）
 
@@ -474,7 +475,7 @@ src/
 - **前端**：ESLint + Prettier；组件 `<script setup lang="ts">`；样式只用 Tailwind 类 + tokens.css 变量，禁止组件内硬编码色值（stylelint 规则）。
 - **命名**：产品名 Typex（[ADR-14](08-decisions.md)）；bundle id `ink.typex.app`；crate/npm 包名 `typex`。
 - **Windows 本地 Tauri 构建**：`pnpm tauri dev/build/bundle` 统一经 `scripts/tauri.mjs` 启动。包装器只为会编译原生代码的 `dev` / `build` 命令通过 `vswhere` 初始化 MSVC x64 环境，并发现、校验 Vulkan SDK / SPIRV-Headers CMake package；`bundle` 只打包已有 EXE，原样透传官方 Tauri CLI。Cargo 产物仍使用项目默认 `src-tauri/target`，禁止重定向 `CARGO_TARGET_DIR` 或占用应用运行时 cwd。仓库级 Cargo config 只为 `x86_64-pc-windows-msvc` 固定 Ninja，并为所有 Cargo 入口注入 llama.cpp CMake project include；后者仅把 Vulkan shader generator 的 `ExternalProject` 根目录收敛到同一 Cargo `OUT_DIR` 下的 `build/ep`，避免上游默认嵌套路径超过 MSVC 限制。`llama-cpp-sys-2` 与 `sherpa-rs-sys` 的 dev package profile 关闭 debug assertions，使其 build script 与实际使用的 Release 原生库保持一致，避免错误引入 debug CRT。Windows 的 sherpa-onnx 使用上游 `download-binaries` 固定版本预编译包和内置 SHA-256 校验，避免本地 FetchContent 生成超长目录；macOS/Linux 保持原 generator 与源码构建，包装器原样透传官方 Tauri CLI。
-- **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。Windows 还必须构建 debug EXE 并验证 PE subsystem 为 GUI。NSIS smoke 必须确认默认目录 hook 已进入渲染脚本，解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 release/包内 EXE 的 GUI subsystem 与 PE import 闭包，不能只断言安装器文件存在。
+- **CI**：GitHub Actions 至少覆盖 macOS 与 Windows x64，Linux 后端落地后加入 Linux x64；Windows 同时运行 default / `--no-default-features` 的 check、clippy、test，以及前端 build/test 和 NSIS package smoke。Windows 还必须构建 debug EXE 并验证 PE subsystem 为 GUI。NSIS smoke 必须确认默认目录与按需提权 hook 已进入渲染脚本，且 updater 明确为 `passive`；静态检查至少约束最终目录写探测、`runas`、重入保护、原参数保留和末尾 `/D=$INSTDIR`。同时解包安装器，核对 app-local DLL/许可/manifest 的文件名与 SHA256，并检查 release/包内 EXE 的 GUI subsystem 与 PE import 闭包，不能只断言安装器文件存在。
 - **官网发布**：独立 Pages workflow 监听 `master` 上 `website/**`、共享 token、图标、根依赖清单与 workflow 自身，另支持 `workflow_dispatch`。job 只执行冻结依赖安装、`site:test`、`site:build`、Pages artifact 上传和 `github-pages` environment 部署；Actions 使用完整提交 SHA 固定。artifact 顶层必须是 `index.html`。workflow 不生成或提交 `CNAME`，自定义域只在 GitHub Pages 设置中配置。
 - **发布**：tag → 各平台 build job 产出唯一命名的平台 artifact 与 updater manifest fragment → publish job 校验后聚合 SHA256 和唯一 `latest.json`。Windows 使用 Tauri 2 原生 updater 格式：同一个 NSIS x64 `.exe` 同时作为手动安装和 updater 下载资产，旁边发布对应 `.exe.sig`，不生成仅供 Tauri v1 迁移的 legacy `.nsis.zip`；Windows 与 macOS 复用仓库现有 updater 密钥。构建前先从原生 release 产物、Microsoft VC tools redist 和固定版本/哈希的 Vulkan Loader 包生成 runtime staging，Tauri Windows resource map 将其安装到 EXE 同目录。Tauri `.sig` 是更新完整性签名，Authenticode 是 Windows 发布者身份，二者独立。SignPath/Authenticode 可后置，但构建链必须保留稳定签名插入点。更新通道分 stable/nightly，任何平台 fragment 不得同名覆盖或跨通道引用。
 - **提交**：Conventional Commits（`feat(audio): …`，scope 用本章模块名）；分支 `feat/…`、`fix/…`；PR 模板含「影响的设计书章节」栏——**代码与文档不同步的 PR 不合**。

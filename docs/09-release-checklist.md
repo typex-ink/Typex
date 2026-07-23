@@ -83,6 +83,8 @@
 
 - [ ] 从上一版本覆盖安装：settings.json 保留、密钥仍可用、历史库完好
 - [ ] 「检查更新」：stable 通道只检查正式 release，nightly 通道检查最新 nightly build；最新版报「已是最新」；旧版本装机检查出新版本 → 确认卡片 → 下载安装 → 自动重启为新版
+- [ ] 在 macOS/Windows 当前用户可写的标准安装目录更新时不出现管理员认证；把旧版安装到受保护目录后更新，仅在写权限探测失败后出现一次平台原生认证，成功后以普通用户身份启动新版
+- [ ] 取消或拒绝更新安装器的管理员认证：更新终止且旧版文件完整、仍可手动启动；不得反复弹窗或留下新旧文件混合状态
 - [ ] 启动 10s 后自动检查不阻塞主流程（关闭「自动检查」后不发请求）
 
 ## 9. 资源与隐私
@@ -119,7 +121,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 - [ ] UIA worker 纯逻辑测试覆盖空/非空选区、不支持、COM/Internal 错误、超时熔断、队列故障和多 range/bounds；显式 harness 覆盖真实 UIA、无 TextPattern 的 Ctrl+C 后备与 bounds
 - [ ] 向管理员权限目标进程实际注入时被 UIPI 拒绝，不自动提权，结果进入剪贴板并显示 `InjectionBlocked`；这是人工边界，可选使用独立 elevated fixture，纯完整性比较单测不能替代该项
 - [ ] 记事本、Edge、VS Code、Windows Terminal 的 UIA/注入行为完成代表性人工抽测
-- [ ] 清理历史安装登记后的 NSIS 全新 GUI/静默安装默认进入 `%LOCALAPPDATA%\Programs\Typex`；覆盖升级与显式 `/D=` 自定义目录保持原路径；卸载、重装通过，WebView2 缺失路径由配置/受控 smoke 验证，卸载默认保留设置、历史和模型
+- [ ] 清理历史安装登记后的 NSIS 全新 GUI/静默安装默认进入 `%LOCALAPPDATA%\Programs\Typex` 且无 UAC；覆盖升级与显式 `/D=` 自定义目录保持原路径；目标不可写时只提升安装器并在完成后降权启动 Typex；卸载、重装通过，WebView2 缺失路径由配置/受控 smoke 验证，卸载默认保留设置、历史和模型
 - [ ] 作为手动安装和 Tauri 2 updater 共用资产的 NSIS `.exe` 解包后，EXE 同目录包含 sherpa/ONNX 四 DLL、`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`、`vcomp140.dll`、`vulkan-1.dll` 与 runtime manifest，第三方许可位于 `licenses/`；相对路径与文件哈希均和 staging 一致
 - [ ] 在未预装 VC++ Redistributable、没有系统级 Vulkan loader/可用 Vulkan ICD 的干净 Windows 基线首启成功，本地模型诊断显示 CPU fallback 而不是进程装载失败
 - [ ] 每个平台的 Tauri updater artifact 都使用配置的 `TAURI_UPDATER_PUBKEY` 对 `.sig` 完成实际验签，manifest schema 校验通过；Windows manifest 直接引用 NSIS `.exe` 而非 legacy `.nsis.zip`；未接入 SignPath 时 artifact 明确标记 unsigned，不把 SHA256 或 updater 签名误称为 Authenticode

@@ -71,7 +71,10 @@
       "endpoints": [
         "https://github.com/typex-ink/Typex/releases/latest/download/latest.json"
       ],
-      "pubkey": "UPDATER_PUBKEY_PENDING_CP-5.4"
+      "pubkey": "UPDATER_PUBKEY_PENDING_CP-5.4",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }
