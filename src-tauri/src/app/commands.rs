@@ -77,8 +77,8 @@ pub fn get_permission_status() -> Vec<crate::platform::permissions::PermissionSt
 
 #[tauri::command]
 #[specta::specta]
-pub fn open_permission_settings(kind: crate::platform::permissions::PermissionKind) {
-    crate::platform::permissions::open_settings(kind);
+pub async fn open_permission_settings(kind: crate::platform::permissions::PermissionKind) {
+    crate::platform::permissions::open_settings(kind).await;
 }
 
 #[tauri::command]

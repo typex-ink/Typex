@@ -95,6 +95,23 @@ describe("Onboarding", () => {
     expect(wrapper.text()).not.toContain("← 上一步");
   });
 
+  it("权限请求完成后立即刷新授权状态", async () => {
+    vi.mocked(commands.getPermissionStatus)
+      .mockResolvedValueOnce([{ kind: "microphone", granted: false }])
+      .mockResolvedValueOnce([{ kind: "microphone", granted: true }]);
+    vi.mocked(commands.openPermissionSettings).mockResolvedValueOnce(undefined);
+    const wrapper = await mountOnboarding();
+
+    await buttonByText(wrapper, "开始 →").trigger("click");
+    await buttonByText(wrapper, "去授权").trigger("click");
+    await flushPromises();
+
+    expect(commands.openPermissionSettings).toHaveBeenCalledWith("microphone");
+    expect(commands.getPermissionStatus).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain("已授权");
+    expect(wrapper.findAll("button").some((button) => button.text() === "去授权")).toBe(false);
+  });
+
   it("先保存完成设置，再调用后端切换到主页", async () => {
     const wrapper = await mountOnboarding();
 

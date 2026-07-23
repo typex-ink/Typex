@@ -37,7 +37,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | WebSocket | `tokio-tungstenite` | 火山流式扩展 |
 | 密钥存储 | `settings.json` credentials 字段 | 与其他配置项同路径；导出与日志必须脱敏 |
 | 本地数据 | `rusqlite`（历史）+ `tauri-plugin-store`（设置） | |
-| macOS 权限 | `tauri-plugin-macos-permissions` + `macos-accessibility-client` | 检测 + 引导跳转 |
+| macOS 权限 | `objc2-av-foundation` + `macos-accessibility-client` + IOKit | 麦克风原生检测/请求 + 辅助功能/输入监听检测与引导 |
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
 | Windows 系统 API | target-specific `windows` crate | 最小 feature 集；`unsafe` 集中在 `platform/windows.rs` 与对应平台 backend 边界 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
@@ -271,7 +271,7 @@ pub enum SessionPhase {
 ### 7.2 已知平台坑清单（开发时逐条对照）
 
 1. **macOS 权限静默失效**：未授权辅助功能时 rdev event tap 可能静默无事件、不报错——必须用 `macos-accessibility-client` 主动检测并引导；开发时给终端/IDE 授权。CGEventTap 还可能被系统以 `TapDisabledByTimeout/UserInput` 禁用，vendored rdev grab 后端必须收到该事件后立即 `CGEventTapEnable(..., true)`。
-2. **macOS 签名后麦克风弹窗 bug**（tauri#9928/#11951）：Info.plist 有 `NSMicrophoneUsageDescription` 也可能不弹授权——需原生侧主动 `AVCaptureDevice.requestAccess`（`tauri-plugin-macos-permissions` 已封装）；entitlement `com.apple.security.device.audio-input`。
+2. **macOS 麦克风首次授权**：只调用 `AVCaptureDevice.authorizationStatus` 或只打开系统设置不足以完成首次授权；`NotDetermined` 必须由原生侧主动调用 `AVCaptureDevice.requestAccess`。用户拒绝或系统限制后再跳转设置；Info.plist 保持 `NSMicrophoneUsageDescription`，entitlement 保持 `com.apple.security.device.audio-input`。开发构建还需稳定签名身份，否则 TCC 可能把重编译产物视为新应用。
 3. **cpal 0.16 macOS CoreAudio 枚举 release 崩溃**：CoreAudio 的 `AudioObjectGetPropertyData(Size)` 会写回 `ioDataSize`，上游 0.16.0 macOS 后端若用不可变局部变量承接，在 release/LTO 下可能被优化成 0 长度 buffer 并在 `HALDeviceList::GetData` SIGSEGV；本项目通过 `src-tauri/vendor/cpal` patch 保持该参数可变，升级 cpal 时必须复核。
 4. **HUD 抢焦点会毁掉注入**：macOS 必须 NSPanel + nonactivating style；其他平台设置不可聚焦标志。
 5. **逐字模拟键入在非美式布局/输入法激活时乱码** → 默认剪贴板粘贴路径；粘贴前 60 ms 级可调延迟（部分慢应用需要）。
@@ -388,7 +388,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |
 | 快捷键 | `begin_hotkey_capture` / `end_hotkey_capture` | 录制模式：期间原始按键流经 event 上报 |
 | 历史 | `query_history { search, offset }` / `get_stats` / `delete_history_item` / `clear_history` | `get_stats` 返回主页统计（总时长/字数/节省时间/语速，本地聚合） |
-| 系统 | `get_permission_status` / `open_permission_settings { kind }` / `get_diagnostics` / `set_paused(bool)` / `copy_last_result` / `check_update` | `check_update` 按 `settings.general.update_channel` 选择 stable/nightly 更新源；字段缺省时由编译版本决定（prerelease → nightly，纯 SemVer → stable） |
+| 系统 | `get_permission_status` / `open_permission_settings { kind }` / `get_diagnostics` / `set_paused(bool)` / `copy_last_result` / `check_update` | macOS 麦克风 `NotDetermined` 时 `open_permission_settings` 主动请求授权，拒绝/受限时才打开设置；外部设置页没有授权完成回调，诊断页在 Typex 设置窗口重新获得焦点时通过 `get_permission_status` 轻量刷新；`check_update` 按 `settings.general.update_channel` 选择 stable/nightly 更新源；字段缺省时由编译版本决定（prerelease → nightly，纯 SemVer → stable） |
 
 ### 10.2 Events（Rust → 前端）
 
@@ -402,7 +402,6 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | `assistant://error` | `{ request_id, error }` | 回答弹窗错误展示（仅弹窗已呼出后的流中断；此前的失败走 HUD） |
 | `settings://changed` | 变更后的 `Settings` | 全窗口 |
 | `hotkey://captured` | 录制期间的按键组合 | HotkeyRecorder 控件 |
-| `permission://changed` | `PermissionStatus` | onboarding、诊断页 |
 | `update://available` | 版本信息 | 设置-关于 |
 
 命名规范：`域://kebab-case`；载荷全部为 `types/` 中的 struct，禁止匿名对象。

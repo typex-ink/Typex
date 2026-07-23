@@ -16,10 +16,21 @@ pub struct PermissionStatus {
     pub granted: bool,
 }
 
-/// 打开系统权限设置页（onboarding「去授权」按钮）。
-pub fn open_settings(kind: PermissionKind) {
+/// 请求首次授权；已经拒绝或不支持应用内请求时打开系统权限设置页。
+pub async fn open_settings(kind: PermissionKind) {
     #[cfg(target_os = "macos")]
     {
+        if kind == PermissionKind::Microphone {
+            match microphone_permission_action(microphone_authorization_status()) {
+                MicrophonePermissionAction::Granted => return,
+                MicrophonePermissionAction::Request => {
+                    request_microphone_access().await;
+                    return;
+                }
+                MicrophonePermissionAction::OpenSettings => {}
+            }
+        }
+
         let pane = match kind {
             PermissionKind::Microphone => "Privacy_Microphone",
             PermissionKind::Accessibility => "Privacy_Accessibility",
@@ -41,19 +52,84 @@ pub fn open_settings(kind: PermissionKind) {
     let _ = kind;
 }
 
-/// 麦克风权限（macOS：AVCaptureDevice authorizationStatus，3 = Authorized）。
-/// NotDetermined 时首次开流会触发系统弹窗——按未授权报告，onboarding 引导点击。
 #[cfg(target_os = "macos")]
-fn microphone_granted() -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MicrophonePermissionAction {
+    Granted,
+    Request,
+    OpenSettings,
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_authorization_status() -> objc2_av_foundation::AVAuthorizationStatus {
     use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
-    // SAFETY: AVMediaTypeAudio 是系统常量；authorizationStatusForMediaType 无副作用
+
+    // SAFETY: AVMediaTypeAudio 是系统提供的 extern 常量；该方法只读取当前 TCC 状态。
     unsafe {
         let Some(media_type) = AVMediaTypeAudio else {
-            return false;
+            return AVAuthorizationStatus::Restricted;
         };
         AVCaptureDevice::authorizationStatusForMediaType(media_type)
-            == AVAuthorizationStatus::Authorized
     }
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_permission_action(
+    status: objc2_av_foundation::AVAuthorizationStatus,
+) -> MicrophonePermissionAction {
+    use objc2_av_foundation::AVAuthorizationStatus;
+
+    match status {
+        AVAuthorizationStatus::Authorized => MicrophonePermissionAction::Granted,
+        AVAuthorizationStatus::NotDetermined => MicrophonePermissionAction::Request,
+        _ => MicrophonePermissionAction::OpenSettings,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn begin_microphone_access_request() -> Option<tokio::sync::oneshot::Receiver<bool>> {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio};
+    use std::sync::Mutex;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = Mutex::new(Some(tx));
+    let handler = RcBlock::new(move |granted: Bool| {
+        if let Ok(mut tx) = tx.lock()
+            && let Some(tx) = tx.take()
+        {
+            let _ = tx.send(granted.as_bool());
+        }
+    });
+
+    // SAFETY: AVFoundation copies the escaping block and invokes it once on an arbitrary queue.
+    // The captured sender is Send, synchronized by a Mutex, and performs no UI work.
+    unsafe {
+        let Some(media_type) = AVMediaTypeAudio else {
+            tracing::warn!("AVMediaTypeAudio unavailable; microphone permission was not requested");
+            return None;
+        };
+        AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &handler);
+    }
+    Some(rx)
+}
+
+#[cfg(target_os = "macos")]
+async fn request_microphone_access() {
+    let Some(rx) = begin_microphone_access_request() else {
+        return;
+    };
+    match rx.await {
+        Ok(granted) => tracing::info!(granted, "microphone permission request completed"),
+        Err(error) => tracing::warn!(%error, "microphone permission request callback dropped"),
+    }
+}
+
+/// 麦克风权限（macOS：AVCaptureDevice authorizationStatus）。
+#[cfg(target_os = "macos")]
+fn microphone_granted() -> bool {
+    microphone_authorization_status() == objc2_av_foundation::AVAuthorizationStatus::Authorized
 }
 
 /// 输入监听权限（macOS：IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)==granted）。
@@ -99,5 +175,31 @@ pub fn check_all() -> Vec<PermissionStatus> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Vec::new()
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use objc2_av_foundation::AVAuthorizationStatus;
+
+    #[test]
+    fn microphone_permission_action_matches_tcc_state() {
+        assert_eq!(
+            microphone_permission_action(AVAuthorizationStatus::Authorized),
+            MicrophonePermissionAction::Granted
+        );
+        assert_eq!(
+            microphone_permission_action(AVAuthorizationStatus::NotDetermined),
+            MicrophonePermissionAction::Request
+        );
+        assert_eq!(
+            microphone_permission_action(AVAuthorizationStatus::Denied),
+            MicrophonePermissionAction::OpenSettings
+        );
+        assert_eq!(
+            microphone_permission_action(AVAuthorizationStatus::Restricted),
+            MicrophonePermissionAction::OpenSettings
+        );
     }
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 诊断页（05 §5.2）：环境自检 + 日志目录
-import { onMounted, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import { commands, type DiagnosticsReport, type PermissionStatus } from "@/ipc/bindings";
@@ -9,6 +10,10 @@ const { t } = useI18n();
 const report = ref<DiagnosticsReport | null>(null);
 const exporting = ref(false);
 const exportResult = ref("");
+const requestingPermission = ref<PermissionStatus["kind"] | null>(null);
+let unlistenFocus: (() => void) | null = null;
+let permissionRefreshId = 0;
+let disposed = false;
 
 async function exportPack() {
   exporting.value = true;
@@ -34,12 +39,42 @@ const CAP_KEY: Record<string, string> = {
   integrity: "settings.diagnostics.cap_integrity",
 };
 
+async function refreshPermissions() {
+  const refreshId = ++permissionRefreshId;
+  const permissions = await commands.getPermissionStatus();
+  if (refreshId === permissionRefreshId && report.value) {
+    report.value = { ...report.value, permissions };
+  }
+}
+
 onMounted(async () => {
-  report.value = await commands.getDiagnostics();
+  const unlisten = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    if (focused) void refreshPermissions();
+  });
+  if (disposed) {
+    unlisten();
+    return;
+  }
+  unlistenFocus = unlisten;
+  const diagnostics = await commands.getDiagnostics();
+  if (!disposed) report.value = diagnostics;
 });
 
-function openSettings(kind: PermissionStatus["kind"]) {
-  commands.openPermissionSettings(kind);
+onUnmounted(() => {
+  disposed = true;
+  permissionRefreshId += 1;
+  unlistenFocus?.();
+});
+
+async function openSettings(kind: PermissionStatus["kind"]) {
+  if (requestingPermission.value) return;
+  requestingPermission.value = kind;
+  try {
+    await commands.openPermissionSettings(kind);
+    await refreshPermissions();
+  } finally {
+    requestingPermission.value = null;
+  }
 }
 </script>
 
@@ -53,7 +88,13 @@ function openSettings(kind: PermissionStatus["kind"]) {
     <div v-for="p in report.permissions" :key="p.kind" class="diag">
       <span :class="p.granted ? 'ok' : 'bad'">{{ p.granted ? "✓" : "✗" }}</span>
       <span>{{ PERM_KEY[p.kind] ? t(PERM_KEY[p.kind]) : p.kind }}</span>
-      <Button v-if="!p.granted" size="sm" class="fix" @click="openSettings(p.kind)">
+      <Button
+        v-if="!p.granted"
+        size="sm"
+        class="fix"
+        :disabled="requestingPermission !== null"
+        @click="openSettings(p.kind)"
+      >
         {{ t("actions.grant_permission") }}
       </Button>
     </div>

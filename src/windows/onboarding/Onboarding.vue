@@ -71,6 +71,7 @@ const lang = computed<UiLanguage>({
 // ── 步骤 2：权限（实时轮询）──
 const perms = ref<PermissionStatus[]>([]);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+const requestingPermission = ref<PermissionStatus["kind"] | null>(null);
 const PERM_META: Record<string, { icon: string; labelKey: string; whyKey: string }> = {
   microphone: { icon: "🎙", labelKey: "onboarding.perm_microphone", whyKey: "onboarding.perm_microphone_why" },
   accessibility: { icon: "⌨", labelKey: "onboarding.perm_accessibility", whyKey: "onboarding.perm_accessibility_why" },
@@ -79,6 +80,17 @@ const PERM_META: Record<string, { icon: string; labelKey: string; whyKey: string
 
 async function pollPerms() {
   perms.value = await commands.getPermissionStatus();
+}
+
+async function requestPermission(kind: PermissionStatus["kind"]) {
+  if (requestingPermission.value) return;
+  requestingPermission.value = kind;
+  try {
+    await commands.openPermissionSettings(kind);
+    await pollPerms();
+  } finally {
+    requestingPermission.value = null;
+  }
 }
 
 // ── 步骤 3：模型（本地一键推荐卡 + 云端直填两组表单，无厂商推荐——ADR-20/21）──
@@ -330,7 +342,12 @@ onUnmounted(() => {
           <small>{{ PERM_META[p.kind] ? t(PERM_META[p.kind].whyKey) : "" }}</small>
         </span>
         <span v-if="p.granted" class="granted">{{ t("onboarding.granted") }}</span>
-        <Button v-else size="sm" @click="commands.openPermissionSettings(p.kind)">
+        <Button
+          v-else
+          size="sm"
+          :disabled="requestingPermission !== null"
+          @click="requestPermission(p.kind)"
+        >
           {{ t("actions.grant_permission") }}
         </Button>
       </div>

@@ -87,8 +87,9 @@ macos-accessibility-client = "0.0.1"
 # macOS grab selectively consumes only Escape sequences claimed by Typex.
 rdev = { version = "0.5", features = ["unstable_grab"] }
 objc2 = "0.6"
+block2 = "0.6.2"
 objc2-app-kit = { version = "0.3", features = ["NSPanel", "NSWindow", "NSResponder", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSColor", "NSAppearance", "objc2-core-foundation"] }
-objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
+objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 # Qwen3-ASR 音频输入需要 llama.cpp tools/mtmd；macOS 使用 Metal。
 llama-cpp-2 = { version = "0.1.150", features = ["metal", "mtmd"], optional = true }
