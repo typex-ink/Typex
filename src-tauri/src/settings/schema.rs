@@ -8,7 +8,7 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
 pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
@@ -277,14 +277,22 @@ pub struct AssistantSettings {
 
 /// 快捷键绑定：每组是一个完整 chord，按键使用稳定物理 KeyId。
 /// 默认全修饰键三角方案（ADR-7）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum HotkeyTriggerMode {
+    #[default]
+    Hold,
+    Toggle,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(default)]
 pub struct HotkeySettings {
     pub dictation: Vec<String>,
     pub assistant: Vec<String>,
     pub translation: Vec<String>,
-    /// 长按/短按判定阈值 ms（02 F-5，可调）
-    pub hold_threshold_ms: u64,
+    /// 录音开始时快照；hold 在 keyup 停止，toggle 在第二次 keydown 停止。
+    pub trigger_mode: HotkeyTriggerMode,
 }
 
 impl Default for HotkeySettings {
@@ -301,7 +309,7 @@ impl Default for HotkeySettings {
             dictation: dict,
             assistant: assist,
             translation,
-            hold_threshold_ms: 350,
+            trigger_mode: HotkeyTriggerMode::Hold,
         }
     }
 }
@@ -492,7 +500,7 @@ mod tests {
     #[test]
     fn default_hotkeys_are_triangle_scheme() {
         let h = HotkeySettings::default();
-        assert_eq!(h.hold_threshold_ms, 350);
+        assert_eq!(h.trigger_mode, HotkeyTriggerMode::Hold);
         assert_eq!(h.translation.len(), 2);
         assert!(h.translation.contains(&h.dictation[0]));
         assert!(h.translation.contains(&h.assistant[0]));
@@ -505,7 +513,7 @@ mod tests {
             dictation: vec!["ControlRight".into(), "Num1".into(), "Digit1".into()],
             assistant: vec!["AltGr".into(), "KeyA".into()],
             translation: vec!["F13".into(), "ContextMenu".into(), "Menu".into()],
-            hold_threshold_ms: 350,
+            trigger_mode: HotkeyTriggerMode::Toggle,
         };
 
         h.normalize();

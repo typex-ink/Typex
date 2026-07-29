@@ -263,6 +263,11 @@
       "import_confirm": "Import"
     },
     "hotkeys": {
+      "trigger_mode": "Trigger mode",
+      "trigger_hold": "Hold to talk",
+      "trigger_toggle": "Press to toggle",
+      "trigger_hold_hint": "Starts on keydown and stops on keyup.",
+      "trigger_toggle_hint": "The first keydown starts and the second stops; holding the key is unnecessary.",
       "unreachable_chords": "Choose three non-empty shortcuts. Dictation and assistant cannot contain each other, and translation cannot exactly match either one."
     },
     "history": {

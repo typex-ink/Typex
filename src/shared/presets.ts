@@ -20,6 +20,7 @@ export const PRESETS: Preset[] = [
   { id: "openai-stt", label: "OpenAI", kind: "openai_compat", base_url: "https://api.openai.com/v1", models: ["gpt-4o-mini-transcribe", "whisper-1"], for: "stt" },
   { id: "groq-stt", label: "Groq", kind: "openai_compat", base_url: "https://api.groq.com/openai/v1", models: ["whisper-large-v3-turbo"], for: "stt" },
   { id: "siliconflow-stt", label: "SiliconFlow", kind: "openai_compat", base_url: "https://api.siliconflow.cn/v1", models: ["FunAudioLLM/SenseVoiceSmall"], for: "stt" },
+  { id: "mimo-stt", label: "Xiaomi MiMo", kind: "mimo", base_url: "https://api.xiaomimimo.com/v1", models: ["mimo-v2.5-asr"], for: "stt" },
   { id: "volcano-stt", label: "火山引擎 · 豆包（极速版）", kind: "volcengine", base_url: "", models: ["bigmodel"], for: "stt" },
   { id: "custom-stt", label: "自定义", labelKey: "settings.profile.preset_custom", kind: "openai_compat", base_url: "", models: [], for: "stt" },
   // LLM

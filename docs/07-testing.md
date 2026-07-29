@@ -35,10 +35,10 @@
 
 对 `advance(state, event) -> (state, Vec<Effect>)` 做穷举式表驱动测试。**必须逐条覆盖的场景清单**（与 [02 功能规格](02-features.md)、[05 §7](05-ux-spec.md) 对齐，新增行为先加进这张表）：
 
-- 长按/短按：349ms 释放 = toggle 开始；351ms 释放 = push-to-talk 结束；toggle 模式下听写/翻译在第二次 keydown 立即结束，助手模式等待完整 chord 释放后结束（确保读取选区时触发修饰键已松开）。
+- 显式触发方式：`hold` 在首次 keyup 结束；`toggle` 忽略首次 keyup，并在第二次 keydown 立即结束，听写/翻译/助手三种模式一致；录音中修改设置不改变当前会话已快照的触发方式。
 - 组合键：默认键位录音中追加第二触发键 → 模式切为翻译且音频保留；自定义配置中，较短 chord 启动后补全严格包含它的较长 chord → 切为后者模式，顺序不影响最终模式。
 - **组合键让路**：触发键按住期间出现普通键 down → 会话静默取消，Effect 仅含取消/释放录音（`CancelRecording` + `ReleaseAudio`），无 `EmitUi`、注入或提示音。
-- 暂停：Recording 的 push-to-talk 与短按 toggle 两种状态收到托盘暂停发来的 `Cancel` → Idle + 释放录音；Transcribing/Processing 不被暂停强杀。
+- 暂停：Recording 的 hold 与 toggle 两种状态收到托盘暂停发来的 `Cancel` → Idle + 释放录音；Transcribing/Processing 不被暂停强杀。
 - 重按忽略：Transcribing/Processing/Injecting 中触发键按下 → 状态不变，Effect = `EmitUi(busy-hint)`；Failed 中按下 → 放弃旧会话开新录音。
 - 录音结束两阶段：松键先进入 Transcribing，Effect 严格为 `EmitUi` → `StopRecording`；匹配的 `RecordingFinished` 才产生 `CallStt`，取消后迟到的完成事件无 Effect。
 - Esc：门闩在开关启用时允许 Recording、Transcribing、Processing、注入尚未提交的 Injecting 与 Failed 按当前 `session_id` 认领并回到 Idle；Idle、开关关闭、过期 ID 与注入已经提交时认领失败。覆盖首次 down、自动重复、配对 up、取消后新 Esc，以及取消赢/提交赢两种注入竞争结果。
@@ -55,9 +55,9 @@
 
 | 对象 | 重点用例 |
 |---|---|
-| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；三组多键 chord 的 partial/完整/乱序、独立翻译直触发、较短 chord 补全后由严格包含它的较长 chord 接管，空值、听写/助手互含及翻译与另两项完全相同均拒绝，翻译为另两项严格子集合法；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；Esc 与普通键让路严格分离，`esc_cancels=false` 时活动/空闲/Windows 75 ms 候选阶段均不取消，只切换该设置不得重置 chord；Esc 序列只在首次 down 认领，成功时吞 repeat/up 且只发一次会话事件，失败时完整透传；rdev 暂停 transition 清空 held；修饰键 down/up 与 349/351ms 边界；Windows scan code 物理位置不随布局 VK 漂移且右 Shift 绑定可端到端触发；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms，快速释放保留原始 held_ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
+| hotkey 判定器（独立于 OS backend 的纯逻辑层） | `KeyId` 别名归一化表（Enter/Return、Digit/Num、Arrow/LeftArrow、AltRight/AltGr、Meta/Win、Menu、标点、字母数字、F13–F19、Numpad/Kp）；三组多键 chord 的 partial/完整/乱序、独立翻译直触发、较短 chord 补全后由严格包含它的较长 chord 接管，空值、听写/助手互含及翻译与另两项完全相同均拒绝，翻译为另两项严格子集合法；partial 全释放无事件、已激活手势等全部 tracked 键释放才 Up；active single/multi chord 配置热更新先 Up、旧 release 不重复，partial 更新无事件，相同配置与无关 settings 更新完全幂等；Esc 与普通键让路严格分离，`esc_cancels=false` 时活动/空闲/Windows 75 ms 候选阶段均不取消，只切换该设置不得重置 chord；Esc 序列只在首次 down 认领，成功时吞 repeat/up 且只发一次会话事件，失败时完整透传；rdev 暂停 transition 清空 held；修饰键 down/up 与原始 held_ms 透传；Windows scan code 物理位置不随布局 VK 漂移且右 Shift 绑定可端到端触发；75 ms 确认窗内 Right Ctrl+C、物理 RAlt+普通键和 AltGr 伪 LCtrl+RAlt 均无语义事件/副作用，单键确认 ≤100 ms；`LLKHF_INJECTED` 被忽略；仅已确认助手手势吞 RAlt keyup，配置更新后对应旧 RAlt keyup 仍恰好吞一次；callback terminal Failed 后 raw event 零产出且 `WM_QUIT` 不覆盖失败；漏 release 后 stale duplicate down 重置恢复，普通键 auto-repeat 不得误判 stale release |
 | Windows 候选录音 adapter | 原始触发键立即发候选 token；75 ms 确认携带同 token 提升；Ctrl+C/物理 RAlt+普通键/AltGr 匹配取消且无可见副作用；`translation=[AltRight]` 在 AltGr 伪 LCtrl+RAlt 路径同样从原始 down 预启动并提升为翻译；双键翻译复用候选；快速释放保留原始 held_ms；暂停、配置更新、hook 失败/意外终止与退出清理未决 token |
-| Windows hook health monitor | Healthy/Starting 与暂停态不误取消；运行期 Failed/意外 Stopped 对 push-to-talk/toggle 统一发一次 `Cancel`；重复终态不重复；启动失败使用同一可订阅状态；主动 Shutdown 静默 |
+| Windows hook health monitor | Healthy/Starting 与暂停态不误取消；运行期 Failed/意外 Stopped 对 hold/toggle 统一发一次 `Cancel`；重复终态不重复；启动失败使用同一可订阅状态；主动 Shutdown 静默 |
 | Windows 音频转换与设备解析 | WASAPI 常见 `f32/i16/u16` → mono f32 的边界值、声道混合、重采样长度；有界缓冲溢出计数；endpoint ID 精确选择；旧 display name 唯一匹配迁移；同名歧义/固定设备缺失；设备拔出/stream error 脱敏分类与主动通知 |
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
 | VAD 与切片（`audio/vad.rs` / `audio/pipeline.rs`） | schema v7 迁移与门限校验；能量/神经网络两条路径；Silero 初始化/推理失败降级；弱声连续 90 ms 保底与纯静音拒绝；首部 300 ms/尾部 150 ms 非对称 padding；长录音切片沿用录音快照；短音频不切、超长无静音音频强制切片 |
@@ -75,10 +75,10 @@
 
 ### 4.1 Provider × wiremock（每个 adapter 一个测试文件）
 
-对 `openai_compat` / `volcengine` / `chat_completions` / `responses` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
+对 `openai_compat` / `mimo` / `volcengine` / `chat_completions` / `responses` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
 
-- 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、multipart 字段完整性、自定义 extra_headers/extra_form 透传。
-- 响应：正常 JSON；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射。
+- 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、OpenAI multipart 字段完整性、MiMo JSON 中完整 WAV data URL 与语言参数、自定义 extra_headers/extra_form 透传。
+- 响应：正常 JSON；MiMo `choices[0].message.content` 缺失/类型错误；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射。
 - 错误与重试：401 → `auth_error` 且**不重试**；429/503 → 退避重试 2 次后放弃；请求体在重试间不被消耗（multipart body 可重放）。
 - 慢响应：STT / LLM profile 的单一 `timeout_ms` 对连接测试及所有使用该档案的功能统一生效；本地/远端调用延迟 > timeout → `timeout` 分类，LLM 持续输出 delta 也不得重置总时限。该契约由 Provider 包装层测试，不由 HTTP adapter 的 reqwest 超时模拟代替。
 - 本地 STT 阻塞隔离：Whisper / SenseVoice / Qwen3-ASR 的原生推理不占用 Tokio worker；超时后原生任务尚未返回时，重试只异步等待同一在途许可，不会启动第二个原生任务或阻塞运行时。

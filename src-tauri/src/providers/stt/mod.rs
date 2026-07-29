@@ -1,4 +1,5 @@
 //! SttProvider trait（03 §2）。
+pub mod mimo;
 pub mod openai_compat;
 pub mod volcengine;
 

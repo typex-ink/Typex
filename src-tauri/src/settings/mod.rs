@@ -309,7 +309,10 @@ mod tests {
         assert_eq!(settings.hotkeys.dictation, defaults.dictation);
         assert_eq!(settings.hotkeys.assistant, defaults.assistant);
         assert_eq!(settings.hotkeys.translation, defaults.translation);
-        assert_eq!(settings.hotkeys.hold_threshold_ms, 999);
+        assert_eq!(
+            settings.hotkeys.trigger_mode,
+            schema::HotkeyTriggerMode::Hold
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

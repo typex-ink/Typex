@@ -1,4 +1,4 @@
-//! 契约快照测试（07 §4.1）：四个 adapter 构造的完整 HTTP 请求形状。
+//! 契约快照测试（07 §4.1）：五个 adapter 构造的完整 HTTP 请求形状。
 //!
 //! 厂商格式是外部契约——任何无意的请求变化（哪怕是「顺手重构」）都会在快照 diff 中显形。
 //! 波动字段（multipart boundary、request-id、host）先归一化再快照。
@@ -9,7 +9,8 @@ use typex_lib::providers::llm::{
     LlmProvider, LlmRequest, Msg, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use typex_lib::providers::stt::{
-    AudioInput, SttOptions, SttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
+    AudioInput, SttOptions, SttProvider, mimo::MimoStt, openai_compat::OpenAiCompatStt,
+    volcengine::VolcengineStt,
 };
 use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::method};
 
@@ -130,6 +131,32 @@ async fn snapshot_openai_compat_stt_request() {
     stt.transcribe(wav_stub(), opts).await.unwrap();
     let captured = slot.lock().unwrap().clone().unwrap();
     insta::assert_json_snapshot!("openai_compat_stt_request", captured);
+}
+
+#[tokio::test]
+async fn snapshot_mimo_stt_request() {
+    let (server, slot) =
+        capture_server(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "choices": [{ "message": { "content": "ok" } }]
+        })))
+        .await;
+    let stt = MimoStt::new(
+        client(),
+        format!("{}/v1", server.uri()),
+        "sk-test",
+        "mimo-v2.5-asr",
+    );
+    stt.transcribe(
+        wav_stub(),
+        SttOptions {
+            language: Some("zh".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let captured = slot.lock().unwrap().clone().unwrap();
+    insta::assert_json_snapshot!("mimo_stt_request", captured);
 }
 
 #[tokio::test]

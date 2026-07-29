@@ -1,0 +1,35 @@
+---
+source: tests/contract_snapshots.rs
+expression: captured
+---
+{
+  "body": {
+    "asr_options": {
+      "language": "zh"
+    },
+    "messages": [
+      {
+        "content": [
+          {
+            "input_audio": {
+              "data": "data:audio/wav;base64,UklGRndhdnN0dWIh"
+            },
+            "type": "input_audio"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "mimo-v2.5-asr",
+    "stream": false
+  },
+  "headers": [
+    "accept: */*",
+    "authorization: Bearer sk-test",
+    "content-length: <len>",
+    "content-type: application/json",
+    "host: <host>"
+  ],
+  "method": "POST",
+  "path": "/v1/chat/completions"
+}

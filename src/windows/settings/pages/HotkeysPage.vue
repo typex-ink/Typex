@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n";
 import Callout from "@/components/Callout.vue";
 import FormRow from "@/components/FormRow.vue";
 import HotkeyRecorder from "@/components/HotkeyRecorder.vue";
+import SegmentedControl from "@/components/SegmentedControl.vue";
 import {
   hotkeyChordsAreReachable,
   normalizeHotkeyChord,
@@ -16,6 +17,22 @@ const store = useSettingsStore();
 const validationError = ref(false);
 
 type FunctionalHotkey = "dictation" | "assistant" | "translation";
+
+const triggerModeOptions = computed(() => [
+  { value: "hold", label: t("settings.hotkeys.trigger_hold") },
+  { value: "toggle", label: t("settings.hotkeys.trigger_toggle") },
+]);
+const triggerMode = computed({
+  get: () => store.settings?.hotkeys.trigger_mode ?? "hold",
+  set: (value: string) => {
+    void store.mutate((draft) => {
+      draft.hotkeys.trigger_mode = value as typeof draft.hotkeys.trigger_mode;
+    });
+  },
+});
+const triggerModeHint = computed(() =>
+  t(`settings.hotkeys.trigger_${triggerMode.value}_hint`),
+);
 
 function saveHotkey(slot: FunctionalHotkey, value: string[]) {
   const settings = store.settings;
@@ -56,6 +73,16 @@ const translation = computed({
     <Callout v-if="validationError" variant="warn" class="validation-error">
       {{ t("settings.hotkeys.unreachable_chords") }}
     </Callout>
+    <FormRow
+      :label="t('settings.hotkeys.trigger_mode')"
+      :hint="triggerModeHint"
+    >
+      <SegmentedControl
+        v-model="triggerMode"
+        :options="triggerModeOptions"
+        :group-label="t('settings.hotkeys.trigger_mode')"
+      />
+    </FormRow>
     <FormRow :label="t('settings.nav_dictation')">
       <HotkeyRecorder v-model="dictation" />
     </FormRow>
