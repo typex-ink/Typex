@@ -9,7 +9,8 @@ use crate::providers::llm::{
     LlmProvider, TimedLlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use crate::providers::stt::{
-    SttProvider, TimedSttProvider, openai_compat::OpenAiCompatStt, volcengine::VolcengineStt,
+    SttProvider, TimedSttProvider, mimo::MimoStt, openai_compat::OpenAiCompatStt,
+    volcengine::VolcengineStt,
 };
 use crate::settings::schema::Settings;
 use crate::types::{ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
@@ -298,6 +299,16 @@ impl ProviderRegistry {
                     .with_extras(profile.extra_headers.clone(), profile.extra_form.clone()),
                 )
             }
+            ProviderKind::Mimo => {
+                let key = self.resolve_secret(profile, "api_key")?;
+                let client = self.http_client();
+                Arc::new(MimoStt::new(
+                    client,
+                    profile.base_url.clone(),
+                    key,
+                    profile.model.clone(),
+                ))
+            }
             ProviderKind::Volcengine => {
                 let app_key = self.resolve_secret(profile, "app_key")?;
                 let access_key = self.resolve_secret(profile, "access_token")?;
@@ -560,6 +571,13 @@ mod tests {
         let a = reg.stt_for(SlotKind::Stt).unwrap();
         let b = reg.stt_for(SlotKind::Stt).unwrap();
         assert!(Arc::ptr_eq(&a, &b)); // 缓存命中
+    }
+
+    #[test]
+    fn mimo_stt_builds_with_shared_registry_path() {
+        let reg = setup();
+        let profile = profile("mimo", ProviderKind::Mimo);
+        assert!(reg.build_stt(&profile).is_ok());
     }
 
     #[test]

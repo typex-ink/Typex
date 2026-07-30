@@ -29,12 +29,12 @@ function makeSettings(
   translation: string[] = [...new Set([...dictation, ...assistant])],
 ): Settings {
   return {
-    schema_version: 9,
+    schema_version: 11,
     hotkeys: {
       dictation,
       assistant,
       translation,
-      hold_threshold_ms: 350,
+      trigger_mode: "hold",
     },
   } as Settings;
 }
@@ -112,6 +112,15 @@ describe("HotkeysPage chord validation", () => {
     expect(saved.hotkeys.dictation).toEqual(["ControlRight"]);
     expect(saved.hotkeys.assistant).toEqual(["AltRight"]);
     expect(saved.hotkeys.translation).toEqual(["F13", "Menu"]);
+  });
+
+  it("persists press-to-toggle as an explicit trigger mode", async () => {
+    const wrapper = mountPage();
+    await wrapper.find('[role="radio"][aria-checked="false"]').trigger("click");
+    await flushPromises();
+
+    const saved = vi.mocked(commands.updateSettings).mock.calls[0][0] as Settings;
+    expect(saved.hotkeys.trigger_mode).toBe("toggle");
   });
 
   it("blocks a translation chord identical to dictation", async () => {

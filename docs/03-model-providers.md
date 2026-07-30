@@ -92,7 +92,44 @@ Content-Type: application/json
 - F-10 词典经 `corpus.context` 传入（词条一行一个）。
 - 流式识别（二进制 WS 帧协议，`wss://openspeech.bytedance.com/api/v3/sauc/bigmodel`）留待实时字幕需求出现时再实现。
 
-### 2.3 内置实现三：`local`（本地推理，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)）
+### 2.3 内置实现三：`mimo`（Xiaomi MiMo ASR）
+
+MiMo ASR 不实现 OpenAI Audio Transcriptions 协议；它使用 Chat Completions 路径承载 JSON + Base64 WAV：
+
+```text
+POST {base_url}/chat/completions
+Authorization: Bearer {api_key}
+Content-Type: application/json
+
+{
+  "model": "mimo-v2.5-asr",
+  "messages": [{
+    "role": "user",
+    "content": [{
+      "type": "input_audio",
+      "input_audio": {
+        "data": "data:audio/wav;base64,<完整 WAV 字节的 Base64>"
+      }
+    }]
+  }],
+  "stream": false,
+  "asr_options": { "language": "auto" }
+}
+```
+
+响应文本位于 `choices[0].message.content`。`SttOptions.language` 未设置、空字符串或为 `auto` 时发送 `auto`，其他值原样发送；MiMo adapter 不发送 `prompt` 或 `temperature`。默认 Base URL 为 `https://api.xiaomimimo.com/v1`，默认模型为 `mimo-v2.5-asr`。
+
+用户配置示例：
+
+```text
+Provider: Xiaomi MiMo
+Base URL: https://api.xiaomimimo.com/v1
+Model: mimo-v2.5-asr
+API Key: 用户自己的 MiMo API Key
+Language: auto 或 zh
+```
+
+### 2.4 内置实现四：`local`（本地推理，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)）
 
 不走 HTTP，进程内推理，实现同一个 `SttProvider` trait。按硬件档位提供两条引擎路线：
 
@@ -105,7 +142,7 @@ Content-Type: application/json
 - `capabilities()` 报告：不限音频时长（本地无 25 MB 上限）；错误分类只剩 `InvalidRequest`/模型未下载。
 - 模型文件由**模型下载管理器**负责（见 §8）：不随安装包分发，按需下载。
 
-### 2.4 扩展位
+### 2.5 扩展位
 
 - `deepgram` / `elevenlabs`：各约百行的薄 adapter（改鉴权头、上传方式）。
 - 流式：各家协议互不兼容（OpenAI Realtime 事件 JSON / 火山二进制帧 / Deepgram 裸推）；唯一准标准是 OpenAI Realtime（阿里 Qwen3-ASR 已模仿）。故流式做成可选 capability；当前默认路径使用「快 Provider + 一次性转写」。
@@ -358,7 +395,7 @@ F-3 不引入新的 Provider 类型：
 ```
 功能槽位             服务池能力         实现走向
 ────────────────────────────────────────────────────────────
-语音转文字   ──▶  stt profile   ──▶  SttProvider（openai_compat | volcengine | local）
+语音转文字   ──▶  stt profile   ──▶  SttProvider（openai_compat | mimo | volcengine | local）
 文本整理     ──▶  llm profile   ──▶  LlmProvider + 整理 system/XML（推荐轻量快模型；可用 local）
 翻译模型     ──▶  llm profile   ──▶  LlmProvider + 翻译 system/XML（可用 local）
 问答模型     ──▶  llm profile   ──▶  LlmProvider + 处理/问答 system/XML（推荐强模型；可手动选择 local）
@@ -374,7 +411,7 @@ F-3 不引入新的 Provider 类型：
 
 ```jsonc
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
@@ -402,7 +439,7 @@ F-3 不引入新的 Provider 类型：
     "dictation": ["ControlRight"],       // 一个完整 chord，稳定物理 KeyId
     "assistant": ["AltRight"],
     "translation": ["ControlRight", "AltRight"], // 独立完整 chord；此处为默认三角键位
-    "hold_threshold_ms": 350
+    "trigger_mode": "hold"                  // hold | toggle；显式选择，不按时长推断
   },
   "slots": {
     "stt":       { "active_profile": "groq-fast" },
@@ -430,6 +467,14 @@ F-3 不引入新的 Provider 类型：
         "access_key": "token-..."
       },
       "options": { "resource_id": "volc.bigasr.auc_turbo", "enable_punc": true, "enable_itn": true }
+    },
+    {
+      "id": "mimo-asr", "capability": "stt", "kind": "mimo",
+      "label": "Xiaomi MiMo",
+      "base_url": "https://api.xiaomimimo.com/v1",
+      "model": "mimo-v2.5-asr", "timeout_ms": 60000,
+      "credentials": { "api_key": "用户自己的 MiMo API Key" },
+      "options": { "language": "auto" }
     },
     {
       "id": "deepseek", "capability": "llm", "kind": "chat_completions",
@@ -467,9 +512,10 @@ F-3 不引入新的 Provider 类型：
 - schema v8 将 `hotkeys.translation` 从派生值改为独立完整 chord。v7 及更旧配置升级时仍按旧规则把听写与助手 chord 有序去重合并为翻译 chord，保持当前行为；v8 起三组 chord 分别归一化和持久化，修改任一项不再重算另外两项。
 - schema v9 以四个 `*_system_prompt` 字段替换旧的 `polish_prompt` / `translate_prompt` / `process_prompt` / `ask_prompt` 模板字段。应用尚未发布，不兼容旧自定义模板：v8 及更旧配置升级时删除旧字段并把新字段置空，直接使用当前内置 system prompt。固定 XML user message 不进入配置 schema。
 - schema v10 将 profile 调用超时默认值从 30 秒提高到 60 秒；迁移时把旧版 UI 自动写入的 `timeout_ms=30000` 更新为 `60000`，其他显式值保持不变。
+- schema v11 以 `hotkeys.trigger_mode`（`hold` / `toggle`）替换 `hold_threshold_ms`。旧配置迁移为 `hold` 以保持原先主推的按住说话行为；触发方式在会话开始时快照，后端不再按按住时长推断语义。
 - profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`。STT 覆盖从转写调用开始到完整文本返回，LLM 覆盖连接、请求发送、首 token 等待与完整流式响应接收；本地与远端实现使用相同语义。同一 profile 被多个功能或连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
-- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
+- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。
 
 ## 7. 各厂商兼容性速查（配置预设的依据）
@@ -479,6 +525,7 @@ F-3 不引入新的 Provider 类型：
 | OpenAI | openai_compat | chat_completions / responses | 基准 |
 | Groq | openai_compat | chat_completions | STT 极快（whisper-turbo），语音输入首选预设 |
 | SiliconFlow | openai_compat（子集） | chat_completions | SenseVoice 中文；参数支持面窄 |
+| Xiaomi MiMo | **mimo adapter**（`/chat/completions` JSON + Base64 WAV） | chat_completions | MiMo ASR 不是 OpenAI Audio Transcriptions 兼容接口 |
 | 火山引擎 · 豆包 | **volcengine adapter** | chat_completions（方舟端点） | STT 双凭据；LLM 是 OpenAI 兼容的 |
 | DeepSeek | — | chat_completions | 整理/翻译高性价比 |
 | OpenRouter | — | chat_completions / responses | 聚合网关 |

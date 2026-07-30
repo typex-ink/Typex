@@ -263,6 +263,11 @@
       "import_confirm": "导入"
     },
     "hotkeys": {
+      "trigger_mode": "触发方式",
+      "trigger_hold": "按住说话",
+      "trigger_toggle": "按下切换",
+      "trigger_hold_hint": "按下立即开始，松开立即结束。",
+      "trigger_toggle_hint": "第一次按下立即开始，第二次按下立即结束；无需保持按键。",
       "unreachable_chords": "请选择三个非空快捷键；听写与助手不能相同或互相包含，翻译不能与前两项完全相同。"
     },
     "history": {

@@ -45,6 +45,8 @@ pub enum ProviderCapability {
 pub enum ProviderKind {
     /// STT：multipart /audio/transcriptions
     OpenaiCompat,
+    /// STT：Xiaomi MiMo /chat/completions JSON + Base64 WAV
+    Mimo,
     /// STT：火山/豆包极速版 flash（双凭据）
     Volcengine,
     /// LLM：OpenAI Chat Completions
@@ -59,7 +61,10 @@ impl ProviderKind {
     pub fn is_stt(self) -> bool {
         matches!(
             self,
-            ProviderKind::OpenaiCompat | ProviderKind::Volcengine | ProviderKind::Local
+            ProviderKind::OpenaiCompat
+                | ProviderKind::Mimo
+                | ProviderKind::Volcengine
+                | ProviderKind::Local
         )
     }
 }

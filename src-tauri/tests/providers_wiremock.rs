@@ -14,7 +14,7 @@ use typex_lib::providers::llm::{
     LlmProvider, LlmRequest, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
 use typex_lib::providers::stt::{
-    AudioInput, SttOptions, SttProvider, openai_compat::OpenAiCompatStt,
+    AudioInput, SttOptions, SttProvider, mimo::MimoStt, openai_compat::OpenAiCompatStt,
 };
 use typex_lib::settings::SettingsService;
 use typex_lib::settings::schema::{ProxyMode, Settings, SlotConfig};
@@ -210,6 +210,149 @@ async fn stt_extra_headers_and_form_passthrough() {
     stt.transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap();
+}
+
+// ── Xiaomi MiMo STT（03 §2.3）──
+
+#[tokio::test]
+async fn mimo_request_shape_audio_roundtrip_and_response_parse() {
+    use base64::Engine;
+    use wiremock::matchers::header_regex;
+
+    let server = MockServer::start().await;
+    let expected_wav = wav_stub().wav_16k_mono;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(header("authorization", "Bearer sk-test"))
+        .and(header_regex("content-type", "^application/json"))
+        .respond_with(move |req: &Request| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["model"], "mimo-v2.5-asr");
+            assert_eq!(body["stream"], false);
+            assert_eq!(body["messages"][0]["role"], "user");
+            assert_eq!(body["messages"][0]["content"][0]["type"], "input_audio");
+            assert_eq!(body["asr_options"]["language"], "zh");
+            assert!(body.get("prompt").is_none());
+            assert!(body.get("temperature").is_none());
+
+            let data_url = body["messages"][0]["content"][0]["input_audio"]["data"]
+                .as_str()
+                .unwrap();
+            let encoded = data_url
+                .strip_prefix("data:audio/wav;base64,")
+                .expect("MiMo audio must be a WAV data URL");
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap();
+            assert_eq!(decoded, expected_wav);
+
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "测试转写文本" } }]
+            }))
+        })
+        .mount(&server)
+        .await;
+
+    let stt = MimoStt::new(
+        client(),
+        format!("{}/v1/", server.uri()),
+        "sk-test",
+        "mimo-v2.5-asr",
+    );
+    let transcript = stt
+        .transcribe(
+            wav_stub(),
+            SttOptions {
+                language: Some("zh".into()),
+                prompt: Some("must not be sent".into()),
+                temperature: Some(0.5),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(transcript.text, "测试转写文本");
+}
+
+#[tokio::test]
+async fn mimo_auto_language_is_used_for_none_empty_and_auto() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |req: &Request| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["asr_options"]["language"], "auto");
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "ok" } }]
+            }))
+        })
+        .expect(3)
+        .mount(&server)
+        .await;
+
+    let stt = MimoStt::new(client(), server.uri(), "k", "m");
+    for language in [None, Some(String::new()), Some("auto".into())] {
+        stt.transcribe(
+            wav_stub(),
+            SttOptions {
+                language,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn mimo_malformed_or_incomplete_responses_are_readable_errors() {
+    for (body, expected) in [
+        ("not-json", "响应 JSON 解析失败"),
+        (r#"{}"#, "choices 缺失"),
+        (r#"{"choices":[]}"#, "choices 为空"),
+        (r#"{"choices":[{}]}"#, "message 缺失"),
+        (r#"{"choices":[{"message":{}}]}"#, "message.content 缺失"),
+        (
+            r#"{"choices":[{"message":{"content":[]}}]}"#,
+            "message.content 不是字符串",
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        let stt = MimoStt::new(client(), server.uri(), "k", "m");
+        let err = stt
+            .transcribe(wav_stub(), SttOptions::default())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ProviderError::InvalidRequest(ref message) if message.contains(expected) && message.contains(body)),
+            "body={body:?}, error={err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mimo_http_error_classification_and_retry_match_shared_policy() {
+    for (status, attempts) in [(401, 1), (429, 3), (500, 3)] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(status).set_body_string(format!("status-{status}")))
+            .expect(attempts)
+            .mount(&server)
+            .await;
+        let stt = MimoStt::new(client(), server.uri(), "k", "m");
+        let err = stt
+            .transcribe(wav_stub(), SttOptions::default())
+            .await
+            .unwrap_err();
+        match status {
+            401 => assert!(matches!(err, ProviderError::Auth(_))),
+            429 => assert!(matches!(err, ProviderError::RateLimited(_))),
+            500 => assert!(matches!(err, ProviderError::Server { status: 500, .. })),
+            _ => unreachable!(),
+        }
+    }
 }
 
 // ── chat_completions LLM ──

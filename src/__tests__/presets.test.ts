@@ -13,4 +13,16 @@ describe("模型预设", () => {
     expect(presets.map((p) => p.id)).toContain("local-stt");
     expect(presets.map((p) => p.id)).not.toContain("local-llm");
   });
+
+  it("Xiaomi MiMo 预设锁定原生 ASR adapter 与 base URL", () => {
+    const preset = presetsForSlot("stt").find((p) => p.id === "mimo-stt");
+    expect(preset).toEqual({
+      id: "mimo-stt",
+      label: "Xiaomi MiMo",
+      kind: "mimo",
+      base_url: "https://api.xiaomimimo.com/v1",
+      models: ["mimo-v2.5-asr"],
+      for: "stt",
+    });
+  });
 });

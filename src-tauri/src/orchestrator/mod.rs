@@ -243,10 +243,10 @@ impl Orchestrator {
                 event => event,
             };
 
-            let threshold = self.settings.get().hotkeys.hold_threshold_ms;
+            let trigger_mode = self.settings.get().hotkeys.trigger_mode;
             let previous_state = exec.state.clone();
             let (mut new_state, mut effects) =
-                advance(previous_state.clone(), event.clone(), threshold);
+                advance(previous_state.clone(), event.clone(), trigger_mode);
             for effect in &effects {
                 if let Effect::Inject { session_id, .. } = effect {
                     exec.injection_latches
@@ -262,7 +262,7 @@ impl Orchestrator {
                 &mut exec,
             ) {
                 event = Event::Esc;
-                (new_state, effects) = advance(previous_state, event.clone(), threshold);
+                (new_state, effects) = advance(previous_state, event.clone(), trigger_mode);
                 self.escape_latch.disarm();
             }
 

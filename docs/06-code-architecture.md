@@ -112,7 +112,7 @@ typex/
 │       │   ├── session.rs        # SessionState 状态机 + 转移逻辑（纯逻辑，可单测）
 │       │   └── pipeline.rs       # 听写/翻译/助手 三条流水线的步骤编排
 │       ├── hotkey/
-│       │   ├── mod.rs            # trait HotkeyBackend + HotkeyService（含长短按/组合判定）
+│       │   ├── mod.rs            # trait HotkeyBackend + HotkeyService（含完整 chord/组合判定）
 │       │   ├── rdev_backend.rs
 │       │   └── portal_backend.rs # Wayland (ashpd)
 │       ├── audio/
@@ -262,7 +262,7 @@ pub enum SessionPhase {
 
 | 能力 | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
-| 全局按住说话 | rdev grab（需辅助功能/输入监听权限） | 原生 `WH_KEYBOARD_LL` 消息循环 | rdev listen（XTEST/XRecord） | Portal GlobalShortcuts（ashpd）；evdev 兜底 |
+| 全局快捷键 down/up | rdev grab（需辅助功能/输入监听权限） | 原生 `WH_KEYBOARD_LL` 消息循环 | rdev listen（XTEST/XRecord） | Portal GlobalShortcuts（ashpd）；evdev 兜底 |
 | 文本注入 | 剪贴板 + CGEvent Cmd+V | 剪贴板 + SendInput Ctrl+V | 剪贴板 + XTEST Ctrl+V | wtype（wlroots 系）/ ydotool·dotool（GNOME/KDE）/ 仅复制降级 |
 | 读选中文本 | AX API → 静音 Cmd+C 降级 | UIA TextPattern → Ctrl+C 降级 | primary selection | primary selection（部分可用）→ 仅手动粘贴降级 |
 | HUD 置顶浮窗 | NSPanel（不抢焦点） | 原生支持 | 原生支持 | gtk-layer-shell（GNOME 不支持 → 降级为托盘状态） |
@@ -285,14 +285,14 @@ pub enum SessionPhase {
 13. **Windows 安装路径不主动迁移**：NSIS 保持 `currentUser`；仅当没有历史卸载/产品登记、`$INSTDIR` 仍是 Tauri 原默认值时，installer hook 改用 `%LOCALAPPDATA%\Programs\Typex`。历史安装位置与显式 `/D=` 优先，GUI 与静默安装使用同一判断（[ADR-26](08-decisions.md)）。
 14. **更新安装器按需提权**：各平台 updater 先以当前用户权限更新，仅当安装目标确实不可写时调用平台原生管理员认证。Windows updater 固定使用可交互的 `passive` 模式；NSIS hook 在最终 `$INSTDIR` 做临时文件创建/删除探测，可写则原权限继续，不可写才以 `runas` 重启同一个已验签安装器，并把原参数与最终 `/D=$INSTDIR` 传给提升后的进程。内部重入标记必须阻止无限提权循环；UAC 取消或提升后仍不可写时不得覆盖旧版本。NSIS 完成后使用 Tauri 的 `RunAsUser` 以普通用户重启 Typex，不得把应用进程永久提升。macOS 由 updater 在普通替换返回 `PermissionDenied` 后请求管理员认证；Linux 平台落地时沿用同一最小权限原则（[ADR-28](08-decisions.md)）。
 
-### 7.3 快捷键（push-to-talk 细节）
+### 7.3 快捷键（触发语义与平台细节）
 
 - 不用 `tauri-plugin-global-shortcut` 作为主路径（无法监听单个修饰键；X11 release 有 bug）。macOS 用启用 `unstable_grab` 的 **rdev grab event tap**，X11 暂用 rdev listen-only 独立线程，Windows 用 `WH_KEYBOARD_LL` + 消息循环；三者都把归一化事件送入同一个纯判定器维护 down/up 状态——默认键位为全修饰键三角方案（见 [05 §7.1](05-ux-spec.md)），必须支持单修饰键触发。
 - **稳定 `KeyId` 契约**：持久化名称以物理 `KeyboardEvent.code` 为主，至少包括 `Enter`、`Digit0..9`、`ArrowLeft/Right/Up/Down`、`AltLeft/AltRight`、`MetaLeft/MetaRight`、`Menu`、`F1..F19`、`KeyA..Z`、`Semicolon`/`Period`/`Backquote`/`BracketLeft`/`BracketRight`/`Backslash` 与 `Numpad*`。`Menu` 是对浏览器 `ContextMenu` 的稳定例外。前端 code、rdev `Key` 与 Win32 VK/scan 必须在各自 adapter 显式映射，禁止把 crate `Debug` 文本当持久化协议。`Return`→`Enter`、`Num1`→`Digit1`、`LeftArrow`→`ArrowLeft`、`AltGr`→`AltRight`、`Alt`→`AltLeft`、`ContextMenu`→`Menu`、`SemiColon`→`Semicolon`、`Dot`→`Period`、`Kp*`→`Numpad*` 等旧名仅作读取/迁移别名。
 - 字母、数字行与标点是**物理位置语义**：浏览器读取 `KeyboardEvent.code`；左右修饰键额外用标准 `KeyboardEvent.location` 校正侧别，以兼容 Windows WebView2 将物理右 Shift 的 `code` 误报为 `ShiftLeft` 的情况。同一物理修饰键的 keydown / keyup 若被误报成不同侧，录制器按 `Shift` / `Control` / `Alt` / `Meta` 家族配对，并在任一事件能确认右侧时保存右侧 `KeyId`；只有录制期间已观察到 `Unidentified` / `Process` keydown 时，后续可识别但无法配对的 keyup 才用于恢复缺失键，其他孤立 keyup 忽略。keyup 的 `ctrlKey` / `shiftKey` / `altKey` / `metaKey` 仍为真时继续监听，防止先释放已识别键后过早提交；等待最终 keyup 超过 2 秒或窗口失焦则静默取消且不修改绑定。`location` 只修正这四类修饰键的左右侧，不参与普通键映射。Windows 普通键优先按低级 hook 的 set-1 scan code 解码（VK 只作 scan 缺失时的后备），rdev 使用其物理 `Key` variant。不得用 `KeyboardEvent.key`、当前布局产生的字符或输入法结果作为绑定 ID。
 - 听写、助手与翻译的 `Vec<KeyId>` 各表示一个独立完整 chord；判定器把三组所有按键纳入 global physical-held 集合，只有某 chord 全部 held 才发 `TriggerDown`。独立翻译 chord 可直接启动翻译；若随后完成的 chord 严格包含当前 chord，判定器发 `ModeUpgraded(target_mode)` 让较长 chord 接管并保留音频。没有包含关系且长度不更长的额外完整 chord 不改变本次手势最先启动的模式。partial chord 从未启动时，全释放不得误发 `TriggerUp`；手势已启动后仍等本次 tracked 触发键全部释放才发一次 `TriggerUp`。
 - 三组 chord 必须非空；听写与助手不得相同或互为子集，翻译不得与听写或助手完全相同，但允许双方存在严格子集关系。前端在 IPC 前阻止，`SettingsService::update` 再以 `InvalidRequest` 拒绝；启动读取到历史非法值时只恢复 `HotkeySettings::default()` 并写无键值 warning，其他设置不得丢失。
-- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，同时立即发出带唯一 token 的内部 `CaptureCandidateStarted`；AudioService 异步开流并只在内存积累样本。窗口内普通键/AltGr 发匹配取消，双触发键或超时确认让 `TriggerDown` 携带同 token 并提升现有流。暂停、配置更新、hook 失败/终止与退出也必须取消未决 token；原始 down 时间戳必须保留用于 350 ms 长短按判定。
+- **组合键让路规则（核心）**：触发键按住期间收到任何**普通键** down 事件 → 判定用户在使用系统组合键（`⌘C`、`Ctrl+C`、`AltGr+E` 等），立即静默让路、不产生任何输出、按键完全放行。Windows adapter 对默认右 Ctrl / 右 Alt 的 `TriggerDown` 语义最多暂存 75 ms，同时立即发出带唯一 token 的内部 `CaptureCandidateStarted`；AudioService 异步开流并只在内存积累样本。窗口内普通键/AltGr 发匹配取消，双触发键或超时确认让 `TriggerDown` 携带同 token 并提升现有流。暂停、配置更新、hook 失败/终止与退出也必须取消未决 token。
 - **漏 release 自恢复**：rdev/CGEventTap 偶发漏掉触发键 release 时，`HotkeyDetector` 会残留 held 状态。修饰键正常不会自动连发，因此同一触发键在 250 ms 抖动窗口后再次 down 视为上一轮 release 丢失：旧 held 状态重置，必要时向状态机发 `Yielded` 取消卡住的录音，再发新的 `TriggerDown`，保证下一次按键恢复响应。
 - **配置热更新边界**：settings 桥接只广播归一化后确实变化的三组 chord 或 `esc_cancels`，判定器和 Windows adapter 仍须对相同配置幂等；只切换 `esc_cancels` 不得结束或重置当前 chord。任一 chord 改绑时若旧 chord 已触发，backend 必须先发送一次配对 `TriggerUp` 再替换配置；旧物理键随后到达的 release 只用于清理，不得再次结束会话。partial chord 从未触发则直接清空且不产生语义事件；Windows 75 ms 内尚未确认的候选必须发送匹配 token 的取消事件，禁止把未确认手势提交给会话状态机。已确认的 Windows 右 Alt 手势在改绑后保留一次性 release tombstone，只吞对应的下一次物理 RAlt keyup；未确认候选、AltGr、让路和未配置路径不得设置该 tombstone。
 - **Esc 会话门闩**：orchestrator 用线程安全门闩发布当前可取消 `session_id`。Recording、Transcribing、Processing、Failed 直接可认领；Injecting 绑定该会话现有 `InjectionLatch`，Esc 取消与首个 OS 输入提交竞争同一原子状态。认领成功只生成一次 `EscPressed { session_id }`，执行器必须校验该 ID 仍是活动会话；Idle、设置关闭、过期 ID 或注入已提交均认领失败。平台 adapter 只对成功认领的物理 Esc 序列吞 down、重复与配对 up，后续新 Esc 和其他键鼠事件完整放行。
@@ -300,7 +300,7 @@ pub enum SessionPhase {
 - Windows 事件解码必须区分 `VK_RCONTROL`、`VK_RMENU`、扩展键与 `LLKHF_INJECTED`；Typex 自己的 SendInput 事件不得反向触发会话。右 Ctrl / Ctrl+C、物理右 Alt / 普通键和 AltGr 常见的伪 `Left Ctrl` + `Right Alt` 序列必须经过同一 75 ms 副作用确认边界；只有已确认的右 Alt 助手/翻译手势可以吞对应 keyup。
 - Windows hook 的 health watch 是运行期安全信号而不只是诊断查询：从 Healthy 进入 `Failed` 或意外 `Stopped` 时，runner 必须只发送一次会话 `Cancel` 并刷新托盘为「快捷键不可用」，防止漏掉 TriggerUp 后持续占用麦克风。callback panic 或事件通道关闭进入 `Failed` 时，hook state 必须原子禁止后续 raw event、退出消息循环并卸钩，且该 `Failed` 不得在 `WM_QUIT` 收尾时被覆盖为 `Stopped`。启动失败走同一个可订阅 health 状态；应用主动退出使用独立的正常 `Shutdown` 终态，不取消、不报错。
 - rdev backend 必须观察暂停 watch 的版本变化而不只读取最终布尔值；任一暂停/恢复 transition 都先清空 detector held 状态，暂停期间到达的 release 不得在恢复后留下 stale gesture。
-- 长按/短按判定：press 后 350 ms 内 release = toggle（三种模式一致，含助手）；超过 = push-to-talk（release 即停止）。**乐观启动**：非 Windows 默认修饰键在触发键按下即开始录音；Windows 默认右侧修饰键在 75 ms 内确认，但麦克风候选流从原始 keydown 即开始，确认时原位提升且不重开设备。普通组合键路径取消候选并保持完全静默。
+- **显式触发语义**：`HotkeyTriggerMode` 在会话开始时快照。`hold` 的首个配对 `TriggerUp` 停止录音；`toggle` 忽略 release，并在下一次 `TriggerDown` 立即停止（三种功能模式一致，助手不再等待第二次 release）。状态机不读取 `held_ms` 推断用户意图。**乐观启动**：非 Windows 默认修饰键在触发键按下即开始录音；Windows 默认右侧修饰键在 75 ms 内确认，但麦克风候选流从原始 keydown 即开始，确认时原位提升且不重开设备。普通组合键路径取消候选并保持完全静默。
 - Wayland：探测 `XDG_SESSION_TYPE`；优先 `ashpd` 走 `org.freedesktop.portal.GlobalShortcuts`（KDE/GNOME≥48/Hyprland 支持，Activated/Deactivated 信号天然支持按住；注意 Portal 快捷键由 compositor 分配，未必能绑到「单独的右⌥」，此时默认键退化为 compositor 允许的组合键）；不可用时提示 evdev 方案（用户加入 `input` 组）或 compositor 绑定 `typex toggle` CLI 命令（经 single-instance 转发）。
 
 ### 7.4 录音

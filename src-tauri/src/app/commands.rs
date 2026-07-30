@@ -109,7 +109,10 @@ fn profile_kind_matches_capability(profile: &ProviderProfile) -> bool {
     match profile.capability {
         ProviderCapability::Stt => matches!(
             profile.kind,
-            ProviderKind::OpenaiCompat | ProviderKind::Volcengine | ProviderKind::Local
+            ProviderKind::OpenaiCompat
+                | ProviderKind::Mimo
+                | ProviderKind::Volcengine
+                | ProviderKind::Local
         ),
         ProviderCapability::Llm => matches!(
             profile.kind,
@@ -1075,6 +1078,10 @@ mod tests {
         assert!(profile_kind_matches_capability(&profile(
             ProviderCapability::Stt,
             ProviderKind::OpenaiCompat,
+        )));
+        assert!(profile_kind_matches_capability(&profile(
+            ProviderCapability::Stt,
+            ProviderKind::Mimo,
         )));
         assert!(profile_kind_matches_capability(&profile(
             ProviderCapability::Llm,

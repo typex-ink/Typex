@@ -42,7 +42,7 @@ function makeSettings(): Settings {
       dictation: ["ControlRight"],
       assistant: ["ShiftRight"],
       translation: ["ControlRight", "ShiftRight"],
-      hold_threshold_ms: 350,
+      trigger_mode: "hold",
     },
   } as Settings;
 }

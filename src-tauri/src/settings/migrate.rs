@@ -30,6 +30,9 @@ pub fn migrate(mut value: Value) -> Value {
     if version < 10 {
         migrate_v9_to_v10(&mut value);
     }
+    if version < 11 {
+        migrate_v10_to_v11(&mut value);
+    }
     normalize_hotkey_ids(&mut value, version < 8);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
@@ -39,6 +42,21 @@ pub fn migrate(mut value: Value) -> Value {
         );
     }
     value
+}
+
+fn migrate_v10_to_v11(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let hotkeys = root
+        .entry("hotkeys")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(hotkeys) = hotkeys.as_object_mut() {
+        hotkeys.remove("hold_threshold_ms");
+        hotkeys
+            .entry("trigger_mode")
+            .or_insert_with(|| Value::String("hold".into()));
+    }
 }
 
 fn migrate_v9_to_v10(value: &mut Value) {
@@ -223,7 +241,7 @@ fn migrate_v1_to_v2(value: &mut Value) {
                 }
             })
             .unwrap_or_else(|| match obj.get("kind").and_then(Value::as_str) {
-                Some("openai_compat" | "volcengine") => "stt",
+                Some("openai_compat" | "mimo" | "volcengine") => "stt",
                 _ => "llm",
             });
         obj.insert("capability".into(), Value::String(capability.into()));
@@ -522,6 +540,23 @@ mod tests {
         );
         assert_eq!(migrated["profiles"][1]["timeout_ms"], 45_000);
         assert!(migrated["profiles"][2].get("timeout_ms").is_none());
+    }
+
+    #[test]
+    fn v10_hotkey_threshold_becomes_explicit_hold_mode() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 10,
+            "hotkeys": {
+                "dictation": ["ControlRight"],
+                "assistant": ["AltRight"],
+                "translation": ["ControlRight", "AltRight"],
+                "hold_threshold_ms": 999
+            }
+        }));
+
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
+        assert_eq!(migrated["hotkeys"]["trigger_mode"], "hold");
+        assert!(migrated["hotkeys"].get("hold_threshold_ms").is_none());
     }
 
     #[test]
