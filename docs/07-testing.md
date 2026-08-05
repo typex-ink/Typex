@@ -78,8 +78,9 @@
 对 `openai_compat` / `mimo` / `volcengine` / `chat_completions` / `responses` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
 
 - 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、OpenAI multipart 字段完整性、MiMo JSON 中完整 WAV data URL 与语言参数、自定义 extra_headers/extra_form 透传。
-- 响应：正常 JSON；MiMo `choices[0].message.content` 缺失/类型错误；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射。
+- 响应：正常 JSON；MiMo `choices[0].message.content` 缺失/类型错误且长响应体不被截断；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Chat Completions 的 `event: error` / `data.error`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射；HTTP、业务状态与 SSE 错误同时保留简短摘要和包含未知嵌套字段 / request ID 的完整响应详情。
 - 错误与重试：401 → `auth_error` 且**不重试**；429/503 → 退避重试 2 次后放弃；请求体在重试间不被消耗（multipart body 可重放）。
+- 日志：用带唯一哨兵的上游响应触发重试日志，断言只出现错误分类、状态和长度等元数据，哨兵、摘要与响应体均不出现。
 - 慢响应：STT / LLM profile 的单一 `timeout_ms` 对连接测试及所有使用该档案的功能统一生效；本地/远端调用延迟 > timeout → `timeout` 分类，LLM 持续输出 delta 也不得重置总时限。该契约由 Provider 包装层测试，不由 HTTP adapter 的 reqwest 超时模拟代替。
 - 本地 STT 阻塞隔离：Whisper / SenseVoice / Qwen3-ASR 的原生推理不占用 Tokio worker；超时后原生任务尚未返回时，重试只异步等待同一在途许可，不会启动第二个原生任务或阻塞运行时。
 
@@ -125,7 +126,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 | 首次启动引导 | 第 4 步可分别录制听写/助手/翻译快捷键；修改任一项只持久化该完整 chord 并同步练习提示；空值、听写/助手互含或翻译与另两项完全相同时阻止保存并显示校验提示，翻译与另两项存在严格子集关系时允许保存 |
 | 首次启动完成 | `onboarding_done` 与自启选择必须先保存，再调用 `complete_onboarding`；提交中不可重复触发；主页切换失败时保留引导页并显示可重试错误 |
 | 模型管理 | `hardware_ok=false && downloadable=true` 时显示低于建议但下载按钮可用并调用下载；`downloadable=false` 时仍禁用 |
-| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误） |
+| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误）；编辑页和卡片浮层完整展示格式化 JSON / 原样文本详情，并在下一次测试或成功后清除旧详情 |
 | 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；`done` 固化完整回答；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**）；生成中 Esc/关闭/失焦发送取消并隐藏，完成后关闭不取消；各状态面板保持不透明 |
 | 主页历史 | 助手记录展开标签为「语音指令 / 助手结果」，复制完整 `result`；统计数据不因助手回答字数改变 |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |

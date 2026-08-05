@@ -4,7 +4,9 @@ use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
 use crate::settings::SettingsService;
 use crate::settings::schema::{Settings, SlotConfig};
-use crate::types::{AudioInputDevice, ProviderCapability, ProviderKind, ProviderProfile, SlotKind};
+use crate::types::{
+    AudioInputDevice, ProfileTestError, ProviderCapability, ProviderKind, ProviderProfile, SlotKind,
+};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Manager, State};
@@ -447,7 +449,7 @@ pub async fn test_profile(
     settings: SettingsState<'_>,
     registry: RegistryState<'_>,
     profile_id: String,
-) -> Result<u32, TypexError> {
+) -> Result<u32, ProfileTestError> {
     let profiles = settings.get().profiles;
     let profile = profiles
         .iter()
@@ -470,7 +472,7 @@ pub async fn test_profile(
             crate::providers::stt::SttOptions::default(),
         )
         .await
-        .map_err(TypexError::from)?;
+        .map_err(ProfileTestError::from)?;
     } else {
         let llm = registry.build_llm(profile)?;
         crate::providers::llm::collect_text(
@@ -486,7 +488,7 @@ pub async fn test_profile(
             },
         )
         .await
-        .map_err(TypexError::from)?;
+        .map_err(ProfileTestError::from)?;
     }
     Ok(start.elapsed().as_millis() as u32)
 }

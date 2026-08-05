@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Button from "@/components/Button.vue";
 import { commands, type ProviderProfile } from "@/ipc/bindings";
+import { formatProfileTestError } from "@/shared/provider-error";
 
 const { t, te } = useI18n();
 
@@ -27,6 +28,7 @@ const emit = defineEmits<{
 
 const testing = ref(false);
 const testResult = ref<string | null>(null);
+const testDetails = ref<string | null>(null);
 const testError = ref(false);
 const switchOpen = ref(false);
 const testTooltipId = `provider-test-${Math.random().toString(36).slice(2)}`;
@@ -36,19 +38,25 @@ const configureText = computed(() =>
     ? `${t("components.provider_card.configure_select")} ${switchOpen.value ? "▴" : "▾"}`
     : t("components.provider_card.configure"),
 );
+const testTooltipText = computed(() =>
+  [testResult.value, testDetails.value].filter((part): part is string => !!part).join("\n\n"),
+);
 
 async function runTest() {
   if (!props.profile) return;
   testing.value = true;
   testResult.value = null;
+  testDetails.value = null;
   const r = await commands.testProfile(props.profile.id);
   testing.value = false;
   if (r.status === "ok") {
     testResult.value = `✓ ${r.data}ms`;
+    testDetails.value = null;
     testError.value = false;
   } else {
-    const upstream = r.error.message?.trim();
-    testResult.value = `${errText(r.error.code)}${upstream ? `：${upstream}` : ""}`;
+    const display = formatProfileTestError(r.error);
+    testResult.value = `${errText(r.error.code)}${display.message ? `：${display.message}` : ""}`;
+    testDetails.value = display.details;
     testError.value = true;
   }
 }
@@ -91,7 +99,7 @@ function configureEmpty() {
           :variant="testError ? 'danger' : 'secondary'"
           size="sm"
           :disabled="testing"
-          :title="testError && testResult ? testResult : undefined"
+          :title="testError && testResult ? testTooltipText : undefined"
           :aria-describedby="testError && testResult ? testTooltipId : undefined"
           @click="runTest"
         >
@@ -109,7 +117,8 @@ function configureEmpty() {
           class="test-tip"
           role="tooltip"
         >
-          {{ testResult }}
+          <span class="test-tip-summary">{{ testResult }}</span>
+          <code v-if="testDetails" class="test-tip-details" tabindex="0">{{ testDetails }}</code>
         </span>
       </span>
       <Button size="sm" @click="emit('edit')">{{ t("actions.edit") }}</Button>
@@ -241,10 +250,25 @@ function configureEmpty() {
   transition: opacity 0.12s ease-out, transform 0.12s ease-out;
   z-index: 20;
 }
+.test-tip-summary,
+.test-tip-details {
+  display: block;
+}
+.test-tip-details {
+  max-height: min(240px, 40vh);
+  margin-top: 6px;
+  padding-top: 6px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font: inherit;
+  user-select: text;
+}
 .test-wrap:hover .test-tip,
 .test-wrap:focus-within .test-tip {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 @media (prefers-reduced-motion: reduce) {
   .test-tip {

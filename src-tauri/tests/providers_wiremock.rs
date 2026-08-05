@@ -6,6 +6,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
+use typex_lib::error::ErrorCode;
 use typex_lib::orchestrator::assistant::{AssistantOutcome, AssistantService};
 use typex_lib::orchestrator::pipeline::{self, ProcessOutcome};
 use typex_lib::providers::ProviderError;
@@ -18,7 +19,9 @@ use typex_lib::providers::stt::{
 };
 use typex_lib::settings::SettingsService;
 use typex_lib::settings::schema::{ProxyMode, Settings, SlotConfig};
-use typex_lib::types::{ProviderCapability, ProviderKind, ProviderProfile, SessionMode, SlotKind};
+use typex_lib::types::{
+    ProfileTestError, ProviderCapability, ProviderKind, ProviderProfile, SessionMode, SlotKind,
+};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -148,7 +151,8 @@ async fn stt_401_is_auth_error_and_not_retried() {
         .transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, ProviderError::Auth(_)));
+    let error: ProfileTestError = err.into();
+    assert_eq!(error.code, ErrorCode::AuthError);
 }
 
 #[tokio::test]
@@ -164,7 +168,8 @@ async fn stt_503_retried_twice_then_gives_up() {
         .transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, ProviderError::Server { status: 503, .. }));
+    let error: ProfileTestError = err.into();
+    assert_eq!(error.code, ErrorCode::ServerError);
 }
 
 #[tokio::test]
@@ -325,11 +330,35 @@ async fn mimo_malformed_or_incomplete_responses_are_readable_errors() {
             .transcribe(wav_stub(), SttOptions::default())
             .await
             .unwrap_err();
+        let error: ProfileTestError = err.into();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
         assert!(
-            matches!(err, ProviderError::InvalidRequest(ref message) if message.contains(expected) && message.contains(body)),
-            "body={body:?}, error={err:?}"
+            error.message.contains(expected),
+            "body={body:?}, error={error:?}"
         );
+        assert_eq!(error.details.as_deref(), Some(body));
     }
+}
+
+#[tokio::test]
+async fn mimo_incomplete_response_keeps_body_beyond_old_limit() {
+    let padding = "x".repeat(3_000);
+    let body = format!(r#"{{"unexpected":"{padding}"}}"#);
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body.clone()))
+        .mount(&server)
+        .await;
+
+    let stt = MimoStt::new(client(), server.uri(), "k", "m");
+    let error: ProfileTestError = stt
+        .transcribe(wav_stub(), SttOptions::default())
+        .await
+        .unwrap_err()
+        .into();
+
+    assert_eq!(error.message, "MiMo 响应 choices 缺失");
+    assert_eq!(error.details.as_deref(), Some(body.as_str()));
 }
 
 #[tokio::test]
@@ -346,12 +375,17 @@ async fn mimo_http_error_classification_and_retry_match_shared_policy() {
             .transcribe(wav_stub(), SttOptions::default())
             .await
             .unwrap_err();
+        let error: ProfileTestError = err.into();
         match status {
-            401 => assert!(matches!(err, ProviderError::Auth(_))),
-            429 => assert!(matches!(err, ProviderError::RateLimited(_))),
-            500 => assert!(matches!(err, ProviderError::Server { status: 500, .. })),
+            401 => assert_eq!(error.code, ErrorCode::AuthError),
+            429 => assert_eq!(error.code, ErrorCode::RateLimited),
+            500 => assert_eq!(error.code, ErrorCode::ServerError),
             _ => unreachable!(),
         }
+        assert_eq!(
+            error.details.as_deref(),
+            Some(format!("status-{status}").as_str())
+        );
     }
 }
 
@@ -723,7 +757,66 @@ async fn chat_completions_error_status_maps() {
     let llm = ChatCompletionsLlm::new(client(), server.uri(), "k", "m");
     let mut stream = llm.complete(llm_req());
     let first = stream.next().await.unwrap();
-    assert!(matches!(first.unwrap_err(), ProviderError::RateLimited(_)));
+    let error: ProfileTestError = first.unwrap_err().into();
+    assert_eq!(error.code, ErrorCode::RateLimited);
+}
+
+#[tokio::test]
+async fn chat_completions_sse_error_keeps_complete_profile_test_details() {
+    let server = MockServer::start().await;
+    let response = serde_json::json!({
+        "error": {
+            "message": "stream failed",
+            "type": "upstream_error",
+            "details": { "reason": "capacity" },
+            "request_id": "req-sse-chat-123"
+        }
+    });
+    let body = format!("data: {response}\n\ndata: [DONE]\n\n");
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .mount(&server)
+        .await;
+
+    let llm = ChatCompletionsLlm::new(client(), server.uri(), "k", "m");
+    let mut stream = llm.complete(llm_req());
+    let error: ProfileTestError = stream.next().await.unwrap().unwrap_err().into();
+
+    assert_eq!(error.code, ErrorCode::ServerError);
+    assert_eq!(error.message, "stream failed");
+    let details: serde_json::Value =
+        serde_json::from_str(error.details.as_deref().unwrap()).unwrap();
+    assert_eq!(details, response);
+}
+
+#[tokio::test]
+async fn chat_completions_error_keeps_complete_profile_test_details() {
+    let server = MockServer::start().await;
+    let response = serde_json::json!({
+        "error": {
+            "message": "Upstream request failed",
+            "type": "upstream_error",
+            "details": { "error": { "message": "model not found" } },
+            "request_id": "req-http-123"
+        }
+    });
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(response.clone()))
+        .mount(&server)
+        .await;
+
+    let llm = ChatCompletionsLlm::new(client(), server.uri(), "k", "m");
+    let mut stream = llm.complete(llm_req());
+    let error: ProfileTestError = stream.next().await.unwrap().unwrap_err().into();
+
+    assert_eq!(error.message, "Upstream request failed");
+    let details: serde_json::Value =
+        serde_json::from_str(error.details.as_deref().unwrap()).unwrap();
+    assert_eq!(details, response);
 }
 
 // ── responses LLM ──
@@ -785,7 +878,7 @@ async fn responses_sends_reasoning_effort_when_configured() {
 async fn responses_failed_event_maps_to_error() {
     let server = MockServer::start().await;
     let body = "event: response.output_text.delta\ndata: {\"delta\":\"部分\"}\n\n\
-                event: response.failed\ndata: {\"response\":{\"error\":{\"message\":\"overloaded\"}}}\n\n";
+                event: response.failed\ndata: {\"response\":{\"error\":{\"message\":\"overloaded\",\"type\":\"server_error\",\"details\":{\"reason\":\"capacity\"},\"request_id\":\"req-sse-123\"}}}\n\n";
     Mock::given(method("POST"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -806,7 +899,16 @@ async fn responses_failed_event_maps_to_error() {
                 got_delta = true;
             }
             Err(e) => {
-                assert!(matches!(e, ProviderError::Server { .. }));
+                let error: ProfileTestError = e.into();
+                assert_eq!(error.message, "overloaded");
+                let details: serde_json::Value =
+                    serde_json::from_str(error.details.as_deref().unwrap()).unwrap();
+                assert_eq!(details["response"]["error"]["type"], "server_error");
+                assert_eq!(
+                    details["response"]["error"]["details"]["reason"],
+                    "capacity"
+                );
+                assert_eq!(details["response"]["error"]["request_id"], "req-sse-123");
                 got_err = true;
                 break;
             }
@@ -884,7 +986,9 @@ async fn volc_error_status_header_maps_auth_not_retried() {
         .transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, ProviderError::Auth(_)), "{err:?}");
+    let error: ProfileTestError = err.into();
+    assert_eq!(error.code, ErrorCode::AuthError);
+    assert_eq!(error.details.as_deref(), Some("invalid access token"));
 }
 
 #[tokio::test]
@@ -905,7 +1009,9 @@ async fn volc_server_status_retried() {
         .transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, ProviderError::Server { .. }), "{err:?}");
+    let error: ProfileTestError = err.into();
+    assert_eq!(error.code, ErrorCode::ServerError);
+    assert_eq!(error.details.as_deref(), Some("internal"));
 }
 
 #[tokio::test]
@@ -921,7 +1027,9 @@ async fn volc_missing_status_header_falls_back_to_http_status() {
         .transcribe(wav_stub(), SttOptions::default())
         .await
         .unwrap_err();
-    assert!(matches!(err, ProviderError::Auth(_)), "{err:?}");
+    let error: ProfileTestError = err.into();
+    assert_eq!(error.code, ErrorCode::AuthError);
+    assert_eq!(error.details.as_deref(), Some("unauthorized"));
 }
 
 #[tokio::test]

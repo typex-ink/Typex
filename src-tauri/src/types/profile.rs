@@ -1,5 +1,6 @@
 //! Provider 配置档案类型（03 §6 配置 schema 的 Rust 形态）。
 
+use crate::error::{ErrorCode, TypexError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -104,6 +105,24 @@ pub struct ProviderProfile {
     /// 槽位/adapter 相关自由选项（language、temperature、resource_id…）
     #[serde(default)]
     pub options: HashMap<String, serde_json::Value>,
+}
+
+/// 「测试连接」专用错误：保留分类摘要与可选的完整 Provider 响应详情。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProfileTestError {
+    pub code: ErrorCode,
+    pub message: String,
+    pub details: Option<String>,
+}
+
+impl From<TypexError> for ProfileTestError {
+    fn from(error: TypexError) -> Self {
+        Self {
+            code: error.code,
+            message: error.message,
+            details: None,
+        }
+    }
 }
 
 fn default_timeout_ms() -> u64 {

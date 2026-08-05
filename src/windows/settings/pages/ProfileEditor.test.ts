@@ -13,13 +13,14 @@ const mockSetProfileSecret = vi.hoisted(() =>
 const mockActivateProfile = vi.hoisted(() =>
   vi.fn(async () => ({ status: "ok" as const, data: null })),
 );
+const mockTestProfile = vi.hoisted(() => vi.fn());
 
 vi.mock("@/ipc/bindings", () => ({
   commands: {
     upsertProfile: mockUpsertProfile,
     setProfileSecret: mockSetProfileSecret,
     activateProfile: mockActivateProfile,
-    testProfile: vi.fn(async () => ({ status: "ok", data: 10 })),
+    testProfile: mockTestProfile,
     deleteProfile: vi.fn(async () => ({ status: "ok" })),
     listLocalModels: vi.fn(async () => ({ status: "ok", data: [] })),
     downloadLocalModel: vi.fn(async () => ({ status: "ok" })),
@@ -109,6 +110,7 @@ describe("ProfileEditor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSetProfileSecret.mockResolvedValue({ status: "ok", data: null });
+    mockTestProfile.mockResolvedValue({ status: "ok", data: 10 });
   });
 
   afterEach(() => {
@@ -304,6 +306,42 @@ describe("ProfileEditor", () => {
     expect(mockSetProfileSecret).toHaveBeenCalledWith("llm-responses", "api_key", "sk-new");
     expect(wrapper.text()).toContain("写入设置失败");
     expect(wrapper.emitted("saved")).toBeUndefined();
+  });
+
+  it("测试连接失败时格式化完整响应详情，成功后清除旧详情", async () => {
+    const details = JSON.stringify({
+      error: {
+        message: "Upstream request failed",
+        type: "upstream_error",
+        details: { error: { message: "model not found" } },
+        request_id: "req-123",
+      },
+    });
+    mockTestProfile
+      .mockResolvedValueOnce({
+        status: "error",
+        error: { code: "invalid_request", message: "Upstream request failed", details },
+      })
+      .mockResolvedValueOnce({ status: "ok", data: 18 });
+    const wrapper = mount(ProfileEditor, {
+      props: { capability: "llm", profile: llmProfile("responses") },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+    const test = wrapper.findAll("button").find((button) => button.text().includes("测试连接"))!;
+
+    await test.trigger("click");
+    await flushPromises();
+    expect(wrapper.get(".test-result").text()).toContain("Upstream request failed");
+    expect(wrapper.get(".test-details").text()).toBe(
+      JSON.stringify(JSON.parse(details), null, 2),
+    );
+    expect(wrapper.get(".test-details").text()).toContain("model not found");
+    expect(wrapper.get(".test-details").text()).toContain("req-123");
+
+    await test.trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".test-details").exists()).toBe(false);
+    expect(wrapper.get(".test-result").text()).toContain("18ms");
   });
 
   it("旧 keyring 引用不算已保存密钥", async () => {

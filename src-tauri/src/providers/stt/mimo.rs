@@ -6,8 +6,6 @@ use super::{
 use crate::providers::{ProviderError, http};
 use base64::Engine;
 
-const RESPONSE_BODY_LIMIT_CHARS: usize = 2_048;
-
 pub struct MimoStt {
     client: reqwest::Client,
     base_url: String,
@@ -100,17 +98,7 @@ struct MimoResponseMessage {
 }
 
 fn response_error(reason: &str, body: &str) -> ProviderError {
-    ProviderError::InvalidRequest(format!("MiMo {reason}; body: {}", truncated_body(body)))
-}
-
-fn truncated_body(body: &str) -> String {
-    let mut chars = body.chars();
-    let truncated: String = chars.by_ref().take(RESPONSE_BODY_LIMIT_CHARS).collect();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
-    }
+    ProviderError::invalid_response(format!("MiMo {reason}"), body.to_string())
 }
 
 fn parse_response(body: &str) -> Result<Transcript, ProviderError> {

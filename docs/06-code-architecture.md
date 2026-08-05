@@ -229,6 +229,8 @@ pub enum SessionPhase {
 
 - 底层各 service 用 `thiserror` 定义局部错误；顶层统一收敛为 `TypexError`，其中带 `ErrorCode`（`auth_error` / `network_error` / `timeout` / `rate_limited` / `server_error` / `no_speech` / `no_focus` / `permission_missing` / …）。
 - `ErrorCode` 即 [05 §9 错误文案表](05-ux-spec.md) 的键：Rust 只发 code + 参数，**文案在前端 i18n 里**（中英双语一处维护）。
+- Provider 错误模块在同一 interface 内区分内部错误消息与上游响应：上游错误独立保存分类、可选 HTTP 状态、简短摘要和未截断响应体；上游错误的 `Display` 与所有 Provider 日志语句只包含分类、状态和长度等非敏感元数据，不得包含上游摘要或响应体。内部错误可保留本地诊断消息，但不得把它当作 `details`。各 adapter 不得把解析说明、业务状态前缀和响应 body 拼成一个字符串。
+- `test_profile` 是诊断型 IPC，错误 interface 使用 `ProfileTestError { code, message, details }`：`message` 是简短摘要，`details` 只在存在独立 Provider 响应体时携带完整文本。其他 command/event 继续使用 `TypexError`，不得把完整响应详情扩散到 HUD、助手窗或日志。
 - 重试策略集中在 `providers/http.rs`（对 `rate_limited/server_error/network` 指数退避 ×2），orchestrator 不重复实现。
 
 ### 5.5 日志

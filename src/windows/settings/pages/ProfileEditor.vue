@@ -9,10 +9,12 @@ import SecretInput from "@/components/SecretInput.vue";
 import Select from "@/components/Select.vue";
 import { presetsForCapability } from "@/shared/presets";
 import { formatBytes } from "@/shared/format";
+import { formatProfileTestError } from "@/shared/provider-error";
 import {
   commands,
   events,
   type LocalModelInfo,
+  type ProfileTestError,
   type ProviderCapability,
   type ProviderProfile,
   type SlotKind,
@@ -74,6 +76,7 @@ const apiKey = ref("");
 const appKey = ref("");
 const accessToken = ref("");
 const testResult = ref<string | null>(null);
+const testDetails = ref<string | null>(null);
 const testOk = ref(false);
 const saving = ref(false);
 
@@ -162,17 +165,29 @@ async function downloadSelected() {
   await commands.downloadLocalModel(selectedLocal.value.id, null);
 }
 
-function profileErrorMessage(error: TypexError): string {
+function profileErrorMessage(error: Pick<TypexError, "code" | "message">): string {
   const key = ERROR_KEYS[error.code];
   const upstream = error.message?.trim();
   return `✗ ${key ? t(key) : error.code}${upstream ? `：${upstream}` : ""}`;
 }
 
+function showProfileError(error: TypexError) {
+  testResult.value = profileErrorMessage(error);
+  testDetails.value = null;
+  testOk.value = false;
+}
+
+function showProfileTestError(error: ProfileTestError) {
+  const display = formatProfileTestError(error);
+  testResult.value = profileErrorMessage({ ...error, message: display.message });
+  testDetails.value = display.details;
+  testOk.value = false;
+}
+
 async function saveSecret(id: string, field: string, value: string): Promise<boolean> {
   const result = await commands.setProfileSecret(id, field, value);
   if (result.status === "ok") return true;
-  testResult.value = profileErrorMessage(result.error);
-  testOk.value = false;
+  showProfileError(result.error);
   return false;
 }
 
@@ -243,8 +258,7 @@ async function save(): Promise<string | null> {
   };
   const r = await commands.upsertProfile(profile);
   if (r.status !== "ok") {
-    testResult.value = profileErrorMessage(r.error);
-    testOk.value = false;
+    showProfileError(r.error);
     saving.value = false;
     return null;
   }
@@ -272,8 +286,7 @@ async function save(): Promise<string | null> {
   if (isNew.value && props.assignTo) {
     const activated = await commands.activateProfile(props.assignTo, id);
     if (activated.status !== "ok") {
-      testResult.value = profileErrorMessage(activated.error);
-      testOk.value = false;
+      showProfileError(activated.error);
       saving.value = false;
       return null;
     }
@@ -289,6 +302,7 @@ async function saveAndBack() {
 
 async function testConnection() {
   testResult.value = t("settings.profile.testing");
+  testDetails.value = null;
   testOk.value = false;
   const id = await save();
   if (!id) {
@@ -302,8 +316,7 @@ async function testConnection() {
     testResult.value = t("settings.profile.test_pass", { ms: r.data });
     testOk.value = true;
   } else {
-    testResult.value = profileErrorMessage(r.error);
-    testOk.value = false;
+    showProfileTestError(r.error);
   }
 }
 
@@ -447,6 +460,7 @@ onUnmounted(() => unlistenProgress?.());
       <Button v-if="!isNew" variant="danger" @click="deleteProfile">{{ t("settings.profile.delete_profile") }}</Button>
     </div>
     <p v-if="testResult" class="test-result" :class="{ ok: testOk }">{{ testResult }}</p>
+    <pre v-if="testDetails" class="test-details" tabindex="0">{{ testDetails }}</pre>
   </div>
 </template>
 
@@ -507,6 +521,7 @@ onUnmounted(() => unlistenProgress?.());
 }
 .test-result {
   margin-top: 10px;
+  margin-bottom: 0;
   font-size: 12px;
   color: var(--error);
   overflow-wrap: anywhere;
@@ -514,5 +529,21 @@ onUnmounted(() => unlistenProgress?.());
 }
 .test-result.ok {
   color: var(--success);
+}
+.test-details {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-left: 2px solid var(--error);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+  white-space: pre-wrap;
 }
 </style>

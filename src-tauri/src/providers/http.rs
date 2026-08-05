@@ -37,7 +37,13 @@ where
         match op().await {
             Ok(v) => return Ok(v),
             Err(e) if e.retryable() && attempt < 2 => {
-                tracing::info!("provider 调用失败将重试（第 {} 次）: {e}", attempt + 1);
+                tracing::info!(
+                    attempt = attempt + 1,
+                    error_code = ?e.error_code(),
+                    http_status = ?e.http_status(),
+                    response_body_len = e.response_body_len(),
+                    "provider 调用失败将重试"
+                );
                 last_err = Some(e);
             }
             Err(e) => return Err(e),
@@ -49,7 +55,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for TestWriter {
+        fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(data);
+            Ok(data.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[tokio::test]
     async fn retries_retryable_twice_then_gives_up() {
@@ -84,7 +106,7 @@ mod tests {
                 if n == 0 {
                     Err(ProviderError::Server {
                         status: 503,
-                        body: String::new(),
+                        message: String::new(),
                     })
                 } else {
                     Ok(42)
@@ -94,5 +116,32 @@ mod tests {
         .await;
         assert_eq!(r.unwrap(), 42);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_log_excludes_upstream_response_content() {
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let writer = TestWriter(Arc::clone(&output));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let response = r#"{"error":{"message":"private-summary","sentinel":"private-body"}}"#;
+
+        let result: Result<(), _> = with_retry(|| {
+            let response = response.to_string();
+            async move { Err(ProviderError::from_status(503, response)) }
+        })
+        .await;
+
+        assert!(result.is_err());
+        let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+        assert!(logs.contains("ServerError"));
+        assert!(logs.contains("http_status=Some(503)"));
+        assert!(logs.contains("response_body_len="));
+        assert!(!logs.contains("private-summary"));
+        assert!(!logs.contains("private-body"));
     }
 }

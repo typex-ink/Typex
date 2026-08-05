@@ -97,15 +97,7 @@ fn parse_event(event_type: &str, data: &str) -> ResponsesEvent {
             }
         }
         "response.completed" => ResponsesEvent::Completed,
-        "response.failed" | "error" => {
-            let v: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
-            let msg = v["response"]["error"]["message"]
-                .as_str()
-                .or_else(|| v["message"].as_str())
-                .unwrap_or("响应失败")
-                .to_string();
-            ResponsesEvent::Failed(msg)
-        }
+        "response.failed" | "error" => ResponsesEvent::Failed(data.to_string()),
         _ => ResponsesEvent::Other,
     }
 }
@@ -138,8 +130,8 @@ impl LlmProvider for ResponsesLlm {
                 match parse_event(&event.event, &event.data) {
                     ResponsesEvent::Delta(text) => yield LlmDelta { text },
                     ResponsesEvent::Completed => break,
-                    ResponsesEvent::Failed(msg) => {
-                        Err(ProviderError::Server { status: 500, body: msg })?;
+                    ResponsesEvent::Failed(body) => {
+                        Err(ProviderError::from_stream_error(body))?;
                     }
                     ResponsesEvent::Other => {}
                 }
@@ -175,7 +167,9 @@ mod tests {
             "response.failed",
             r#"{"response":{"error":{"message":"boom"}}}"#,
         ) {
-            ResponsesEvent::Failed(m) => assert_eq!(m, "boom"),
+            ResponsesEvent::Failed(body) => {
+                assert_eq!(body, r#"{"response":{"error":{"message":"boom"}}}"#)
+            }
             _ => panic!("expected Failed"),
         }
     }

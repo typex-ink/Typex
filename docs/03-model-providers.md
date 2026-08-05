@@ -167,7 +167,7 @@ Authorization: Bearer {api_key}
   "stream": true, "temperature": 0.3 }
 ```
 
-SSE `data:` 行解析 `choices[0].delta.content`。覆盖 OpenAI、DeepSeek、Groq、SiliconFlow、OpenRouter、Ollama、火山方舟（豆包 LLM 也提供 OpenAI 兼容端点）等几乎全部生态。
+SSE `data:` 行解析 `choices[0].delta.content`。`event: error` 或 `data:` JSON 中出现非空 `error` 字段时必须立即返回 Provider 错误，不能静默忽略后把空流判为连接成功；错误事件的完整 `data` 文本按上游响应详情保留。覆盖 OpenAI、DeepSeek、Groq、SiliconFlow、OpenRouter、Ollama、火山方舟（豆包 LLM 也提供 OpenAI 兼容端点）等几乎全部生态。
 
 Qwen3 / 千问类模型可能默认输出 `<think>...</think>` 推理块，语音助手会表现为长时间“思考”且把内部推理显示到回答弹窗。Reasoning 模型还可能支持显式 effort 等级。Provider 层必须做三件事：
 
@@ -516,7 +516,7 @@ F-3 不引入新的 Provider 类型：
 - profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`。STT 覆盖从转写调用开始到完整文本返回，LLM 覆盖连接、请求发送、首 token 等待与完整流式响应接收；本地与远端实现使用相同语义。同一 profile 被多个功能或连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
 - **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
-- 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；展示延迟与分类后的错误。
+- 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；成功展示延迟，失败展示分类后的错误摘要与完整 Provider 响应详情。HTTP 错误、流式错误以及成功 HTTP 响应的协议解析错误都必须把短摘要与未截断响应体分开保存；远端 JSON 响应在前端格式化后展示，非 JSON 文本原样展示。响应详情不进入日志或持久化，正常听写 / 翻译 / 助手错误仍只携带简短摘要。
 
 ## 7. 各厂商兼容性速查（配置预设的依据）
 

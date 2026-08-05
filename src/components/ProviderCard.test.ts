@@ -34,11 +34,19 @@ describe("ProviderCard", () => {
   });
 
   it("测试失败时用按钮态承载错误，完整报错放入悬停浮层", async () => {
+    const details = JSON.stringify({
+      error: {
+        message: "Upstream request failed",
+        details: { error: { message: "model not found" } },
+        request_id: "req-123",
+      },
+    });
     mockTestProfile.mockResolvedValue({
       status: "error",
       error: {
         code: "auth_error",
         message: "Upstream request failed",
+        details,
       },
     });
     const wrapper = mount(ProviderCard, {
@@ -55,5 +63,32 @@ describe("ProviderCard", () => {
     expect(wrapper.find(".lat").exists()).toBe(false);
     expect(wrapper.find(".test-tip").text()).toContain("鉴权/访问被拒（401/403）");
     expect(wrapper.find(".test-tip").text()).toContain("Upstream request failed");
+    expect(wrapper.get(".test-tip-details").text()).toBe(
+      JSON.stringify(JSON.parse(details), null, 2),
+    );
+    expect(wrapper.get(".test-tip-details").attributes("tabindex")).toBe("0");
+  });
+
+  it("下一次测试成功后清除旧错误详情", async () => {
+    mockTestProfile
+      .mockResolvedValueOnce({
+        status: "error",
+        error: { code: "invalid_request", message: "failed", details: "failed" },
+      })
+      .mockResolvedValueOnce({ status: "ok", data: 42 });
+    const wrapper = mount(ProviderCard, {
+      props: { profile: profile() },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+    const testButton = wrapper.findAll("button").find((button) => button.text() === "测试")!;
+
+    await testButton.trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".test-tip-details").exists()).toBe(true);
+
+    await wrapper.findAll("button").find((button) => button.text() === "测试失败")!.trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".test-tip").exists()).toBe(false);
+    expect(wrapper.get(".lat").text()).toContain("42ms");
   });
 });

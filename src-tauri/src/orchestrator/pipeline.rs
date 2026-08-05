@@ -107,7 +107,12 @@ pub async fn prepare_transcript(
             degraded: true,
         },
         Err(e) => {
-            tracing::warn!("整理失败降级直通: {e}");
+            tracing::warn!(
+                error_code = ?e.error_code(),
+                http_status = ?e.http_status(),
+                response_body_len = e.response_body_len(),
+                "整理失败降级直通"
+            );
             PreparedTranscript {
                 text: transcript,
                 degraded: true,

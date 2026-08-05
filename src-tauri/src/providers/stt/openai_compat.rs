@@ -101,9 +101,15 @@ impl SttProvider for OpenAiCompatStt {
             if status >= 400 {
                 return Err(ProviderError::from_status(status, body));
             }
-            let parsed: TranscriptionResponse = serde_json::from_str(&body).map_err(|e| {
-                ProviderError::InvalidRequest(format!("响应解析失败: {e}; body: {body}"))
-            })?;
+            let parsed: TranscriptionResponse = match serde_json::from_str(&body) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    return Err(ProviderError::invalid_response(
+                        format!("响应解析失败: {error}"),
+                        body,
+                    ));
+                }
+            };
             Ok(transcript_from_provider_text(parsed.text, parsed.language))
         })
         .await

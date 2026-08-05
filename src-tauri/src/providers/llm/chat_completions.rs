@@ -75,12 +75,30 @@ impl ChatCompletionsLlm {
     }
 }
 
-/// 解析一行 SSE data JSON → delta 文本。
-fn parse_delta(data: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(data).ok()?;
-    v["choices"][0]["delta"]["content"]
-        .as_str()
-        .map(String::from)
+enum ChatCompletionsEvent {
+    Delta(String),
+    Failed(String),
+    Other,
+}
+
+/// 解析一条 SSE 事件；错误事件必须保留完整 data 文本。
+fn parse_event(event_type: &str, data: &str) -> ChatCompletionsEvent {
+    if event_type == "error" {
+        return ChatCompletionsEvent::Failed(data.to_string());
+    }
+    let value: serde_json::Value = match serde_json::from_str(data) {
+        Ok(value) => value,
+        Err(_) => return ChatCompletionsEvent::Other,
+    };
+    if value.get("error").is_some_and(|error| !error.is_null())
+        || value.get("type").and_then(|value| value.as_str()) == Some("error")
+    {
+        return ChatCompletionsEvent::Failed(data.to_string());
+    }
+    match value["choices"][0]["delta"]["content"].as_str() {
+        Some(text) => ChatCompletionsEvent::Delta(text.to_string()),
+        None => ChatCompletionsEvent::Other,
+    }
 }
 
 impl LlmProvider for ChatCompletionsLlm {
@@ -127,10 +145,15 @@ fn async_stream_impl(
             if event.data == "[DONE]" {
                 break;
             }
-            if let Some(text) = parse_delta(&event.data)
-                && !text.is_empty() {
+            match parse_event(&event.event, &event.data) {
+                ChatCompletionsEvent::Delta(text) if !text.is_empty() => {
                     yield LlmDelta { text };
                 }
+                ChatCompletionsEvent::Failed(body) => {
+                    Err(ProviderError::from_stream_error(body))?;
+                }
+                ChatCompletionsEvent::Delta(_) | ChatCompletionsEvent::Other => {}
+            }
         }
     }
 }
@@ -142,18 +165,40 @@ mod tests {
     #[test]
     fn parse_delta_extracts_content() {
         let data = r#"{"choices":[{"delta":{"content":"你好"}}]}"#;
-        assert_eq!(parse_delta(data), Some("你好".into()));
+        assert!(matches!(
+            parse_event("message", data),
+            ChatCompletionsEvent::Delta(text) if text == "你好"
+        ));
     }
 
     #[test]
     fn parse_delta_none_for_role_only_chunk() {
         let data = r#"{"choices":[{"delta":{"role":"assistant"}}]}"#;
-        assert_eq!(parse_delta(data), None);
+        assert!(matches!(
+            parse_event("message", data),
+            ChatCompletionsEvent::Other
+        ));
     }
 
     #[test]
     fn parse_delta_none_for_invalid_json() {
-        assert_eq!(parse_delta("not json"), None);
+        assert!(matches!(
+            parse_event("message", "not json"),
+            ChatCompletionsEvent::Other
+        ));
+    }
+
+    #[test]
+    fn parse_error_event_keeps_complete_data() {
+        let data = r#"{"error":{"message":"failed","request_id":"req-123"}}"#;
+        assert!(matches!(
+            parse_event("message", data),
+            ChatCompletionsEvent::Failed(body) if body == data
+        ));
+        assert!(matches!(
+            parse_event("error", "plain failure"),
+            ChatCompletionsEvent::Failed(body) if body == "plain failure"
+        ));
     }
 
     #[test]

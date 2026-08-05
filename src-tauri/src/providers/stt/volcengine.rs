@@ -4,6 +4,7 @@
 //! 成功判定看响应 header `X-Api-Status-Code: 20000000`，文本在 `result.text`。
 
 use super::{AudioInput, SttCapabilities, SttOptions, SttProvider, Transcript};
+use crate::error::ErrorCode;
 use crate::providers::{ProviderError, http};
 use base64::Engine;
 
@@ -90,20 +91,23 @@ struct FlashResult {
 
 /// 火山业务状态码 → 统一错误分类（03 §1）。
 /// 45xxxxxx = 客户端参数/鉴权类；55xxxxxx = 服务端。鉴权失败为 45000001/403 系。
-fn classify_status(code: &str, body: String) -> ProviderError {
-    match code {
+fn classify_status(code: &str, http_status: u16, body: String) -> ProviderError {
+    let error_code = match code {
         // 官方文档：45000001 请求参数无效；45000002 空音频；45000151 音频格式不正确
-        "45000001" | "45000002" | "45000151" => ProviderError::InvalidRequest(body),
+        "45000001" | "45000002" | "45000151" => ErrorCode::InvalidRequest,
         // 鉴权/资源未开通
-        c if c.starts_with("403") || c == "45000030" => ProviderError::Auth(body),
+        c if c.starts_with("403") || c == "45000030" => ErrorCode::AuthError,
         // 限流/并发超限
-        "45000429" | "42901003" => ProviderError::RateLimited(body),
-        c if c.starts_with("55") => ProviderError::Server {
-            status: 500,
-            body: format!("volc status {c}: {body}"),
-        },
-        c => ProviderError::InvalidRequest(format!("volc status {c}: {body}")),
-    }
+        "45000429" | "42901003" => ErrorCode::RateLimited,
+        c if c.starts_with("55") => ErrorCode::ServerError,
+        _ => ErrorCode::InvalidRequest,
+    };
+    ProviderError::from_upstream_response(
+        error_code,
+        Some(http_status),
+        format!("volc status {code}"),
+        body,
+    )
 }
 
 #[async_trait::async_trait]
@@ -138,20 +142,27 @@ impl SttProvider for VolcengineStt {
             // 协议以 X-Api-Status-Code 为准；缺失时退回 HTTP 状态码判定
             match api_status.as_deref() {
                 Some(STATUS_OK) => {}
-                Some(code) => return Err(classify_status(code, text)),
+                Some(code) => return Err(classify_status(code, http_status, text)),
                 None if http_status >= 400 => {
                     return Err(ProviderError::from_status(http_status, text));
                 }
                 None => {
-                    return Err(ProviderError::InvalidRequest(format!(
-                        "响应缺少 X-Api-Status-Code: {text}"
-                    )));
+                    return Err(ProviderError::invalid_response(
+                        "响应缺少 X-Api-Status-Code",
+                        text,
+                    ));
                 }
             }
 
-            let parsed: FlashResponse = serde_json::from_str(&text).map_err(|e| {
-                ProviderError::InvalidRequest(format!("响应解析失败: {e}; body: {text}"))
-            })?;
+            let parsed: FlashResponse = match serde_json::from_str(&text) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    return Err(ProviderError::invalid_response(
+                        format!("响应解析失败: {error}"),
+                        text,
+                    ));
+                }
+            };
             Ok(Transcript {
                 text: parsed.result.map(|r| r.text).unwrap_or_default(),
                 detected_language: None,
