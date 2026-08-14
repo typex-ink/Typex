@@ -193,7 +193,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 进程内推理，实现同一个 `LlmProvider` trait（流式返回 delta 与云端一致）：
 
 - **引擎**：llama.cpp（`llama-cpp-2` 绑定——GGUF 生态最全，Apple Silicon Metal 加速成熟；与本地 STT 的 Qwen3-ASR 共用同一引擎，[ADR-22](08-decisions.md)）。
-- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3.6 27B / 35B-A3B、Qwen3.8 27B 与 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高；Qwen3.6/Qwen3.8 条目只下载文本推理所需的主 GGUF，不下载视觉 mmproj 或 MTP 辅助模型。
+- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3.6 27B / 35B-A3B、Qwen3.8 27B 与 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高；Qwen3.6/Qwen3.8 条目只下载文本推理所需的主 GGUF，不下载视觉 mmproj 或 MTP 辅助模型。Qwen3.8 固定到已校验的 Hugging Face 提交；ModelScope 镜像与该提交字节不一致期间不作为下载源。
 - **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B–35B 级模型（[ADR-22](08-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。缓存记录 GPU/CPU load mode；同一缓存的推理由独占租约串行执行。仅 GPU-loaded 模型在 context 初始化或 decode 失败、且 ThinkingFilter 后尚未向调用方发出首个可见 delta 时，允许严格关闭模型设备、K/Q/V 与算子 offload 后从头 CPU 重试一次。fallback 必须先从缓存移除并释放失败 GPU 代际，再在缓存锁外加载 CPU；显式 unload 与 CPU 加载竞态时本次请求使用 detached CPU 模型，不得回填过时代际。首个可见 delta 发出后发生错误时不得重放，直接返回明确错误；prompt/tokenize/上下文长度等输入错误、无 GPU、CPU-loaded 模型和 CPU 重试错误不再重试。`UnloadAfterUse` 只清理自己持有的缓存代际。
 - **思考模式**：本地 Qwen LLM 仅支持开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。Provider 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。

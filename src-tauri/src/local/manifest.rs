@@ -337,14 +337,13 @@ pub fn catalog() -> Vec<ModelEntry> {
             engine: ModelEngine::Llama,
             files: vec![ModelFile {
                 name: "Qwen3.8-27B-Q4_K_M.gguf".into(),
-                bytes: 17_106_773_984,
-                sha256: "7b2aec3b9ababdfd75aa17552ee95607d866e44decf547f6f12fcef85cc89f1b".into(),
+                bytes: 17_106_775_008,
+                sha256: "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169".into(),
             }],
             license: "Apache-2.0".into(),
-            sources: vec![
-                hf("https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main"),
-                ms("https://modelscope.cn/models/unsloth/Qwen3.8-27B-GGUF/resolve/master"),
-            ],
+            sources: vec![hf(
+                "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/65ca473c4b541e5be2d509e2407b7d43988dfc90",
+            )],
             min_ram_gb: 24,
             requires_gpu: true,
         },
@@ -673,8 +672,8 @@ mod tests {
             entry.files,
             vec![ModelFile {
                 name: "Qwen3.8-27B-Q4_K_M.gguf".into(),
-                bytes: 17_106_773_984,
-                sha256: "7b2aec3b9ababdfd75aa17552ee95607d866e44decf547f6f12fcef85cc89f1b".into(),
+                bytes: 17_106_775_008,
+                sha256: "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169".into(),
             }]
         );
         assert_eq!(
@@ -683,16 +682,10 @@ mod tests {
                 .iter()
                 .map(|source| (source.id.as_str(), source.url_prefix.as_str()))
                 .collect::<Vec<_>>(),
-            vec![
-                (
-                    "huggingface",
-                    "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main",
-                ),
-                (
-                    "modelscope",
-                    "https://modelscope.cn/models/unsloth/Qwen3.8-27B-GGUF/resolve/master",
-                ),
-            ]
+            vec![(
+                "huggingface",
+                "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/65ca473c4b541e5be2d509e2407b7d43988dfc90",
+            ),]
         );
     }
 

@@ -125,7 +125,7 @@
   - **性能**（≥ 16 GB 且有 GPU 加速）：Qwen3-ASR-1.7B Q8_0（主模型 + mmproj 约 2.5 GB）+ Qwen3.5-4B Q4_K_M（约 2.7 GB），合计约 5.3 GB。
   - 档位只是首次下载的默认组合；下载后各槽位仍可在模型库中自由更换单个模型。
   - **高配手动模型**（不自动下载）：Whisper large-v3 int8（STT，约 1.8 GB，RAM ≥ 16 GB）；Qwen3-14B Q4（约 9.0 GB，RAM ≥ 32 GB）；Qwen3-30B-A3B Q4（约 18.6 GB，RAM ≥ 32 GB）；Qwen3-32B Q4（约 19.8 GB，RAM ≥ 48 GB）。
-- **2026-08-15 清单扩展**：在不改变 Qwen3.5 零配置分档的前提下，新增 Qwen3.6-27B / 35B-A3B 与 Qwen3.8-27B Q4_K_M 作为高配手动 LLM。Qwen3.6 使用 `ggml-org` 的 llama.cpp GGUF（约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速），Qwen3.8 使用 Unsloth GGUF（约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速）；均只下载文本主 GGUF。
+- **2026-08-15 清单扩展**：在不改变 Qwen3.5 零配置分档的前提下，新增 Qwen3.6-27B / 35B-A3B 与 Qwen3.8-27B Q4_K_M 作为高配手动 LLM。Qwen3.6 使用 `ggml-org` 的 llama.cpp GGUF（约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速），Qwen3.8 使用 Unsloth GGUF（约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速）；均只下载文本主 GGUF。Qwen3.8 发布后曾原地更新内嵌 chat template，导致 Hugging Face 与 ModelScope 镜像字节不一致；清单因此固定到已校验的 Hugging Face 提交，镜像一致前不暴露 ModelScope 源。
 - **工程注意**：llama.cpp 音频(qwen3vl)支持仍标 experimental、有长音频 bug——用现有 VAD 切片规避（短分段转写本来就是 F-1 的路径）；1.7B STT 仅在 GPU 加速可用时提供。Whisper large-v3 当前走 sherpa-onnx CPU provider，界面不承诺 GPU 加速；后续如启用 CUDA/CoreML 需单独做运行时能力探测。问答槽不做本地兜底的口径不变（ADR-20）；若用户设备属性能档，设置中允许**手动**把问答槽指向本地大档模型（默认仍为空 + 配置引导）。
 - **影响**：whisper.cpp 从「补充引擎」降为可选扩展（Qwen3-ASR 的 52 语言覆盖已够长尾，Whisper large-v3 已由 sherpa-onnx 覆盖）；Whisper large-v3-turbo、NVIDIA Parakeet、Moonshine 等模型需新增运行时或稳定导出后再进入内置下载清单。模型库清单（[03 §8](03-model-providers.md)）按档位组织，并支持用户托管导入清单外模型。
 
