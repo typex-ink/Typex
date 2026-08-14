@@ -233,6 +233,13 @@ mod tests {
     }
 
     #[test]
+    fn qwen3_5_models_remain_the_tier_defaults() {
+        assert_eq!(Tier::Lightweight.model_ids()[1], "qwen3.5-0.8b-q4");
+        assert_eq!(Tier::Standard.model_ids()[1], "qwen3.5-2b-q4");
+        assert_eq!(Tier::Performance.model_ids()[1], "qwen3.5-4b-q4");
+    }
+
+    #[test]
     fn diagnostics_string_format() {
         // 验证格式包含必要字段（不依赖实际硬件，用固定参数组装）
         let hw = HardwareInfo {

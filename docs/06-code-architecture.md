@@ -140,7 +140,7 @@ typex/
 │       │   │   ├── mod.rs        # trait LlmProvider + PromptKit（内置 system prompt + 固定 XML user message）
 │       │   │   ├── chat_completions.rs
 │       │   │   ├── responses.rs
-│       │   │   └── local.rs      # llama.cpp + Qwen3.5（仅整理/翻译槽，feature "local-models"）
+│       │   │   └── local.rs      # llama.cpp + Qwen 系列（整理/翻译/问答槽，feature "local-models"）
 │       │   └── models/
 │       │       └── mod.rs        # 模型库清单 + 下载管理器 + 硬件分档探测（[03 §8]）
 │       ├── settings/

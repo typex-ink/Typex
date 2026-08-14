@@ -1,4 +1,4 @@
-//! 本地 LLM Provider · llama.cpp + Qwen3.5 GGUF（03 §3.3 / ADR-20/22）。
+//! 本地 LLM Provider · llama.cpp + Qwen 系列 GGUF（03 §3.3 / ADR-20/22）。
 //!
 //! 实现同一 `LlmProvider` trait（流式 delta 与云端一致）：推理在专属线程逐
 //! token 生成，经 tokio mpsc channel 转成 BoxStream。上下文 4K（整理/翻译都是
@@ -454,7 +454,7 @@ pub struct LlamaLlm {
 }
 
 impl LlamaLlm {
-    /// `model_path` = `{data_dir}/models/{model_id}/qwen3.5-*.gguf`（构造函数注入）。
+    /// `model_path` = `{data_dir}/models/{model_id}/qwen*.gguf`（构造函数注入）。
     pub fn new(model_path: PathBuf, policy: LoadPolicy) -> Self {
         Self {
             model: Arc::new(InferenceModelCache::new()),

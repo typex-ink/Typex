@@ -193,8 +193,8 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 进程内推理，实现同一个 `LlmProvider` trait（流式返回 delta 与云端一致）：
 
 - **引擎**：llama.cpp（`llama-cpp-2` 绑定——GGUF 生态最全，Apple Silicon Metal 加速成熟；与本地 STT 的 Qwen3-ASR 共用同一引擎，[ADR-22](08-decisions.md)）。
-- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高。
-- **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B–32B 级模型（[ADR-22](08-decisions.md)）。
+- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3.6 27B / 35B-A3B、Qwen3.8 27B 与 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高；Qwen3.6/Qwen3.8 条目只下载文本推理所需的主 GGUF，不下载视觉 mmproj 或 MTP 辅助模型。
+- **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B–35B 级模型（[ADR-22](08-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。缓存记录 GPU/CPU load mode；同一缓存的推理由独占租约串行执行。仅 GPU-loaded 模型在 context 初始化或 decode 失败、且 ThinkingFilter 后尚未向调用方发出首个可见 delta 时，允许严格关闭模型设备、K/Q/V 与算子 offload 后从头 CPU 重试一次。fallback 必须先从缓存移除并释放失败 GPU 代际，再在缓存锁外加载 CPU；显式 unload 与 CPU 加载竞态时本次请求使用 detached CPU 模型，不得回填过时代际。首个可见 delta 发出后发生错误时不得重放，直接返回明确错误；prompt/tokenize/上下文长度等输入错误、无 GPU、CPU-loaded 模型和 CPU 重试错误不再重试。`UnloadAfterUse` 只清理自己持有的缓存代际。
 - **思考模式**：本地 Qwen LLM 仅支持开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。Provider 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
@@ -530,7 +530,7 @@ F-3 不引入新的 Provider 类型：
 | DeepSeek | — | chat_completions | 整理/翻译高性价比 |
 | OpenRouter | — | chat_completions / responses | 聚合网关 |
 | Ollama / 自建 | openai_compat（如 speaches） | chat_completions | 本地/内网 |
-| **本地 · 离线** | **local**（Qwen3-ASR GGUF / SenseVoice / Whisper large-v3·sherpa-onnx） | **local**（llama.cpp + Qwen3.5/Qwen3 GGUF，整理/翻译/问答槽可手动选择） | 零配置兜底仅用分档小组合；高配模型需手动下载，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md) |
+| **本地 · 离线** | **local**（Qwen3-ASR GGUF / SenseVoice / Whisper large-v3·sherpa-onnx） | **local**（llama.cpp + Qwen3.5/Qwen3.6/Qwen3.8/Qwen3 GGUF，整理/翻译/问答槽可手动选择） | 零配置兜底仅用分档小组合；高配模型需手动下载，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md) |
 | 阿里 DashScope | 扩展候选（chat-completions 变体传音频） | chat_completions 兼容端点 | STT 格式特殊，当前不做 |
 | Deepgram / ElevenLabs | 扩展候选薄 adapter | — | 非 OpenAI 格式但协议简单 |
 
@@ -539,9 +539,9 @@ F-3 不引入新的 Provider 类型：
 本地模型不随安装包分发（安装包只含推理引擎，约 +30–60 MB）；由下载管理器按需获取：
 
 - **模型库清单**：内置清单随应用更新，用户导入清单位于 `{app_data_dir}/models/user-models.json`。每个模型条目 = id、显示名、用途（stt/llm）、推理引擎（sherpa/sherpa_whisper/llama）、文件列表、字节数、SHA-256、许可证、可变下载源列表、硬件建议（RAM/是否建议 GPU 加速）。
-  - 内置清单（[ADR-22](08-decisions.md)）：STT = `sense-voice-small-int8` / `qwen3-asr-0.6b-q8` / `qwen3-asr-1.7b-q8` / `whisper-large-v3-int8`；LLM = `qwen3.5-0.8b-q4` / `qwen3.5-2b-q4` / `qwen3.5-4b-q4` / `qwen3.5-9b-q4` / `qwen3-14b-q4` / `qwen3-30b-a3b-q4` / `qwen3-32b-q4` / `smollm3-3b-q4` / `granite-3.3-2b-instruct-q4` / `phi-4-mini-instruct-q4`。
+  - 内置清单（[ADR-22](08-decisions.md)）：STT = `sense-voice-small-int8` / `qwen3-asr-0.6b-q8` / `qwen3-asr-1.7b-q8` / `whisper-large-v3-int8`；LLM = `qwen3.5-0.8b-q4` / `qwen3.5-2b-q4` / `qwen3.5-4b-q4` / `qwen3.5-9b-q4` / `qwen3.6-27b-q4` / `qwen3.6-35b-a3b-q4` / `qwen3.8-27b-q4` / `qwen3-14b-q4` / `qwen3-30b-a3b-q4` / `qwen3-32b-q4` / `smollm3-3b-q4` / `granite-3.3-2b-instruct-q4` / `phi-4-mini-instruct-q4`。
   - 用户导入模型 id 由 Typex 生成（`user-...`），只能显式选择到 local profile，不参与零配置兜底。
-- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3 与 14B/30B/32B LLM 属于高配手动模型，不进入自动推荐档。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。`LocalModelInfo.hardware_ok` 只表示本机是否达到推荐条件，供 UI 显示性能警告；它不参与下载授权，wire shape 保持不变（[ADR-26](08-decisions.md)）。
+- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3、Qwen3.6-27B/35B-A3B、Qwen3.8-27B 与 Qwen3 14B/30B/32B LLM 属于高配手动模型，不进入自动推荐档。Qwen3.6-27B/35B-A3B Q4_K_M 分别约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速；Qwen3.8-27B Q4_K_M 约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。`LocalModelInfo.hardware_ok` 只表示本机是否达到推荐条件，供 UI 显示性能警告；它不参与下载授权，wire shape 保持不变（[ADR-26](08-decisions.md)）。
 - **下载源**：内置模型可有 HuggingFace / ModelScope / 官方源等多个源；默认按清单顺序自动换源，可在设置-模型服务-模型管理页底部固定为 HuggingFace 或 ModelScope（没有对应源的模型会提示无可用源）。下载按钮只由条目是否存在远程源（`downloadable`）和当前下载状态约束；低于推荐硬件仍可直接开始下载，不增加确认框。导入模型或无远程源条目仍不可下载。
 - **下载行为**：断点续传（HTTP Range）、SHA-256 校验、失败换源重试；进度经 Tauri event 推送 UI（onboarding 第 3 步与设置-模型服务页共用同一进度组件）。
 - **导入行为**：用户可导入已下载的 LLM GGUF、llama 音频 GGUF（主模型 + `mmproj*.gguf`）或 SenseVoice/sherpa ONNX（`.onnx` + `tokens.txt`）。导入采用托管模式：优先硬链接，失败则复制到 `{app_data_dir}/models/{model_id}/`，并计算本地文件 SHA-256。Whisper / Parakeet / Moonshine 导入需要进一步区分各运行时文件结构，当前只开放内置可下载的 Whisper large-v3。

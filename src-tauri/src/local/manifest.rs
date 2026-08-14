@@ -39,7 +39,7 @@ pub enum ModelEngine {
     /// sherpa-onnx Whisper（高配 STT）。
     #[serde(rename = "sherpa_whisper")]
     SherpaWhisper,
-    /// llama.cpp（Qwen3-ASR / Qwen3.5 GGUF）。
+    /// llama.cpp（Qwen3-ASR / Qwen 系列 GGUF）。
     Llama,
 }
 
@@ -295,6 +295,60 @@ pub fn catalog() -> Vec<ModelEntry> {
             requires_gpu: true,
         },
         ModelEntry {
+            id: "qwen3.6-27b-q4".into(),
+            display_name: "Qwen3.6 27B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3.6-27B-Q4_K_M.gguf".into(),
+                bytes: 19_095_766_304,
+                sha256: "65b753ea835627f7b511143c6ceb976525c7f21f5df8c664bc0a9c23d1c49921".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/ggml-org/Qwen3.6-27B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/ggml-org/Qwen3.6-27B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 32,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "qwen3.6-35b-a3b-q4".into(),
+            display_name: "Qwen3.6 35B-A3B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3.6-35B-A3B-Q4_K_M.gguf".into(),
+                bytes: 20_419_565_568,
+                sha256: "671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/ggml-org/Qwen3.6-35B-A3B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 32,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "qwen3.8-27b-q4".into(),
+            display_name: "Qwen3.8 27B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "Qwen3.8-27B-Q4_K_M.gguf".into(),
+                bytes: 17_106_773_984,
+                sha256: "7b2aec3b9ababdfd75aa17552ee95607d866e44decf547f6f12fcef85cc89f1b".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/unsloth/Qwen3.8-27B-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 24,
+            requires_gpu: true,
+        },
+        ModelEntry {
             id: "qwen3-14b-q4".into(),
             display_name: "Qwen3 14B Q4".into(),
             purpose: ModelPurpose::Llm,
@@ -485,7 +539,7 @@ mod tests {
 
     #[test]
     fn catalog_has_expanded_entries() {
-        assert!(catalog().len() >= 14);
+        assert!(catalog().len() >= 17);
     }
 
     #[test]
@@ -511,6 +565,9 @@ mod tests {
         assert!(gpu_required.contains(&"qwen3-asr-1.7b-q8".to_string()));
         assert!(gpu_required.contains(&"qwen3.5-4b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3.5-9b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3.6-27b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3.6-35b-a3b-q4".to_string()));
+        assert!(gpu_required.contains(&"qwen3.8-27b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3-14b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3-30b-a3b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3-32b-q4".to_string()));
@@ -528,6 +585,9 @@ mod tests {
     fn high_end_manual_models_are_available_but_not_tier_defaults() {
         for id in [
             "whisper-large-v3-int8",
+            "qwen3.6-27b-q4",
+            "qwen3.6-35b-a3b-q4",
+            "qwen3.8-27b-q4",
             "qwen3-14b-q4",
             "qwen3-30b-a3b-q4",
             "qwen3-32b-q4",
@@ -544,6 +604,95 @@ mod tests {
         assert_eq!(
             entry_by_id("whisper-large-v3-int8").engine,
             ModelEngine::SherpaWhisper
+        );
+    }
+
+    #[test]
+    fn qwen3_6_entries_match_published_ggufs() {
+        let expected = [
+            (
+                "qwen3.6-27b-q4",
+                "Qwen3.6 27B Q4",
+                "Qwen3.6-27B-Q4_K_M.gguf",
+                19_095_766_304,
+                "65b753ea835627f7b511143c6ceb976525c7f21f5df8c664bc0a9c23d1c49921",
+                "Qwen3.6-27B-GGUF",
+            ),
+            (
+                "qwen3.6-35b-a3b-q4",
+                "Qwen3.6 35B-A3B Q4",
+                "Qwen3.6-35B-A3B-Q4_K_M.gguf",
+                20_419_565_568,
+                "671e47e0ec53c665d048b98c3ecbfd5236b5ca9c3e02ed19fc8f81f7b85140c7",
+                "Qwen3.6-35B-A3B-GGUF",
+            ),
+        ];
+
+        for (id, display_name, file_name, bytes, sha256, repo) in expected {
+            let entry = entry_by_id(id);
+            assert_eq!(entry.display_name, display_name);
+            assert_eq!(entry.purpose, ModelPurpose::Llm);
+            assert_eq!(entry.engine, ModelEngine::Llama);
+            assert_eq!(entry.license, "Apache-2.0");
+            assert_eq!(entry.min_ram_gb, 32);
+            assert!(entry.requires_gpu);
+            assert_eq!(entry.files.len(), 1);
+            assert_eq!(entry.files[0].name, file_name);
+            assert_eq!(entry.files[0].bytes, bytes);
+            assert_eq!(entry.files[0].sha256, sha256);
+            assert_eq!(
+                entry
+                    .sources
+                    .iter()
+                    .map(|source| (source.id.clone(), source.url_prefix.clone()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (
+                        "huggingface".to_string(),
+                        format!("https://huggingface.co/ggml-org/{repo}/resolve/main"),
+                    ),
+                    (
+                        "modelscope".to_string(),
+                        format!("https://modelscope.cn/models/ggml-org/{repo}/resolve/master"),
+                    ),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn qwen3_8_27b_entry_matches_published_gguf() {
+        let entry = entry_by_id("qwen3.8-27b-q4");
+        assert_eq!(entry.display_name, "Qwen3.8 27B Q4");
+        assert_eq!(entry.purpose, ModelPurpose::Llm);
+        assert_eq!(entry.engine, ModelEngine::Llama);
+        assert_eq!(entry.license, "Apache-2.0");
+        assert_eq!(entry.min_ram_gb, 24);
+        assert!(entry.requires_gpu);
+        assert_eq!(
+            entry.files,
+            vec![ModelFile {
+                name: "Qwen3.8-27B-Q4_K_M.gguf".into(),
+                bytes: 17_106_773_984,
+                sha256: "7b2aec3b9ababdfd75aa17552ee95607d866e44decf547f6f12fcef85cc89f1b".into(),
+            }]
+        );
+        assert_eq!(
+            entry
+                .sources
+                .iter()
+                .map(|source| (source.id.as_str(), source.url_prefix.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "huggingface",
+                    "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main",
+                ),
+                (
+                    "modelscope",
+                    "https://modelscope.cn/models/unsloth/Qwen3.8-27B-GGUF/resolve/master",
+                ),
+            ]
         );
     }
 

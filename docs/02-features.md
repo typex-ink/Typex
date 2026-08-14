@@ -267,7 +267,7 @@
 
 **目标：消灭「必须先配 API 才能用」的上手门槛**（[ADR-20](08-decisions.md)）。本地模型以「本地 · 离线」预设的身份出现在模型服务列表中，与云端预设同列、槽位级自由混搭；**未配置任何 API 时作为默认兜底（零配置模式）**。
 
-- **选型：Qwen 全家桶为主（[ADR-22](08-decisions.md)，均 Apache 2.0，GGUF 走 llama.cpp 单引擎）**：STT = Qwen3-ASR（0.6B/1.7B，52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA；官方 ggml-org GGUF 当前可用量化为 Q8_0/bf16，Typex 选 Q8_0）；整理/翻译 = Qwen3.5 小模型（0.8B/2B/4B，Q4_K_M）。SenseVoice-Small（sherpa-onnx，int8 约 230 MB，非自回归、CPU 实时数倍速）保留为轻量档 STT——弱机器上唯一能保证实时的选项。
+- **选型：Qwen 全家桶为主（[ADR-22](08-decisions.md)，均 Apache 2.0，GGUF 走 llama.cpp 单引擎）**：STT = Qwen3-ASR（0.6B/1.7B，52 语言 + 22 中文方言，1.7B 为开源 ASR SOTA；官方 ggml-org GGUF 当前可用量化为 Q8_0/bf16，Typex 选 Q8_0）；整理/翻译的自动分档 = Qwen3.5 小模型（0.8B/2B/4B，Q4_K_M），模型库另提供 Qwen3/Qwen3.6/Qwen3.8 高配手动模型。SenseVoice-Small（sherpa-onnx，int8 约 230 MB，非自回归、CPU 实时数倍速）保留为轻量档 STT——弱机器上唯一能保证实时的选项。
 - **硬件分档推荐**：下载时按设备性能（RAM / CPU / GPU 加速）自动推荐档位，可手动改档；探测结果只表达预期性能与推荐程度，不构成下载门槛。只要内置模型存在远程下载源，即使设备低于建议也始终允许下载；档位只影响首次下载组合，之后各槽位可在模型库自由换单个模型（[ADR-26](08-decisions.md)）：
 
 | 档位 | 适用设备 | STT | 整理/翻译 LLM | 合计体积 |

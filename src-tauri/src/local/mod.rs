@@ -11,7 +11,7 @@
 //! - [`stt_sense_voice`]：SenseVoice 轻量档 STT（sherpa-onnx）
 //! - [`stt_qwen_asr`]：Qwen3-ASR 标准/性能档 STT（llama.cpp mtmd）
 //! - [`stt_whisper`]：Whisper large-v3 高配精度档 STT（sherpa-onnx）
-//! - [`llm_llama`]：Qwen3.5 本地 LLM，整理/翻译槽（llama.cpp）
+//! - [`llm_llama`]：Qwen 系列本地 LLM，整理/翻译/问答槽（llama.cpp）
 //!
 //! IPC 契约无条件注册，具体实现按 feature 分支执行。
 
