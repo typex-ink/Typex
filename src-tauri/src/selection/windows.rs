@@ -389,7 +389,9 @@ unsafe fn read_rectangles(
     let _ = unsafe { SafeArrayDestroy(array) };
 
     values
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter_map(|v| {
             (v[2] > 0.0 && v[3] > 0.0).then_some(SelectionBounds {
                 x: v[0],
