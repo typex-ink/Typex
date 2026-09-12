@@ -49,6 +49,56 @@ jobs:
       - name: Generate IPC bindings
         run: pnpm gen:ipc
 
+      - name: Validate macOS signing and notarization secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+        run: |
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_NOTARY_KEY_ID \
+            APPLE_NOTARY_ISSUER \
+            APPLE_NOTARY_KEY_BASE64
+          do
+            if [[ -z "${!name}" ]]; then
+              echo "$name is required for a signed and notarized macOS nightly"
+              exit 1
+            fi
+          done
+
+      - name: Import Apple Developer ID certificate
+        uses: apple-actions/import-codesign-certs@fe74d46e82474f87e1ba79832ad28a4013d0e33a # v6
+        with:
+          keychain: typex-signing
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+
+      - name: Install Apple Developer ID G2 intermediate
+        run: |
+          ca="$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          curl --fail --location --silent --show-error \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            --output "$ca"
+          echo "F16CD3C54C7F83CEA4BF1A3E6A0819C8AAA8E4A1528FD144715F350643D2DF3A  $ca" |
+            shasum -a 256 -c -
+          if ! security find-certificate -a -Z "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null |
+            grep 'F16CD3C54C7F83CEA4BF1A3E6A0819C8AAA8E4A1528FD144715F350643D2DF3A' >/dev/null; then
+            security import "$ca" -k "$HOME/Library/Keychains/login.keychain-db"
+          fi
+
+      - name: Verify Apple signing identity
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          security find-identity -v -p codesigning
+          security find-identity -v -p codesigning | grep -F "$APPLE_SIGNING_IDENTITY" >/dev/null
+
       - name: Build macOS app
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
@@ -69,7 +119,19 @@ jobs:
             --config "$BUILD_CONFIG"
 
       - name: Bundle local runtime dylibs
+        env:
+          TYPEX_CODESIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: scripts/bundle-macos-runtime-dylibs.sh
+
+      - name: Configure Apple notarization API key
+        env:
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+        run: scripts/setup-macos-notary-api-key.sh
+
+      - name: Notarize and staple macOS app
+        run: scripts/notarize-macos-artifact.sh
 
       - name: Prepare macOS nightly assets
         env:
@@ -86,6 +148,15 @@ jobs:
           export UPDATER_ARCHIVE_NAME="typex-${PLATFORM_ID}-nightly.app.tar.gz"
           export UPDATE_NOTES="Nightly ${GITHUB_SHA}"
           scripts/prepare-macos-assets.sh
+
+      - name: Sign, notarize and staple macOS DMG
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          DMG_PATH="nightly-assets/${PLATFORM_ID}/typex-${PLATFORM_ID}-nightly.dmg"
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+          codesign --verify --strict "$DMG_PATH"
+          scripts/notarize-macos-artifact.sh "$DMG_PATH"
 
       - name: Upload macOS nightly assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

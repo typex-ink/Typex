@@ -75,4 +75,13 @@ Release workflow 只接受正式版 tag。CI 必须拒绝：
 
 Nightly 或内部测试构建可以使用 `-dev`，但不应复用正式 release tag，也不应覆盖正式更新源。
 
-多平台更新元数据必须先按平台生成 fragment，再由单一聚合 job 写出一个 `latest.json`。stable/nightly 通道分离；publish job 下载平台 artifact 后必须先拒绝重复资产名，并用仓库公钥对最终下载字节重新验签。重复平台 key、重复资产名、缺少或不匹配的 Tauri updater 签名、验签失败或 URL 跨通道时 CI 必须失败。macOS 与 Windows 复用同一组仓库级 Tauri updater 密钥，不为平台复制私钥。
+多平台更新元数据必须先按平台生成 fragment，再由单一聚合 job 写出一个 `latest.json`。stable/nightly 通道分离；publish job 下载平台 artifact 后必须先拒绝重复资产名，并用仓库公钥对最终下载字节重新验签。重复平台 key、重复资产名、缺少或不匹配的 Tauri updater 签名、验签失败或 URL 跨通道时 CI 必须失败。macOS 与 Windows 复用同一组仓库级 Tauri updater 密钥，不为平台复制私钥。正式 release 与公开 nightly 的 macOS job 还必须具备 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY` 以及一套 Apple notarization credentials；缺少任一项时在生成公开 artifact 前失败，不降级为 unsigned 或 ad-hoc 包。Apple 私钥只以受保护的 base64 `.p12` GitHub Secret 形式注入临时 keychain，绝不提交仓库。
+
+macOS 发布所需的 GitHub Secrets：
+
+- `APPLE_CERTIFICATE`：Developer ID Application `.p12` 的 base64 内容。
+- `APPLE_CERTIFICATE_PASSWORD`：导出 `.p12` 时设置的密码。
+- `APPLE_SIGNING_IDENTITY`：`security find-identity -v -p codesigning` 输出中的完整 identity。
+- `APPLE_NOTARY_KEY_ID`、`APPLE_NOTARY_ISSUER`、`APPLE_NOTARY_KEY_BASE64`：用于 `notarytool` 的 App Store Connect API key ID、issuer ID 和 `.p8` base64 内容。
+
+`.p12` 只在本地安全导出后写入 GitHub Secret；不得把 `.cer` 当作可替代 `.p12` 的 CI 私钥。`APPLE_NOTARY_KEY_BASE64` 只在 runner 临时目录还原，脚本不会把 key 内容写入 `GITHUB_ENV`。
