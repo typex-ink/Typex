@@ -35,11 +35,7 @@ Windows 版本支持 64 位 Windows 10 22H2 及以上版本和 Windows 11。NSIS
 
 当前 Windows 候选构建尚未进行 Authenticode 发布者签名，因此 Windows 可能显示“未知发布者”或 Microsoft Defender SmartScreen 提示。选择“更多信息 > 仍要运行”前，请先核对随版本提供的 SHA-256 校验值和 Tauri updater 签名。启用 WDAC、AppLocker 或 Smart App Control 的受管设备可能会直接阻止未签名构建。
 
-**macOS 用户注意**:如果启动时提示"无法验证是否包含恶意软件",安装后运行以下命令移除隔离属性即可:
-
-```bash
-sudo xattr -dr com.apple.quarantine /Applications/Typex.app
-```
+macOS 发布包已使用 Developer ID 签名并通过 Apple 公证。打开下载的 `.dmg`，将 **Typex** 拖入「应用程序」后即可启动。
 
 ## 相关链接
 

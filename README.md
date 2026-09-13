@@ -35,11 +35,7 @@ Windows builds support 64-bit Windows 10 22H2 or later and Windows 11. The NSIS 
 
 Windows release candidates are currently not Authenticode-signed. Windows may therefore show an **Unknown Publisher** or Microsoft Defender SmartScreen warning. Verify the SHA-256 checksum and Tauri updater signature published with the release before choosing **More info > Run anyway**. Managed devices using WDAC, AppLocker, or Smart App Control may block unsigned builds entirely.
 
-**On macOS**, if you see a warning that the app "cannot be verified to be free of malware" on launch, remove the quarantine attribute after installing:
-
-```bash
-sudo xattr -dr com.apple.quarantine /Applications/Typex.app
-```
+macOS builds are signed with Developer ID and notarized by Apple. Open the downloaded `.dmg`, drag **Typex** into **Applications**, and launch it.
 
 ## Links
 

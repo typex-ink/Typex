@@ -102,7 +102,7 @@
 - [ ] 版本号符合 [10 版本策略](10-versioning.md)：`package.json` / `tauri.conf.json` / `Cargo.toml` / 关于页 / tag 一致，正式版不带 `-dev`
 - [ ] release workflow 的非发布构建/静态校验覆盖 macOS universal 与 Windows NSIS x64；平台 updater fragment 聚合后 `latest.json` 的平台键唯一且 stable/nightly 隔离
 - [ ] macOS release/nightly job 导入临时 Developer ID keychain；最终 `.app` 内所有 Mach-O（含本地 runtime dylib）由内到外以同一 identity 签名，启用 Hardened Runtime、时间戳和 `src-tauri/Entitlements.plist`
-- [ ] 签名/公证启用后：DMG 使用与 `.app` 相同的 Developer ID identity 和安全时间戳签名；从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）；`.app` 与 DMG 均完成 stapling/validation
+- [ ] DMG 使用与 `.app` 相同的 Developer ID identity 和安全时间戳签名；从 GitHub Release 下载的 dmg 在全新 macOS 上可直接打开（Gatekeeper 通过）；`.app` 与 DMG 均完成 stapling/validation
 - [ ] Apple 证书 `.p12`、证书密码、签名 identity、notary API key 不进入仓库或日志；`TAURI_SIGNING_PRIVATE_KEY` 只用于 updater 完整性签名，不冒充 Apple 发布者签名
 
 ## 11. Windows 专项
