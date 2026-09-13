@@ -1,7 +1,7 @@
 {
   "name": "typex",
   "private": true,
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "license": "GPL-3.0-only",
