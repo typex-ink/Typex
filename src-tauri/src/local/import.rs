@@ -140,10 +140,13 @@ fn validate_files(
                 return Err(ImportError::InvalidLlmFiles);
             }
         }
-        (ModelPurpose::Llm, ModelEngine::Sherpa | ModelEngine::SherpaWhisper) => {
+        (
+            ModelPurpose::Llm,
+            ModelEngine::Sherpa | ModelEngine::SherpaWhisper | ModelEngine::SherpaTransducer,
+        ) => {
             return Err(ImportError::UnsupportedLlmEngine);
         }
-        (ModelPurpose::Stt, ModelEngine::SherpaWhisper) => {
+        (ModelPurpose::Stt, ModelEngine::SherpaWhisper | ModelEngine::SherpaTransducer) => {
             return Err(ImportError::UnsupportedWhisperImport);
         }
         (ModelPurpose::Stt, ModelEngine::Sherpa) => {
@@ -257,6 +260,23 @@ mod tests {
     fn parse_rejects_unknown_runtime() {
         let err = parse_engine("whisper").unwrap_err();
         assert!(matches!(err, ImportError::InvalidEngine(_)));
+    }
+
+    #[test]
+    fn whisper_and_transducer_imports_are_rejected_in_favor_of_builtin_catalog() {
+        let dir = tempfile::tempdir().unwrap();
+        let onnx = dir.path().join("encoder.int8.onnx");
+        std::fs::write(&onnx, b"x").unwrap();
+
+        for engine in [ModelEngine::SherpaWhisper, ModelEngine::SherpaTransducer] {
+            let stt_err =
+                validate_files(ModelPurpose::Stt, engine, std::slice::from_ref(&onnx)).unwrap_err();
+            assert!(matches!(stt_err, ImportError::UnsupportedWhisperImport));
+
+            let llm_err =
+                validate_files(ModelPurpose::Llm, engine, std::slice::from_ref(&onnx)).unwrap_err();
+            assert!(matches!(llm_err, ImportError::UnsupportedLlmEngine));
+        }
     }
 
     #[test]

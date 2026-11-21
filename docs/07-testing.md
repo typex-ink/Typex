@@ -64,7 +64,7 @@
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
 | `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言，含 v7→v8 按旧规则生成翻译 chord、v8 三组独立持久化、v8→v9 丢弃四个旧自定义模板并初始化四个 system prompt 字段、v9→v10 把旧 UI 默认的 30 秒 profile 时限提升为 60 秒且保留其他显式值；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
-| 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含高配手动模型（Whisper large-v3、Qwen3.6 27B/35B-A3B、Qwen3.8 27B、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档；Qwen3.6 条目的文件名、精确字节数、SHA-256 与双下载源固定，Qwen3.8 固定精确元数据及不可变 Hugging Face 提交且不包含字节不一致的 ModelScope 镜像 |
+| 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens，拒绝未开放导入的 Whisper/Transducer 运行时；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含可选/高配手动模型（Whisper large-v3 / large-v3-turbo、Parakeet v3、Granite 4.0、Gemma 4、Qwen3.6 27B/35B-A3B、Qwen3.8 27B、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档；Qwen3.6、Granite 4.0 与 Gemma 4 条目的文件名、精确字节数、SHA-256 与双下载源固定，Whisper-turbo 与 Parakeet-v3 固定精确元数据与 Hugging Face 源，Qwen3.8 固定精确元数据及不可变 Hugging Face 提交且不包含字节不一致的 ModelScope 镜像；Parakeet 识别器预校验缺失文件与 `<blk>` 词表返回 `InvalidRequest`；本地 LLM 正确构造 Gemma 4 `<|turn>` 模板、收敛 `/think` 控制词注入范围，且 `ThinkingFilter` 同时剥离 `<think>...</think>` 与 `<|channel>thought...<channel|>` 跨分片思考块 |
 | 本地 llama GPU→CPU fallback | load mode；CPU 模型 `n_gpu_layers=0` 且 devices 为空、context 的 K/Q/V 与 op offload 关闭、ASR mtmd `use_gpu=false`；仅 GPU runtime 错误且 LLM 首个可见 delta 前重试一次；输入错误、CPU mode、已输出与第二次错误不重试；ASR 非流式整次重试；并发请求由 inference lease 串行且只加载一个共享 CPU 条目、fallback 前释放失败 GPU 条目、CPU 加载不持缓存锁、显式 unload 后 detached fallback 不回填、`UnloadAfterUse` 只清自己的缓存代际 |
 | 剪贴板事务与 Windows 空选区判定（`inject/paste.rs` / `inject/windows.rs` 的纯逻辑部分） | 保存→注入→恢复的顺序；取消先赢时恢复且 SendInput/后备注入调用为 0，提交先赢时取消失败且只完成一次；恢复失败不吞注入成功的结果；原多格式快照完整传递；用户/剪贴板管理器中途改变 sequence/owner 时不覆盖；同一非空 owner 分批发布格式导致 sequence 连续变化时接受最终原子载荷并更新恢复基线；复制文本与旧值相同仍按 sequence 识别；sequence 相同与 `u32` 回绕边界；`vscode-editor-data` 缺失、合法 JSON true/false、损坏/字段类型错误/超大 metadata、尾随 NUL 与 Unicode 文本。只有可可靠证明的空选区才返回 `None`，未知情况保留文本 |
 | PromptKit 消息构造 | 四类内置 system prompt 静态约束；四类固定 XML user message 的元素顺序、可选元素省略和动态值转义；`ANSWER:` 前缀解析 |
@@ -126,7 +126,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 | 首次启动引导 | 第 4 步可分别录制听写/助手/翻译快捷键；修改任一项只持久化该完整 chord 并同步练习提示；空值、听写/助手互含或翻译与另两项完全相同时阻止保存并显示校验提示，翻译与另两项存在严格子集关系时允许保存 |
 | 首次启动完成 | `onboarding_done` 与自启选择必须先保存，再调用 `complete_onboarding`；提交中不可重复触发；主页切换失败时保留引导页并显示可重试错误 |
 | 模型管理 | `hardware_ok=false && downloadable=true` 时显示低于建议但下载按钮可用并调用下载；`downloadable=false` 时仍禁用 |
-| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误）；编辑页和卡片浮层完整展示格式化 JSON / 原样文本详情，并在下一次测试或成功后清除旧详情 |
+| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；切换云端预设自动填充首个建议模型并展示候选胶囊，点击胶囊切换模型且编辑已有档案时不覆盖自定义模型名；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误）；编辑页和卡片浮层完整展示格式化 JSON / 原样文本详情，并在下一次测试或成功后清除旧详情 |
 | 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；`done` 固化完整回答；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**）；生成中 Esc/关闭/失焦发送取消并隐藏，完成后关闭不取消；各状态面板保持不透明 |
 | 主页历史 | 助手记录展开标签为「语音指令 / 助手结果」，复制完整 `result`；统计数据不因助手回答字数改变 |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |

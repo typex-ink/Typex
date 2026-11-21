@@ -67,6 +67,7 @@ function usedSlotLabels(profileId: string): string[] {
 function localEngineLabel(engine: string): string {
   if (engine === "llama") return "llama.cpp";
   if (engine === "sherpa_whisper") return "sherpa-onnx Whisper";
+  if (engine === "sherpa_transducer") return "sherpa-onnx Transducer";
   if (engine === "sherpa") return "sherpa-onnx";
   return engine;
 }

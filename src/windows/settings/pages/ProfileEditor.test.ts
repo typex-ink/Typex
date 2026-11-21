@@ -359,4 +359,54 @@ describe("ProfileEditor", () => {
 
     expect(save.attributes("disabled")).toBeDefined();
   });
+
+  it("选择多模型预设时自动填充默认模型并支持候选胶囊一键切换", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "llm", profile: null },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const presetTrigger = wrapper.findAll("button.select")[0]!;
+    await presetTrigger.trigger("click");
+
+    const groqOption = [...document.body.querySelectorAll<HTMLButtonElement>(".select-option")]
+      .find((option) => option.textContent?.trim() === "Groq")!;
+    expect(groqOption).toBeTruthy();
+    groqOption.click();
+    await flushPromises();
+
+    const modelInput = wrapper.get('input[placeholder="模型名"]');
+    expect((modelInput.element as HTMLInputElement).value).toBe("openai/gpt-oss-20b");
+
+    const chips = wrapper.findAll("button.model-chip");
+    expect(chips.map((c) => c.text())).toEqual([
+      "openai/gpt-oss-20b",
+      "openai/gpt-oss-120b",
+      "qwen/qwen3.8-27b",
+    ]);
+    expect(chips[0]?.attributes("aria-pressed")).toBe("true");
+
+    await chips[2]!.trigger("click");
+    expect((modelInput.element as HTMLInputElement).value).toBe("qwen/qwen3.8-27b");
+    expect(chips[2]?.attributes("aria-pressed")).toBe("true");
+  });
+
+  it("编辑已有云端档案时回显预设候选胶囊且不覆盖已保存自定义模型名", async () => {
+    const profile = llmProfile("responses");
+    profile.model = "my-custom-openai-model";
+    const wrapper = mount(ProfileEditor, {
+      props: { capability: "llm", profile },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    const modelInput = wrapper.get('input[placeholder="模型名"]');
+    expect((modelInput.element as HTMLInputElement).value).toBe("my-custom-openai-model");
+
+    const chips = wrapper.findAll("button.model-chip");
+    expect(chips.map((c) => c.text())).toEqual(["gpt-5.4-mini", "gpt-5.4", "gpt-5.4-nano"]);
+    expect(chips.every((c) => c.attributes("aria-pressed") === "false")).toBe(true);
+  });
 });

@@ -10,8 +10,9 @@
 //! - [`download`]：HTTP Range 断点续传、SHA-256 校验、换源重试
 //! - [`stt_sense_voice`]：SenseVoice 轻量档 STT（sherpa-onnx）
 //! - [`stt_qwen_asr`]：Qwen3-ASR 标准/性能档 STT（llama.cpp mtmd）
-//! - [`stt_whisper`]：Whisper large-v3 高配精度档 STT（sherpa-onnx）
-//! - [`llm_llama`]：Qwen 系列本地 LLM，整理/翻译/问答槽（llama.cpp）
+//! - [`stt_whisper`]：Whisper 多语种精度档 STT（sherpa-onnx）
+//! - [`stt_transducer`]：Parakeet TDT 高速英欧语档 STT（sherpa-onnx）
+//! - [`llm_llama`]：本地 GGUF LLM，整理/翻译/问答槽（llama.cpp）
 //!
 //! IPC 契约无条件注册，具体实现按 feature 分支执行。
 
@@ -22,4 +23,5 @@ pub mod llm_llama;
 pub mod manifest;
 pub mod stt_qwen_asr;
 pub mod stt_sense_voice;
+pub mod stt_transducer;
 pub mod stt_whisper;

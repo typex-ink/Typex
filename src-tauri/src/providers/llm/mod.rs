@@ -82,13 +82,13 @@ impl LlmProvider for TimedLlmProvider {
     }
 }
 
-const THINK_OPEN: &str = "<think>";
-const THINK_CLOSE: &str = "</think>";
+const THINK_DELIMITERS: &[(&str, &str)] =
+    &[("<think>", "</think>"), ("<|channel>thought", "<channel|>")];
 
 #[derive(Debug, Default)]
 pub(crate) struct ThinkingFilter {
     pending: String,
-    in_think: bool,
+    active_close: Option<&'static str>,
 }
 
 impl ThinkingFilter {
@@ -97,10 +97,9 @@ impl ThinkingFilter {
         let mut out = String::new();
 
         loop {
-            if self.in_think {
-                let Some(close_pos) = find_ascii_case_insensitive(&self.pending, THINK_CLOSE)
-                else {
-                    let keep = partial_tag_suffix_len(&self.pending, THINK_CLOSE);
+            if let Some(close_tag) = self.active_close {
+                let Some(close_pos) = find_ascii_case_insensitive(&self.pending, close_tag) else {
+                    let keep = partial_tag_suffix_len(&self.pending, close_tag);
                     if keep > 0 {
                         self.pending = self.pending[self.pending.len() - keep..].to_string();
                     } else {
@@ -108,14 +107,26 @@ impl ThinkingFilter {
                     }
                     return out;
                 };
-                let drain_to = close_pos + THINK_CLOSE.len();
+                let drain_to = close_pos + close_tag.len();
                 self.pending.drain(..drain_to);
-                self.in_think = false;
+                self.active_close = None;
                 continue;
             }
 
-            let Some(open_pos) = find_ascii_case_insensitive(&self.pending, THINK_OPEN) else {
-                let keep = partial_tag_suffix_len(&self.pending, THINK_OPEN);
+            let earliest_open = THINK_DELIMITERS
+                .iter()
+                .filter_map(|&(open_tag, close_tag)| {
+                    find_ascii_case_insensitive(&self.pending, open_tag)
+                        .map(|pos| (pos, open_tag, close_tag))
+                })
+                .min_by_key(|&(pos, _, _)| pos);
+
+            let Some((open_pos, open_tag, close_tag)) = earliest_open else {
+                let keep = THINK_DELIMITERS
+                    .iter()
+                    .map(|&(open_tag, _)| partial_tag_suffix_len(&self.pending, open_tag))
+                    .max()
+                    .unwrap_or(0);
                 let emit_len = self.pending.len().saturating_sub(keep);
                 out.push_str(&self.pending[..emit_len]);
                 self.pending.drain(..emit_len);
@@ -123,16 +134,16 @@ impl ThinkingFilter {
             };
 
             out.push_str(&self.pending[..open_pos]);
-            let drain_to = open_pos + THINK_OPEN.len();
+            let drain_to = open_pos + open_tag.len();
             self.pending.drain(..drain_to);
-            self.in_think = true;
+            self.active_close = Some(close_tag);
         }
     }
 
     pub(crate) fn finish(&mut self) -> String {
-        if self.in_think {
+        if self.active_close.is_some() {
             self.pending.clear();
-            self.in_think = false;
+            self.active_close = None;
             String::new()
         } else {
             std::mem::take(&mut self.pending)
@@ -302,6 +313,26 @@ mod tests {
         let mut f = ThinkingFilter::default();
         assert_eq!(f.push("你好<thi"), "你好");
         assert_eq!(f.push("nk>内部</think>回答"), "回答");
+        assert_eq!(f.finish(), "");
+    }
+
+    #[test]
+    fn thinking_filter_strips_gemma4_thought_channel_across_chunks() {
+        let mut f = ThinkingFilter::default();
+        assert_eq!(f.push("<|chan"), "");
+        assert_eq!(f.push("nel>thought\nstep 1\n<chan"), "");
+        assert_eq!(f.push("nel|>最终译文"), "最终译文");
+        assert_eq!(f.finish(), "");
+    }
+
+    #[test]
+    fn thinking_filter_strips_empty_gemma4_thought_channel_and_preserves_other_channels() {
+        let mut f = ThinkingFilter::default();
+        assert_eq!(
+            f.push("<|channel>thought\n<channel|>结果包含 <channel> 与 <|channel>"),
+            "结果包含 <channel> 与 "
+        );
+        assert_eq!(f.push("other 文本"), "<|channel>other 文本");
         assert_eq!(f.finish(), "");
     }
 }

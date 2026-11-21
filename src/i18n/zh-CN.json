@@ -195,6 +195,7 @@
       "endpoint_ph": "（默认官方端点）",
       "model": "模型",
       "model_ph": "模型名",
+      "model_suggestions": "候选模型",
       "api_format": "接口格式",
       "kind_chat": "Chat Completions（OpenAI 兼容）",
       "kind_responses": "Responses（OpenAI 新协议）",

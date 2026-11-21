@@ -41,7 +41,7 @@ IPC 使用 **tauri-specta** 自动生成 TS 类型绑定，杜绝前后端接口
 | 应用基建 | `tauri-plugin-single-instance` / `-autostart` / `-updater` / `-global-shortcut`（备用）；托盘内置 | 全官方插件 |
 | Windows 系统 API | target-specific `windows` crate | 最小 feature 集；`unsafe` 集中在 `platform/windows.rs` 与对应平台 backend 边界 |
 | Linux HUD | `gtk-layer-shell`（经 `gtk_window()` 句柄） | Handy 验证过的方案 |
-| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper STT：`sherpa-onnx`；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；`llama-cpp-2` target-gate 为 macOS Metal / Windows Vulkan / 其他 CPU；GPU-loaded 模型仅在运行初始化/decode 错误且尚可安全重放时回退一次 CPU；Windows 的 sherpa/ONNX、Vulkan loader 与 MSVC runtime 采用安装目录内 app-local 部署；硬件仅用于推荐档和性能提示，不阻止存在远程源的模型下载（[03 §8](03-model-providers.md)、[ADR-26](08-decisions.md)） |
+| 本地推理（[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md)） | LLM+Qwen3-ASR：`llama-cpp-2`；SenseVoice/Whisper/Parakeet STT：`sherpa-onnx`；硬件探测：`sysinfo` | feature flag `local-models` 集中管理，可 `--no-default-features` 裁剪；`llama-cpp-2` target-gate 为 macOS Metal / Windows Vulkan / 其他 CPU；GPU-loaded 模型仅在运行初始化/decode 错误且尚可安全重放时回退一次 CPU；Windows 的 sherpa/ONNX、Vulkan loader 与 MSVC runtime 采用安装目录内 app-local 部署；硬件仅用于推荐档和性能提示，不阻止存在远程源的模型下载（[03 §8](03-model-providers.md)、[ADR-26](08-decisions.md)） |
 
 ## 2. 进程与窗口模型
 

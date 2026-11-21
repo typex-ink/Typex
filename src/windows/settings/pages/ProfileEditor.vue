@@ -61,11 +61,26 @@ function initialReasoningEffort(profile: ProviderProfile | null): ReasoningEffor
   return "none";
 }
 
-const presetId = ref<string>(
-  props.profile?.kind === "local"
-    ? (presets.find((p) => p.kind === "local")?.id ?? presets[presets.length - 1].id)
-    : presets[presets.length - 1].id, // 默认「自定义」
-);
+function resolveInitialPresetId(profile: ProviderProfile | null): string {
+  const customId =
+    presets.find((p) => p.id.startsWith("custom-"))?.id ?? presets[presets.length - 1].id;
+  if (!profile) return customId;
+  if (profile.kind === "local") {
+    return presets.find((p) => p.kind === "local")?.id ?? customId;
+  }
+  if (profile.kind === "volcengine") {
+    return presets.find((p) => p.kind === "volcengine")?.id ?? customId;
+  }
+  const normalizedBaseUrl = (profile.base_url ?? "").trim().replace(/\/+$/, "");
+  if (!normalizedBaseUrl) return customId;
+  return (
+    presets.find(
+      (p) => p.kind !== "local" && p.base_url.trim().replace(/\/+$/, "") === normalizedBaseUrl,
+    )?.id ?? customId
+  );
+}
+
+const presetId = ref<string>(resolveInitialPresetId(props.profile));
 const label = ref(props.profile?.label ?? "");
 const baseUrl = ref(props.profile?.base_url ?? "");
 const model = ref(props.profile?.model ?? "");
@@ -86,6 +101,15 @@ const isNew = computed(() => !props.profile);
 const draftProfileId = props.profile?.id ?? `p-${Date.now().toString(36)}`;
 const isVolc = computed(() => kind.value === "volcengine");
 const isLocal = computed(() => kind.value === "local");
+const currentPreset = computed(() => presets.find((p) => p.id === presetId.value) ?? null);
+const suggestedModels = computed(() => currentPreset.value?.models ?? []);
+const showModelSuggestions = computed(() => {
+  if (isLocal.value) return false;
+  if (suggestedModels.value.length > 1) return true;
+  return (
+    suggestedModels.value.length === 1 && model.value.trim() !== suggestedModels.value[0]
+  );
+});
 const timeoutHintKey = computed(() =>
   props.capability === "stt"
     ? "settings.profile.timeout_hint_stt"
@@ -412,7 +436,27 @@ onUnmounted(() => unlistenProgress?.());
         <span class="w280"><Input v-model="baseUrl" mono :placeholder="t('settings.profile.endpoint_ph')" /></span>
       </FormRow>
       <FormRow :label="t('settings.profile.model')">
-        <span class="w280"><Input v-model="model" mono :placeholder="t('settings.profile.model_ph')" /></span>
+        <span class="w280 model-field">
+          <Input v-model="model" mono :placeholder="t('settings.profile.model_ph')" />
+          <span
+            v-if="showModelSuggestions"
+            class="model-chips"
+            role="group"
+            :aria-label="t('settings.profile.model_suggestions')"
+          >
+            <button
+              v-for="candidate in suggestedModels"
+              :key="candidate"
+              type="button"
+              class="model-chip"
+              :class="{ active: model.trim() === candidate }"
+              :aria-pressed="model.trim() === candidate"
+              @click="model = candidate"
+            >
+              {{ candidate }}
+            </button>
+          </span>
+        </span>
       </FormRow>
       <FormRow v-if="capability !== 'stt'" :label="t('settings.profile.api_format')">
         <Select
@@ -480,6 +524,48 @@ onUnmounted(() => unlistenProgress?.());
 .w280 {
   width: 280px;
   display: inline-block;
+}
+.model-field {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.model-chip {
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+.model-chip:hover {
+  border-color: var(--border-2);
+  color: var(--text-1);
+}
+.model-chip.active {
+  background: var(--sel-bg);
+  border-color: var(--border-2);
+  color: var(--text-1);
+  font-weight: 600;
+}
+.model-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-chip {
+    transition: none;
+  }
 }
 .timeout-field {
   width: 120px;

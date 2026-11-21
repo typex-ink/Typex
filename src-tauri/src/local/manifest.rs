@@ -36,10 +36,13 @@ pub enum ModelPurpose {
 pub enum ModelEngine {
     /// sherpa-onnx（SenseVoice 轻量 STT）。
     Sherpa,
-    /// sherpa-onnx Whisper（高配 STT）。
+    /// sherpa-onnx Whisper（多语种 STT）。
     #[serde(rename = "sherpa_whisper")]
     SherpaWhisper,
-    /// llama.cpp（Qwen3-ASR / Qwen 系列 GGUF）。
+    /// sherpa-onnx NeMo Transducer/TDT（Parakeet 高速英/欧语 STT）。
+    #[serde(rename = "sherpa_transducer")]
+    SherpaTransducer,
+    /// llama.cpp（Qwen3-ASR / GGUF LLM）。
     Llama,
 }
 
@@ -219,6 +222,76 @@ pub fn catalog() -> Vec<ModelEntry> {
                 "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3/resolve/main",
             )],
             min_ram_gb: 16,
+            requires_gpu: false,
+        },
+        ModelEntry {
+            id: "whisper-large-v3-turbo-int8".into(),
+            display_name: "Whisper large-v3-turbo (int8)".into(),
+            purpose: ModelPurpose::Stt,
+            engine: ModelEngine::SherpaWhisper,
+            files: vec![
+                ModelFile {
+                    name: "turbo-encoder.int8.onnx".into(),
+                    bytes: 674_716_297,
+                    sha256: "b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b"
+                        .into(),
+                },
+                ModelFile {
+                    name: "turbo-decoder.int8.onnx".into(),
+                    bytes: 361_080_764,
+                    sha256: "20accd02388482eb3a46bd615631adfdc85e1eb2c7db9ea3f02a40ffe6b81547"
+                        .into(),
+                },
+                ModelFile {
+                    name: "turbo-tokens.txt".into(),
+                    bytes: 816_730,
+                    sha256: "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126"
+                        .into(),
+                },
+            ],
+            license: "MIT".into(),
+            sources: vec![hf(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main",
+            )],
+            min_ram_gb: 8,
+            requires_gpu: false,
+        },
+        ModelEntry {
+            id: "parakeet-tdt-0.6b-v3-int8".into(),
+            display_name: "Parakeet TDT 0.6B v3 (int8)".into(),
+            purpose: ModelPurpose::Stt,
+            engine: ModelEngine::SherpaTransducer,
+            files: vec![
+                ModelFile {
+                    name: "encoder.int8.onnx".into(),
+                    bytes: 652_282_294,
+                    sha256: "1afbe69c1ffdabee94755f42e4daf1d93549131a3da11356bda84fcef0f2c479"
+                        .into(),
+                },
+                ModelFile {
+                    name: "decoder.int8.onnx".into(),
+                    bytes: 11_845_274,
+                    sha256: "0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5"
+                        .into(),
+                },
+                ModelFile {
+                    name: "joiner.int8.onnx".into(),
+                    bytes: 6_355_277,
+                    sha256: "cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98"
+                        .into(),
+                },
+                ModelFile {
+                    name: "tokens.txt".into(),
+                    bytes: 93_939,
+                    sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"
+                        .into(),
+                },
+            ],
+            license: "CC-BY-4.0".into(),
+            sources: vec![hf(
+                "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main",
+            )],
+            min_ram_gb: 4,
             requires_gpu: false,
         },
         // ── LLM ───────────────────────────────────────────────────────────────
@@ -452,6 +525,118 @@ pub fn catalog() -> Vec<ModelEntry> {
             min_ram_gb: 8,
             requires_gpu: false,
         },
+        ModelEntry {
+            id: "granite-4.0-h-micro-q4".into(),
+            display_name: "Granite 4.0 H-Micro 3B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "granite-4.0-h-micro-Q4_K_M.gguf".into(),
+                bytes: 1_942_564_512,
+                sha256: "bcc78b9b25450101d1ad90d4b9a264e1bac892f534dfb76066f4eec792fdf023".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/ibm-granite/granite-4.0-h-micro-GGUF/resolve/main"),
+                ms(
+                    "https://modelscope.cn/models/ibm-granite/granite-4.0-h-micro-GGUF/resolve/master",
+                ),
+            ],
+            min_ram_gb: 8,
+            requires_gpu: false,
+        },
+        ModelEntry {
+            id: "granite-4.0-h-tiny-q4".into(),
+            display_name: "Granite 4.0 H-Tiny 7B-A1B Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "granite-4.0-h-tiny-Q4_K_M.gguf".into(),
+                bytes: 4_230_976_352,
+                sha256: "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF/resolve/main"),
+                ms(
+                    "https://modelscope.cn/models/ibm-granite/granite-4.0-h-tiny-GGUF/resolve/master",
+                ),
+            ],
+            min_ram_gb: 8,
+            requires_gpu: false,
+        },
+        ModelEntry {
+            id: "gemma-4-e2b-it-q4".into(),
+            display_name: "Gemma 4 E2B Instruct Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "gemma-4-E2B-it-Q4_K_M.gguf".into(),
+                bytes: 3_106_738_272,
+                sha256: "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/unsloth/gemma-4-E2B-it-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 8,
+            requires_gpu: false,
+        },
+        ModelEntry {
+            id: "gemma-4-e4b-it-q4".into(),
+            display_name: "Gemma 4 E4B Instruct Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "gemma-4-E4B-it-Q4_K_M.gguf".into(),
+                bytes: 4_977_171_584,
+                sha256: "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/unsloth/gemma-4-E4B-it-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 16,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "gemma-4-26b-a4b-it-q4".into(),
+            display_name: "Gemma 4 26B-A4B Instruct Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf".into(),
+                bytes: 16_947_541_728,
+                sha256: "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 24,
+            requires_gpu: true,
+        },
+        ModelEntry {
+            id: "gemma-4-31b-it-q4".into(),
+            display_name: "Gemma 4 31B Instruct Q4".into(),
+            purpose: ModelPurpose::Llm,
+            engine: ModelEngine::Llama,
+            files: vec![ModelFile {
+                name: "gemma-4-31B-it-Q4_K_M.gguf".into(),
+                bytes: 18_323_733_440,
+                sha256: "38bd64c852c4b460434cc7162fa9bdcf242faf86502581a754cb72956bb17f84".into(),
+            }],
+            license: "Apache-2.0".into(),
+            sources: vec![
+                hf("https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main"),
+                ms("https://modelscope.cn/models/unsloth/gemma-4-31B-it-GGUF/resolve/master"),
+            ],
+            min_ram_gb: 32,
+            requires_gpu: true,
+        },
     ]
 }
 
@@ -538,7 +723,7 @@ mod tests {
 
     #[test]
     fn catalog_has_expanded_entries() {
-        assert!(catalog().len() >= 17);
+        assert_eq!(catalog().len(), 25);
     }
 
     #[test]
@@ -570,6 +755,9 @@ mod tests {
         assert!(gpu_required.contains(&"qwen3-14b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3-30b-a3b-q4".to_string()));
         assert!(gpu_required.contains(&"qwen3-32b-q4".to_string()));
+        assert!(gpu_required.contains(&"gemma-4-e4b-it-q4".to_string()));
+        assert!(gpu_required.contains(&"gemma-4-26b-a4b-it-q4".to_string()));
+        assert!(gpu_required.contains(&"gemma-4-31b-it-q4".to_string()));
     }
 
     #[test]
@@ -687,6 +875,145 @@ mod tests {
                 "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/65ca473c4b541e5be2d509e2407b7d43988dfc90",
             ),]
         );
+    }
+
+    #[test]
+    fn whisper_turbo_and_parakeet_v3_entries_match_published_onnx() {
+        let turbo = entry_by_id("whisper-large-v3-turbo-int8");
+        assert_eq!(turbo.purpose, ModelPurpose::Stt);
+        assert_eq!(turbo.engine, ModelEngine::SherpaWhisper);
+        assert_eq!(turbo.license, "MIT");
+        assert_eq!(turbo.min_ram_gb, 8);
+        assert!(!turbo.requires_gpu);
+        assert_eq!(turbo.files.len(), 3);
+        assert!(
+            turbo
+                .files
+                .iter()
+                .all(|f| f.bytes > 0 && f.sha256.len() == 64)
+        );
+
+        let parakeet = entry_by_id("parakeet-tdt-0.6b-v3-int8");
+        assert_eq!(parakeet.purpose, ModelPurpose::Stt);
+        assert_eq!(parakeet.engine, ModelEngine::SherpaTransducer);
+        assert_eq!(parakeet.license, "CC-BY-4.0");
+        assert_eq!(parakeet.min_ram_gb, 4);
+        assert!(!parakeet.requires_gpu);
+        assert_eq!(
+            file_names(&parakeet),
+            vec![
+                "encoder.int8.onnx",
+                "decoder.int8.onnx",
+                "joiner.int8.onnx",
+                "tokens.txt",
+            ]
+        );
+        assert!(
+            parakeet
+                .files
+                .iter()
+                .all(|f| f.bytes > 0 && f.sha256.len() == 64)
+        );
+    }
+
+    #[test]
+    fn granite4_and_gemma4_entries_match_published_ggufs_and_stay_out_of_auto_tiers() {
+        let expected = [
+            (
+                "granite-4.0-h-micro-q4",
+                "granite-4.0-h-micro-Q4_K_M.gguf",
+                1_942_564_512_u64,
+                "bcc78b9b25450101d1ad90d4b9a264e1bac892f534dfb76066f4eec792fdf023",
+                8_u32,
+                false,
+                "ibm-granite/granite-4.0-h-micro-GGUF",
+            ),
+            (
+                "granite-4.0-h-tiny-q4",
+                "granite-4.0-h-tiny-Q4_K_M.gguf",
+                4_230_976_352,
+                "5a38b08c441ae1adbafb1d2b8a7167e0d48734d83af68b268cefea1eec553dcd",
+                8,
+                false,
+                "ibm-granite/granite-4.0-h-tiny-GGUF",
+            ),
+            (
+                "gemma-4-e2b-it-q4",
+                "gemma-4-E2B-it-Q4_K_M.gguf",
+                3_106_738_272,
+                "740185b21d22ceb83a11c3aa62ad5842ef32c70f6096d756bbee85a1e4ec34b8",
+                8,
+                false,
+                "unsloth/gemma-4-E2B-it-GGUF",
+            ),
+            (
+                "gemma-4-e4b-it-q4",
+                "gemma-4-E4B-it-Q4_K_M.gguf",
+                4_977_171_584,
+                "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+                16,
+                true,
+                "unsloth/gemma-4-E4B-it-GGUF",
+            ),
+            (
+                "gemma-4-26b-a4b-it-q4",
+                "gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
+                16_947_541_728,
+                "f2c28b3dc4776931ac6f879e11f203dec637ea0f14267a86ec8f6165f63f293f",
+                24,
+                true,
+                "unsloth/gemma-4-26B-A4B-it-GGUF",
+            ),
+            (
+                "gemma-4-31b-it-q4",
+                "gemma-4-31B-it-Q4_K_M.gguf",
+                18_323_733_440,
+                "38bd64c852c4b460434cc7162fa9bdcf242faf86502581a754cb72956bb17f84",
+                32,
+                true,
+                "unsloth/gemma-4-31B-it-GGUF",
+            ),
+        ];
+
+        for (id, file_name, bytes, sha256, min_ram_gb, requires_gpu, repo) in expected {
+            let entry = entry_by_id(id);
+            assert_eq!(entry.purpose, ModelPurpose::Llm);
+            assert_eq!(entry.engine, ModelEngine::Llama);
+            assert_eq!(entry.license, "Apache-2.0");
+            assert_eq!(entry.min_ram_gb, min_ram_gb);
+            assert_eq!(entry.requires_gpu, requires_gpu);
+            assert_eq!(
+                entry.files,
+                vec![ModelFile {
+                    name: file_name.into(),
+                    bytes,
+                    sha256: sha256.into(),
+                }]
+            );
+            assert_eq!(
+                entry
+                    .sources
+                    .iter()
+                    .map(|s| (s.id.clone(), s.url_prefix.clone()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (
+                        "huggingface".into(),
+                        format!("https://huggingface.co/{repo}/resolve/main"),
+                    ),
+                    (
+                        "modelscope".into(),
+                        format!("https://modelscope.cn/models/{repo}/resolve/master"),
+                    ),
+                ]
+            );
+            assert!(
+                !crate::local::hardware::Tier::ALL
+                    .iter()
+                    .any(|tier| tier.model_ids().contains(&id)),
+                "{id} 不应进入自动硬件分档"
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! 本地 LLM Provider · llama.cpp + Qwen 系列 GGUF（03 §3.3 / ADR-20/22）。
+//! 本地 LLM Provider · llama.cpp + GGUF（03 §3.3 / ADR-20/22）。
 //!
 //! 实现同一 `LlmProvider` trait（流式 delta 与云端一致）：推理在专属线程逐
 //! token 生成，经 tokio mpsc channel 转成 BoxStream。上下文 4K（整理/翻译都是
@@ -542,6 +542,43 @@ impl VisibleOutputTracker {
     }
 }
 
+fn is_gemma4_chat_template(tmpl: &str) -> bool {
+    tmpl.contains("<|turn>") && tmpl.contains("<turn|>")
+}
+
+fn template_uses_thinking_directive(tmpl: &str) -> bool {
+    let is_chatml = tmpl.contains("<|im_start|>")
+        && !tmpl.contains("<|im_sep|>")
+        && !tmpl.contains("<end_of_utterance>");
+    is_chatml
+        && (tmpl.contains("/no_think")
+            || tmpl.contains("enable_thinking")
+            || tmpl.contains("<think>"))
+}
+
+fn build_gemma4_prompt(req: &LlmRequest, enable_thinking: bool) -> String {
+    let mut prompt = String::from("<bos>");
+    let sys = req.system.trim();
+    if enable_thinking || !sys.is_empty() {
+        prompt.push_str("<|turn>system\n");
+        if enable_thinking {
+            prompt.push_str("<|think|>\n");
+        }
+        prompt.push_str(sys);
+        prompt.push_str("<turn|>\n");
+    }
+    for m in &req.messages {
+        let role = if m.role == "assistant" {
+            "model"
+        } else {
+            m.role.as_str()
+        };
+        prompt.push_str(&format!("<|turn>{role}\n{}<turn|>\n", m.content.trim()));
+    }
+    prompt.push_str("<|turn>model\n");
+    prompt
+}
+
 /// 组装 prompt：优先模型内置 chat 模板（GGUF metadata），缺失时手拼 Qwen ChatML。
 fn build_prompt(
     model: &LlamaModel,
@@ -550,6 +587,11 @@ fn build_prompt(
 ) -> Result<String, ProviderError> {
     let last_user = req.messages.iter().rposition(|m| m.role == "user");
     if let Ok(template) = model.chat_template(None) {
+        let raw_tmpl = template.to_str().unwrap_or_default();
+        if is_gemma4_chat_template(raw_tmpl) {
+            return Ok(build_gemma4_prompt(req, enable_thinking));
+        }
+        let inject_directive = template_uses_thinking_directive(raw_tmpl);
         let mut chat = Vec::with_capacity(req.messages.len() + 1);
         if !req.system.is_empty() {
             chat.push(
@@ -558,7 +600,7 @@ fn build_prompt(
             );
         }
         for (idx, m) in req.messages.iter().enumerate() {
-            let content = if Some(idx) == last_user {
+            let content = if inject_directive && Some(idx) == last_user {
                 append_thinking_directive(&m.content, enable_thinking)
             } else {
                 m.content.clone()
@@ -1243,6 +1285,70 @@ mod tests {
         assert!(!output.has_emitted());
         assert_eq!(output.push("visible"), Some("visible".into()));
         assert!(output.has_emitted());
+    }
+
+    #[test]
+    fn gemma4_prompt_formats_turns_and_thinking_token_without_chatml_directive() {
+        let req = LlmRequest {
+            system: "  你是翻译助手  ".into(),
+            messages: vec![
+                crate::providers::llm::Msg {
+                    role: "user".into(),
+                    content: "  Hello world  ".into(),
+                },
+                crate::providers::llm::Msg {
+                    role: "assistant".into(),
+                    content: "  你好，世界  ".into(),
+                },
+            ],
+            temperature: 0.0,
+            max_tokens: Some(64),
+        };
+
+        assert_eq!(
+            build_gemma4_prompt(&req, false),
+            "<bos><|turn>system\n你是翻译助手<turn|>\n<|turn>user\nHello world<turn|>\n<|turn>model\n你好，世界<turn|>\n<|turn>model\n"
+        );
+        assert_eq!(
+            build_gemma4_prompt(&req, true),
+            "<bos><|turn>system\n<|think|>\n你是翻译助手<turn|>\n<|turn>user\nHello world<turn|>\n<|turn>model\n你好，世界<turn|>\n<|turn>model\n"
+        );
+
+        let empty_system = LlmRequest {
+            system: String::new(),
+            messages: vec![crate::providers::llm::Msg {
+                role: "user".into(),
+                content: "ping".into(),
+            }],
+            temperature: 0.0,
+            max_tokens: Some(16),
+        };
+        assert_eq!(
+            build_gemma4_prompt(&empty_system, false),
+            "<bos><|turn>user\nping<turn|>\n<|turn>model\n"
+        );
+        assert_eq!(
+            build_gemma4_prompt(&empty_system, true),
+            "<bos><|turn>system\n<|think|>\n<turn|>\n<|turn>user\nping<turn|>\n<|turn>model\n"
+        );
+    }
+
+    #[test]
+    fn thinking_directive_detection_targets_only_thinking_chatml_templates() {
+        let qwen_tmpl = "{% for m in messages %}<|im_start|>{{ m.role }}\n{{ m.content }}<|im_end|>{% endfor %}{% if enable_thinking %}<think>{% endif %}";
+        let smollm3_tmpl = "<|im_start|>user\n{{ content }} /no_think<|im_end|>";
+        let granite4_tmpl =
+            "{% set g4_default_system_message = '' %}<|start_of_role|>user<|end_of_role|><tools>";
+        let phi4_tmpl = "<|im_start|>system<|im_sep|>{{ content }}<|im_end|>";
+        let gemma4_tmpl = "{{ bos_token }}<|turn>user\n{{ content }}<turn|>\n";
+
+        assert!(template_uses_thinking_directive(qwen_tmpl));
+        assert!(template_uses_thinking_directive(smollm3_tmpl));
+        assert!(!template_uses_thinking_directive(granite4_tmpl));
+        assert!(!template_uses_thinking_directive(phi4_tmpl));
+        assert!(!template_uses_thinking_directive(gemma4_tmpl));
+        assert!(is_gemma4_chat_template(gemma4_tmpl));
+        assert!(!is_gemma4_chat_template(qwen_tmpl));
     }
 
     #[test]

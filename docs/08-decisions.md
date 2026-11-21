@@ -126,8 +126,9 @@
   - 档位只是首次下载的默认组合；下载后各槽位仍可在模型库中自由更换单个模型。
   - **高配手动模型**（不自动下载）：Whisper large-v3 int8（STT，约 1.8 GB，RAM ≥ 16 GB）；Qwen3-14B Q4（约 9.0 GB，RAM ≥ 32 GB）；Qwen3-30B-A3B Q4（约 18.6 GB，RAM ≥ 32 GB）；Qwen3-32B Q4（约 19.8 GB，RAM ≥ 48 GB）。
 - **2026-08-15 清单扩展**：在不改变 Qwen3.5 零配置分档的前提下，新增 Qwen3.6-27B / 35B-A3B 与 Qwen3.8-27B Q4_K_M 作为高配手动 LLM。Qwen3.6 使用 `ggml-org` 的 llama.cpp GGUF（约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速），Qwen3.8 使用 Unsloth GGUF（约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速）；均只下载文本主 GGUF。Qwen3.8 发布后曾原地更新内嵌 chat template，导致 Hugging Face 与 ModelScope 镜像字节不一致；清单因此固定到已校验的 Hugging Face 提交，镜像一致前不暴露 ModelScope 源。
-- **工程注意**：llama.cpp 音频(qwen3vl)支持仍标 experimental、有长音频 bug——用现有 VAD 切片规避（短分段转写本来就是 F-1 的路径）；1.7B STT 仅在 GPU 加速可用时提供。Whisper large-v3 当前走 sherpa-onnx CPU provider，界面不承诺 GPU 加速；后续如启用 CUDA/CoreML 需单独做运行时能力探测。问答槽不做本地兜底的口径不变（ADR-20）；若用户设备属性能档，设置中允许**手动**把问答槽指向本地大档模型（默认仍为空 + 配置引导）。
-- **影响**：whisper.cpp 从「补充引擎」降为可选扩展（Qwen3-ASR 的 52 语言覆盖已够长尾，Whisper large-v3 已由 sherpa-onnx 覆盖）；Whisper large-v3-turbo、NVIDIA Parakeet、Moonshine 等模型需新增运行时或稳定导出后再进入内置下载清单。模型库清单（[03 §8](03-model-providers.md)）按档位组织，并支持用户托管导入清单外模型。
+- **2026-11-22 清单与预设扩展**：保留全部现有内置条目与三档自动推荐不变，追加 STT `Whisper large-v3-turbo int8`（`SherpaWhisper`，约 1.04 GB，CPU 推理远快于原版 `large-v3`）与 `Parakeet TDT 0.6B v3 int8`（复用已随 `sherpa-rs 0.6.8` / `sherpa-onnx 1.12.9` 编译的 `nemo_transducer` 识别器新增 `SherpaTransducer`，约 671 MB，覆盖英文与 25 种欧洲语言）；追加 LLM `Granite 4.0 H-Micro 3B / H-Tiny 7B-A1B Q4_K_M` 与 Apache-2.0 许可的 `Gemma 4` 系列（`E2B` / `E4B` / `26B-A4B` / `31B` Q4_K_M，Hugging Face 与 ModelScope 镜像 SHA-256 一致）。为兼容 Gemma 4 的 `<|turn>` 聊天模板与 `<|channel>thought...<channel|>` 思考通道，本地 `LlamaLlm` 增加专用模板分支并将 `/think`、`/no_think` 控制词收敛至消费该指令的 ChatML 模型，`ThinkingFilter` 同步过滤两类思考块。
+- **工程注意**：llama.cpp 音频(qwen3vl)支持仍标 experimental、有长音频 bug——用现有 VAD 切片规避（短分段转写本来就是 F-1 的路径）；1.7B STT 仅在 GPU 加速可用时提供。Whisper 与 Parakeet 当前走 sherpa-onnx CPU provider，界面不承诺 GPU 加速；后续如启用 CUDA/CoreML 需单独做运行时能力探测。问答槽不做本地兜底的口径不变（ADR-20）；若用户设备属性能档，设置中允许**手动**把问答槽指向本地大档模型（默认仍为空 + 配置引导）。
+- **影响**：whisper.cpp 从「补充引擎」降为可选扩展（Qwen3-ASR 的 52 语言覆盖已够长尾，Whisper large-v3 / large-v3-turbo 与 Parakeet v3 已由 sherpa-onnx 覆盖）；Moonshine 等模型需补充运行时封装后再进入内置下载清单。模型库清单（[03 §8](03-model-providers.md)）按档位组织，并支持用户托管导入清单外模型。
 
 ### ADR-23 · 助手交互重构：回答弹窗只在有回答要展示时出现（2026-07-06，项目所有者拍板）
 

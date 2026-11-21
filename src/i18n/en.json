@@ -195,6 +195,7 @@
       "endpoint_ph": "(official endpoint by default)",
       "model": "Model",
       "model_ph": "Model name",
+      "model_suggestions": "Suggested models",
       "api_format": "API format",
       "kind_chat": "Chat Completions (OpenAI-compatible)",
       "kind_responses": "Responses (OpenAI's new protocol)",

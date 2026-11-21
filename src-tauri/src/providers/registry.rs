@@ -335,10 +335,10 @@ impl ProviderRegistry {
         )))
     }
 
-    /// 本地 STT：按 model id 选引擎（sherpa / sherpa_whisper / llama mtmd）。
+    /// 本地 STT：按 model id 选引擎（sherpa / sherpa_whisper / sherpa_transducer / llama mtmd）。
     #[cfg(feature = "local-models")]
     fn build_local_stt(&self, profile: &ProviderProfile) -> Result<Arc<dyn SttProvider>> {
-        use crate::local::{manifest, stt_qwen_asr, stt_sense_voice, stt_whisper};
+        use crate::local::{manifest, stt_qwen_asr, stt_sense_voice, stt_transducer, stt_whisper};
         let dir = self
             .models_data_dir
             .lock()
@@ -402,6 +402,45 @@ impl ProviderRegistry {
                 Ok(Arc::new(stt_whisper::WhisperStt::from_files(
                     encoder,
                     decoder,
+                    tokens,
+                    threads as i32,
+                )))
+            }
+            manifest::ModelEngine::SherpaTransducer => {
+                let encoder = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.contains("encoder") && f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| {
+                        TypexError::new(ErrorCode::Internal, "清单缺 Transducer encoder 文件")
+                    })?;
+                let decoder = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.contains("decoder") && f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| {
+                        TypexError::new(ErrorCode::Internal, "清单缺 Transducer decoder 文件")
+                    })?;
+                let joiner = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.contains("joiner") && f.name.ends_with(".onnx"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| {
+                        TypexError::new(ErrorCode::Internal, "清单缺 Transducer joiner 文件")
+                    })?;
+                let tokens = entry
+                    .files
+                    .iter()
+                    .find(|f| f.name.ends_with("tokens.txt"))
+                    .map(|f| model_dir.join(&f.name))
+                    .ok_or_else(|| TypexError::new(ErrorCode::Internal, "清单缺 tokens.txt"))?;
+                Ok(Arc::new(stt_transducer::TransducerStt::from_files(
+                    encoder,
+                    decoder,
+                    joiner,
                     tokens,
                     threads as i32,
                 )))
@@ -839,5 +878,49 @@ mod tests {
 
         reg.build_llm(&profile)
             .expect("本地 LLM 档案不应要求 api_key");
+    }
+
+    #[cfg(feature = "local-models")]
+    #[test]
+    fn local_stt_and_llm_build_for_new_catalog_models() {
+        let reg = ProviderRegistry::new(Settings::default());
+        let data_dir = tempfile::tempdir().unwrap();
+        reg.set_models_data_dir(data_dir.path().to_path_buf());
+
+        for model_id in ["whisper-large-v3-turbo-int8", "parakeet-tdt-0.6b-v3-int8"] {
+            let stt_profile = ProviderProfile {
+                id: format!("local-{model_id}"),
+                capability: ProviderCapability::Stt,
+                kind: ProviderKind::Local,
+                label: model_id.into(),
+                base_url: String::new(),
+                model: model_id.into(),
+                credentials: HashMap::new(),
+                extra_headers: HashMap::new(),
+                extra_form: HashMap::new(),
+                timeout_ms: 60_000,
+                options: HashMap::new(),
+            };
+            reg.build_stt(&stt_profile)
+                .unwrap_or_else(|e| panic!("应能构建本地 STT {model_id}: {e:?}"));
+        }
+
+        for model_id in ["granite-4.0-h-micro-q4", "gemma-4-e2b-it-q4"] {
+            let llm_profile = ProviderProfile {
+                id: format!("local-{model_id}"),
+                capability: ProviderCapability::Llm,
+                kind: ProviderKind::Local,
+                label: model_id.into(),
+                base_url: String::new(),
+                model: model_id.into(),
+                credentials: HashMap::new(),
+                extra_headers: HashMap::new(),
+                extra_form: HashMap::new(),
+                timeout_ms: 60_000,
+                options: HashMap::new(),
+            };
+            reg.build_llm(&llm_profile)
+                .unwrap_or_else(|e| panic!("应能构建本地 LLM {model_id}: {e:?}"));
+        }
     }
 }

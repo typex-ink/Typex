@@ -50,7 +50,7 @@ Content-Type: multipart/form-data
 
 form fields:
   file            = audio.wav (必填)
-  model           = {model}   (必填, 如 gpt-4o-mini-transcribe / whisper-large-v3-turbo)
+  model           = {model}   (必填, 如 gpt-transcribe / whisper-large-v3-turbo)
   language        = zh        (可选, ISO-639-1, 提升精度与速度)
   prompt          = ...       (可选, F-10 词典词条；一行一个术语)
   response_format = json      (固定 json, 最大兼容)
@@ -137,8 +137,9 @@ Language: auto 或 zh
   - Qwen3-ASR 的 llama.cpp / OpenAI-compatible 网关输出可能带 `language Chinese<asr_text>...` 包装；Provider 层必须剥离 `language ...<asr_text>` 前缀、把语言填入 `Transcript.detected_language`，不得把包装文本传给 orchestrator / 前端 / 注入层。
   - 缓存条目记录 GPU/CPU load mode，同一缓存的转写通过独占 inference lease 串行执行。仅 GPU-loaded 条目的不透明 mtmd 初始化错误或 context/eval/decode 运行错误触发一次完整 CPU 重载，并用同一音频与词典从头重试；CPU 模型设备列表为空，context offload 与 mtmd GPU 均关闭。fallback 先释放失败 GPU 代际，再在缓存锁外加载 CPU；WAV/GGUF/mmproj 预校验、明确的 `support_audio=false`、prompt/tokenize 等输入或模型契约错误不重试，显式 unload 后不得把重试模型重新写回缓存。
 - **SenseVoice（轻量档）**：sherpa-onnx（官方 Rust crate，静态链接）+ `SenseVoice-Small int8`（约 230 MB）。非自回归，CPU 实时数倍速——弱机器上唯一保证实时的选项；自带 VAD 可复用。F-10 词典经 sherpa hotwords 接口传入。
-- **Whisper large-v3（高配精度档）**：sherpa-onnx Whisper 导出（encoder/decoder int8 + tokens，约 1.8 GB）。质量和语言覆盖优先，CPU 推理通常低于实时，只作为设置页手动下载/选择的高精度 STT，不参与零配置推荐档。
-- whisper.cpp 降为可选扩展（当前 Whisper large-v3 先走 sherpa-onnx；large-v3-turbo / Parakeet / Moonshine 等需新增运行时或稳定导出后再进入清单）。
+- **Whisper large-v3 / large-v3-turbo（多语种精度档）**：sherpa-onnx Whisper 导出（encoder/decoder int8 + tokens）。`large-v3`（约 1.8 GB）质量优先但 CPU 推理通常低于实时；`large-v3-turbo`（约 1.04 GB，4 层 decoder）在 99 语种下保持接近 `large-v3` 的精度，同时 CPU 推理显著提速。两者均作为设置页手动下载/选择的 STT，不参与零配置推荐档。
+- **Parakeet TDT 0.6B v3（英/欧语高速档）**：sherpa-onnx NeMo Transducer/TDT 导出（`sherpa_transducer`，`model_type=nemo_transducer` + `greedy_search`，encoder/decoder/joiner int8 + tokens，约 671 MB，CC-BY-4.0）。覆盖英文与 25 种欧洲语言（不支持中文），CPU 延迟极低且英文准确率优异，作为设置页手动可选模型，启动前校验 `<blk>` 词表防止底层原生初始化异常退出。
+- whisper.cpp 降为可选扩展（当前 Whisper 系列与 Parakeet 已走 sherpa-onnx；Moonshine 等需补充运行时封装后再进入清单）。
 - `capabilities()` 报告：不限音频时长（本地无 25 MB 上限）；错误分类只剩 `InvalidRequest`/模型未下载。
 - 模型文件由**模型下载管理器**负责（见 §8）：不随安装包分发，按需下载。
 
@@ -173,7 +174,7 @@ Qwen3 / 千问类模型可能默认输出 `<think>...</think>` 推理块，语�
 
 - `profiles[].options.reasoning_effort` 是用户可配置字符串，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；缺省表示“不指定”，不向 OpenAI 兼容端点发送通用 reasoning 字段。对普通 OpenAI 兼容 Chat Completions 端点，请求体发送顶层 `reasoning_effort`。
 - `profiles[].options.enable_thinking` 是兼容旧配置和 Qwen 兼容端点的布尔值；对已知支持该扩展的 Qwen 兼容 Chat Completions 端点（SiliconFlow、DashScope/阿里兼容模式等），以及用户显式保存 thinking 配置的自定义 Qwen 端点，请求体发送顶层 `enable_thinking`。`reasoning_effort=none` 映射为 `false`，其他等级映射为 `true`，不把通用 `reasoning_effort` 发给这些端点。
-- 不论端点是否支持该参数，所有 LLM 流式 delta 在进入 orchestrator 前都要过滤完整或跨 chunk 分片的 `<think>...</think>` 块；内部推理不得出现在助手弹窗、整理/翻译结果或注入文本中。
+- 不论端点是否支持该参数，所有 LLM 流式 delta 在进入 orchestrator 前都要过滤完整或跨 chunk 分片的 `<think>...</think>` 与 Gemma 4 `<|channel>thought...<channel|>` 思考块；内部推理不得出现在助手弹窗、整理/翻译结果或注入文本中。
 
 ### 3.2 内置实现二：`responses`（OpenAI Responses 格式）
 
@@ -193,10 +194,10 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 进程内推理，实现同一个 `LlmProvider` trait（流式返回 delta 与云端一致）：
 
 - **引擎**：llama.cpp（`llama-cpp-2` 绑定——GGUF 生态最全，Apple Silicon Metal 加速成熟；与本地 STT 的 Qwen3-ASR 共用同一引擎，[ADR-22](08-decisions.md)）。
-- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；高配用户可手动下载 Qwen3.6 27B / 35B-A3B、Qwen3.8 27B 与 Qwen3 14B / 30B-A3B / 32B Q4_K_M。Apache 2.0，多语言，中文分词效率高；Qwen3.6/Qwen3.8 条目只下载文本推理所需的主 GGUF，不下载视觉 mmproj 或 MTP 辅助模型。Qwen3.8 固定到已校验的 Hugging Face 提交；ModelScope 镜像与该提交字节不一致期间不作为下载源。
+- **模型**：Qwen3.5 小模型系列 instruct GGUF（0.8B / 2B / 4B / 9B，Q4_K_M）按硬件档位/设置页下载；另提供轻量/中量可选模型 Granite 4.0（H-Micro 3B / H-Tiny 7B-A1B Q4_K_M）、Gemma 4（E2B / E4B Q4_K_M）、SmolLM3-3B、Granite 3.3 2B、Phi-4 Mini，以及高配手动模型 Gemma 4（26B-A4B UD-Q4_K_M / 31B Q4_K_M）、Qwen3.6 27B / 35B-A3B、Qwen3.8 27B 与 Qwen3 14B / 30B-A3B / 32B Q4_K_M。多模态模型（Qwen3.6 / Qwen3.8 / Gemma 4）条目只下载文本推理所需的主 GGUF，不下载视觉/音频 mmproj 或 MTP/dflash 辅助模型。Qwen3.8 固定到已校验的 Hugging Face 提交；ModelScope 镜像与该提交字节不一致期间不作为下载源。
 - **槽位策略**：本地 LLM 可绑定到「文本整理」「翻译模型」「问答模型」槽；零配置路径只自动指向整理/翻译，问答槽默认仍为空并显示配置引导。性能档设备可在设置中手动把问答槽指向本地 4B–35B 级模型（[ADR-22](08-decisions.md)）。
 - **运行时策略**：模型常驻内存或「录音开始时预热」（设置可选）；冷加载约 1–3 s。上下文窗口按需 4 K 即可（整理/翻译都是短输入）。缓存记录 GPU/CPU load mode；同一缓存的推理由独占租约串行执行。仅 GPU-loaded 模型在 context 初始化或 decode 失败、且 ThinkingFilter 后尚未向调用方发出首个可见 delta 时，允许严格关闭模型设备、K/Q/V 与算子 offload 后从头 CPU 重试一次。fallback 必须先从缓存移除并释放失败 GPU 代际，再在缓存锁外加载 CPU；显式 unload 与 CPU 加载竞态时本次请求使用 detached CPU 模型，不得回填过时代际。首个可见 delta 发出后发生错误时不得重放，直接返回明确错误；prompt/tokenize/上下文长度等输入错误、无 GPU、CPU-loaded 模型和 CPU 重试错误不再重试。`UnloadAfterUse` 只清理自己持有的缓存代际。
-- **思考模式**：本地 Qwen LLM 仅支持开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。Provider 在最后一条用户消息末尾注入 `/think` 或 `/no_think` 控制词。即便模型仍输出 `<think>...</think>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
+- **模板与思考模式**：本地 LLM 仅支持思考开关语义。`profiles[].options.reasoning_effort=none` 或缺省时视为关闭，其他 effort 等级视为开启；旧配置 `profiles[].options.enable_thinking=true` 继续等价于开启。对内置模板含 `<|turn>` 与 `<turn|>` 的 Gemma 4 模型，Provider 按官方模板直接构造 `<bos><|turn>...<turn|>`，并在开启思考时于首个 `system` turn 顶部注入 `<|think|>\n`；对消费 `/think`、`/no_think` 控制词的 ChatML 模型（Qwen / SmolLM3 及无内置模板的 Qwen ChatML 兜底），在最后一条用户消息末尾注入对应控制词；其余模型（如 Granite、Phi-4）直接套用内置模板，不注入字面量控制词。即便模型仍输出 `<think>...</think>` 或 `<|channel>thought...<channel|>`，Provider 层也会在流式 delta 进入 orchestrator 前过滤。
 - `capabilities()`：流式 = 是；错误分类只剩 `InvalidRequest`/模型未下载/内存不足。
 
 ### 3.4 System prompt 与固定任务消息（可在高级设置中覆盖）
@@ -485,8 +486,8 @@ F-3 不引入新的 Provider 类型：
     },
     {
       "id": "openai-gpt", "capability": "llm", "kind": "responses",
-      "label": "OpenAI · gpt-5",
-      "base_url": "https://api.openai.com/v1", "model": "gpt-5", "timeout_ms": 60000,
+      "label": "OpenAI · gpt-5.4",
+      "base_url": "https://api.openai.com/v1", "model": "gpt-5.4", "timeout_ms": 60000,
       "credentials": { "api_key": "sk-..." }
     },
     {
@@ -515,35 +516,36 @@ F-3 不引入新的 Provider 类型：
 - schema v11 以 `hotkeys.trigger_mode`（`hold` / `toggle`）替换 `hold_threshold_ms`。旧配置迁移为 `hold` 以保持原先主推的按住说话行为；触发方式在会话开始时快照，后端不再按按住时长推断语义。
 - profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`。STT 覆盖从转写调用开始到完整文本返回，LLM 覆盖连接、请求发送、首 token 等待与完整流式响应接收；本地与远端实现使用相同语义。同一 profile 被多个功能或连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
-- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / 火山·豆包 / DeepSeek / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥。
+- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / Mistral / 火山·豆包 / DeepSeek / 阿里百炼 · DashScope / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥；当预设附带多个建议模型时，编辑表单提供快捷候选胶囊供一键点选。
 - 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；成功展示延迟，失败展示分类后的错误摘要与完整 Provider 响应详情。HTTP 错误、流式错误以及成功 HTTP 响应的协议解析错误都必须把短摘要与未截断响应体分开保存；远端 JSON 响应在前端格式化后展示，非 JSON 文本原样展示。响应详情不进入日志或持久化，正常听写 / 翻译 / 助手错误仍只携带简短摘要。
 
 ## 7. 各厂商兼容性速查（配置预设的依据）
 
 | 厂商 | STT | LLM | 备注 |
 |---|---|---|---|
-| OpenAI | openai_compat | chat_completions / responses | 基准 |
-| Groq | openai_compat | chat_completions | STT 极快（whisper-turbo），语音输入首选预设 |
-| SiliconFlow | openai_compat（子集） | chat_completions | SenseVoice 中文；参数支持面窄 |
-| Xiaomi MiMo | **mimo adapter**（`/chat/completions` JSON + Base64 WAV） | chat_completions | MiMo ASR 不是 OpenAI Audio Transcriptions 兼容接口 |
-| 火山引擎 · 豆包 | **volcengine adapter** | chat_completions（方舟端点） | STT 双凭据；LLM 是 OpenAI 兼容的 |
-| DeepSeek | — | chat_completions | 整理/翻译高性价比 |
+| OpenAI | openai_compat（`gpt-transcribe`） | chat_completions / responses（`gpt-5.4` 系列） | 基准 |
+| Groq | openai_compat | chat_completions（`gpt-oss` / `qwen3.8`） | STT 极快（whisper-turbo），语音输入首选预设 |
+| SiliconFlow | openai_compat（子集） | chat_completions | SenseVoice / TeleSpeech 中文；参数支持面窄 |
+| Xiaomi MiMo | **mimo adapter**（`/chat/completions` JSON + Base64 WAV） | chat_completions（`mimo-v2.6` 系列） | MiMo ASR 不是 OpenAI Audio Transcriptions 兼容接口 |
+| Mistral | openai_compat（`voxtral-mini-latest`） | — | Voxtral 多语言转写 |
+| 火山引擎 · 豆包 | **volcengine adapter** | chat_completions（方舟端点，`doubao-seed-2-0` 系列） | STT 双凭据；LLM 是 OpenAI 兼容的 |
+| DeepSeek | — | chat_completions | 整理/翻译/推理高性价比 |
+| 阿里百炼 · DashScope | 扩展候选（chat-completions 变体传音频） | chat_completions 兼容端点（`qwen-flash` / `qwen-plus`） | LLM 内置预设并默认管理 `enable_thinking`；STT 格式特殊暂不做 |
 | OpenRouter | — | chat_completions / responses | 聚合网关 |
 | Ollama / 自建 | openai_compat（如 speaches） | chat_completions | 本地/内网 |
-| **本地 · 离线** | **local**（Qwen3-ASR GGUF / SenseVoice / Whisper large-v3·sherpa-onnx） | **local**（llama.cpp + Qwen3.5/Qwen3.6/Qwen3.8/Qwen3 GGUF，整理/翻译/问答槽可手动选择） | 零配置兜底仅用分档小组合；高配模型需手动下载，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md) |
-| 阿里 DashScope | 扩展候选（chat-completions 变体传音频） | chat_completions 兼容端点 | STT 格式特殊，当前不做 |
+| **本地 · 离线** | **local**（Qwen3-ASR GGUF / SenseVoice / Whisper large-v3 & turbo / Parakeet v3·sherpa-onnx） | **local**（llama.cpp + Qwen3.5/3.6/3.8/3、Granite 4.0、Gemma 4 GGUF，整理/翻译/问答槽可手动选择） | 零配置兜底仅用分档小组合；其余模型手动下载，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md) |
 | Deepgram / ElevenLabs | 扩展候选薄 adapter | — | 非 OpenAI 格式但协议简单 |
 
 ## 8. 模型下载管理器（配合 `local`）
 
 本地模型不随安装包分发（安装包只含推理引擎，约 +30–60 MB）；由下载管理器按需获取：
 
-- **模型库清单**：内置清单随应用更新，用户导入清单位于 `{app_data_dir}/models/user-models.json`。每个模型条目 = id、显示名、用途（stt/llm）、推理引擎（sherpa/sherpa_whisper/llama）、文件列表、字节数、SHA-256、许可证、可变下载源列表、硬件建议（RAM/是否建议 GPU 加速）。
-  - 内置清单（[ADR-22](08-decisions.md)）：STT = `sense-voice-small-int8` / `qwen3-asr-0.6b-q8` / `qwen3-asr-1.7b-q8` / `whisper-large-v3-int8`；LLM = `qwen3.5-0.8b-q4` / `qwen3.5-2b-q4` / `qwen3.5-4b-q4` / `qwen3.5-9b-q4` / `qwen3.6-27b-q4` / `qwen3.6-35b-a3b-q4` / `qwen3.8-27b-q4` / `qwen3-14b-q4` / `qwen3-30b-a3b-q4` / `qwen3-32b-q4` / `smollm3-3b-q4` / `granite-3.3-2b-instruct-q4` / `phi-4-mini-instruct-q4`。
+- **模型库清单**：内置清单随应用更新，用户导入清单位于 `{app_data_dir}/models/user-models.json`。每个模型条目 = id、显示名、用途（stt/llm）、推理引擎（`sherpa` / `sherpa_whisper` / `sherpa_transducer` / `llama`）、文件列表、字节数、SHA-256、许可证、可变下载源列表、硬件建议（RAM/是否建议 GPU 加速）。
+  - 内置清单（[ADR-22](08-decisions.md)）：STT = `sense-voice-small-int8` / `qwen3-asr-0.6b-q8` / `qwen3-asr-1.7b-q8` / `whisper-large-v3-int8` / `whisper-large-v3-turbo-int8` / `parakeet-tdt-0.6b-v3-int8`；LLM = `qwen3.5-0.8b-q4` / `qwen3.5-2b-q4` / `qwen3.5-4b-q4` / `qwen3.5-9b-q4` / `qwen3.6-27b-q4` / `qwen3.6-35b-a3b-q4` / `qwen3.8-27b-q4` / `qwen3-14b-q4` / `qwen3-30b-a3b-q4` / `qwen3-32b-q4` / `smollm3-3b-q4` / `granite-3.3-2b-instruct-q4` / `phi-4-mini-instruct-q4` / `granite-4.0-h-micro-q4` / `granite-4.0-h-tiny-q4` / `gemma-4-e2b-it-q4` / `gemma-4-e4b-it-q4` / `gemma-4-26b-a4b-it-q4` / `gemma-4-31b-it-q4`。
   - 用户导入模型 id 由 Typex 生成（`user-...`），只能显式选择到 local profile，不参与零配置兜底。
-- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3、Qwen3.6-27B/35B-A3B、Qwen3.8-27B 与 Qwen3 14B/30B/32B LLM 属于高配手动模型，不进入自动推荐档。Qwen3.6-27B/35B-A3B Q4_K_M 分别约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速；Qwen3.8-27B Q4_K_M 约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。`LocalModelInfo.hardware_ok` 只表示本机是否达到推荐条件，供 UI 显示性能警告；它不参与下载授权，wire shape 保持不变（[ADR-26](08-decisions.md)）。
+- **硬件分档推荐**：首次下载时探测设备（RAM 总量、CPU 核数、Metal/CUDA/Vulkan 可用性），自动勾选推荐档——轻量（SenseVoice + 0.8B，约 0.8 GB）/ 标准（ASR-0.6B + 2B，约 2.3 GB）/ 性能（ASR-1.7B + 4B，约 5.3 GB）；用户可改档或单选模型。Whisper large-v3 / large-v3-turbo、Parakeet v3、Granite 4.0、Gemma 4、Qwen3.6-27B/35B-A3B、Qwen3.8-27B 与 Qwen3 14B/30B/32B 均属于手动可选模型，不进入自动推荐档。Qwen3.6-27B/35B-A3B Q4_K_M 分别约 19.1/20.4 GB，建议 RAM ≥ 32 GB 且有 GPU 加速；Qwen3.8-27B Q4_K_M 约 17.1 GB，建议 RAM ≥ 24 GB 且有 GPU 加速；Gemma 4 E4B / 26B-A4B / 31B 分别约 5.0 / 16.9 / 18.3 GB，分别建议 RAM ≥ 16 / 24 / 32 GB 且有 GPU 加速。探测逻辑在 Rust 侧（`sysinfo` + 各加速后端探测），结果同时展示在诊断页。`LocalModelInfo.hardware_ok` 只表示本机是否达到推荐条件，供 UI 显示性能警告；它不参与下载授权，wire shape 保持不变（[ADR-26](08-decisions.md)）。
 - **下载源**：内置模型可有 HuggingFace / ModelScope / 官方源等多个源；默认按清单顺序自动换源，可在设置-模型服务-模型管理页底部固定为 HuggingFace 或 ModelScope（没有对应源的模型会提示无可用源）。下载按钮只由条目是否存在远程源（`downloadable`）和当前下载状态约束；低于推荐硬件仍可直接开始下载，不增加确认框。导入模型或无远程源条目仍不可下载。
 - **下载行为**：断点续传（HTTP Range）、SHA-256 校验、失败换源重试；进度经 Tauri event 推送 UI（onboarding 第 3 步与设置-模型服务页共用同一进度组件）。
-- **导入行为**：用户可导入已下载的 LLM GGUF、llama 音频 GGUF（主模型 + `mmproj*.gguf`）或 SenseVoice/sherpa ONNX（`.onnx` + `tokens.txt`）。导入采用托管模式：优先硬链接，失败则复制到 `{app_data_dir}/models/{model_id}/`，并计算本地文件 SHA-256。Whisper / Parakeet / Moonshine 导入需要进一步区分各运行时文件结构，当前只开放内置可下载的 Whisper large-v3。
+- **导入行为**：用户可导入已下载的 LLM GGUF、llama 音频 GGUF（主模型 + `mmproj*.gguf`）或 SenseVoice/sherpa ONNX（`.onnx` + `tokens.txt`）。导入采用托管模式：优先硬链接，失败则复制到 `{app_data_dir}/models/{model_id}/`，并计算本地文件 SHA-256。Whisper / Parakeet / Moonshine 导入需要进一步区分各运行时文件结构，当前只开放内置可下载的 Whisper 与 Parakeet 条目。
 - **存储**：`{app_data_dir}/models/{model_id}/`；设置-模型服务页显示占用体积、来源（内置/导入）、许可证、支持删除；删除被槽位引用的模型时警告。
 - **边界**：下载是本地 Provider 唯一的网络行为；不做后台自动更新模型（用户手动触发），与「零上报」承诺一致。
