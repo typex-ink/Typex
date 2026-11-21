@@ -20,7 +20,7 @@ jobs:
   # aggregates updater fragments and nightly metadata without rebuilding them.
   build-macos:
     name: Build macOS universal
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       PLATFORM_ID: macos-universal
     steps:
@@ -299,7 +299,7 @@ jobs:
     needs:
       - build-macos
       - build-windows
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

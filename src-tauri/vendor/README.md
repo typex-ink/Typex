@@ -49,6 +49,7 @@
   - 以 `CMakeLists.txt` 作为源码复制完成标记；自动删除并重建中断复制留下的不完整目录，复制后再次校验。
   - MSVC 构建显式禁用 Fortran 探测，避免 Eigen 的可选 BLAS 检查误选 PATH 中的 MinGW `gfortran`。
   - 从链接库和运行时资产中排除只供 sherpa 命令行示例使用的 `cargs`。
+  - 在复制动态库资产前自动创建目标父目录（如 `target/<profile>/deps`）并清理悬空软链接，兼容新版 Cargo 不再预先创建 `deps/` 目录的构建布局，同时在失败信息中保留底层 OS 错误原因。
 - [`sherpa-rs-sys/sherpa-onnx/cmake/show-info.cmake`](sherpa-rs-sys/sherpa-onnx/cmake/show-info.cmake)：不再调用新版 Windows 已移除的 WMIC，改用 CMake 提供的 host system 名称和版本。
 - [`sherpa-rs-sys/sherpa-onnx/cmake/onnxruntime-win-x64.cmake`](sherpa-rs-sys/sherpa-onnx/cmake/onnxruntime-win-x64.cmake)：不再依赖仅 Visual Studio generator 提供的 `CMAKE_VS_PLATFORM_NAME`，改用目标处理器和指针宽度校验 Windows x64，使 Ninja 等 single-config generator 可用。
 

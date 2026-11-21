@@ -17,7 +17,7 @@ concurrency:
 jobs:
   validate:
     name: Validate release version
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -68,7 +68,7 @@ jobs:
   build-macos:
     name: Build macOS universal
     needs: validate
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       PLATFORM_ID: macos-universal
     steps:
@@ -350,7 +350,7 @@ jobs:
       - validate
       - build-macos
       - build-windows
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

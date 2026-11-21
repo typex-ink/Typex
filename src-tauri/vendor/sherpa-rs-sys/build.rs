@@ -46,11 +46,29 @@ fn add_search_path<P: AsRef<Path>>(path: P) {
     println!("cargo:rustc-link-search={}", path.as_ref().display());
 }
 
+// Typex patch: Cargo's new build-dir layout does not pre-create `target/<profile>/deps`
+// before build scripts run; create parent directories and clear broken symlinks first.
 fn copy_file(src: PathBuf, dst: PathBuf) {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent).unwrap_or_else(|err| {
+            panic!(
+                "Failed to create destination directory {}: {err}",
+                parent.display()
+            )
+        });
+    }
+    if dst.symlink_metadata().is_ok() && !dst.exists() {
+        let _ = fs::remove_file(&dst);
+    }
     if let Err(err) = std::fs::hard_link(&src, &dst) {
         debug_log!("Failed to hardlink {:?}. fallback to copy.", err);
-        fs::copy(&src, &dst)
-            .unwrap_or_else(|_| panic!("Failed to copy {} to {}", src.display(), dst.display()));
+        fs::copy(&src, &dst).unwrap_or_else(|copy_err| {
+            panic!(
+                "Failed to copy {} to {}: {copy_err}",
+                src.display(),
+                dst.display()
+            )
+        });
     }
 }
 
