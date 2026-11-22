@@ -47,11 +47,12 @@ fn build_menu<R: Runtime>(
     }
     let target_menu = target_menu.build()?;
 
-    // 模型 ▸ 子菜单（ADR-21：四个功能槽快速切换）
+    // 模型 ▸ 子菜单（ADR-21 / ADR-30：五个功能槽快速切换，整理决策支持停用）
     let mut model_menu = SubmenuBuilder::with_id(app, "model_menu", "模型");
-    let groups: [(&str, SlotKind); 4] = [
+    let groups: [(&str, SlotKind); 5] = [
         ("听写", SlotKind::Stt),
         ("文本整理", SlotKind::Polish),
+        ("整理决策", SlotKind::Decision),
         ("翻译", SlotKind::Translate),
         ("问答", SlotKind::Assistant),
     ];
@@ -74,6 +75,13 @@ fn build_menu<R: Runtime>(
             .build(app)?;
         model_menu = model_menu.item(&header);
         let active = s.slots.get(&slot).and_then(|c| c.active_profile.as_deref());
+        if slot.is_optional() {
+            let off_item =
+                CheckMenuItemBuilder::with_id(format!("model_off:{slot:?}"), "停用（始终整理）")
+                    .checked(active.is_none())
+                    .build(app)?;
+            model_menu = model_menu.item(&off_item);
+        }
         for p in profiles {
             let item =
                 CheckMenuItemBuilder::with_id(format!("model:{:?}:{}", slot, p.id), &p.label)
@@ -256,6 +264,25 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                     let _ = settings.mutate(|s| s.translation.target_language = lang);
                     refresh(app);
                 }
+                id if id.starts_with("model_off:") => {
+                    let slot_str = id.trim_start_matches("model_off:");
+                    let slot = match slot_str {
+                        "Decision" => Some(SlotKind::Decision),
+                        _ => None,
+                    };
+                    if let Some(slot) = slot {
+                        let settings = app.state::<Arc<SettingsService>>();
+                        let _ = settings.mutate(|s| {
+                            s.slots.insert(
+                                slot,
+                                crate::settings::schema::SlotConfig {
+                                    active_profile: None,
+                                },
+                            );
+                        });
+                        refresh(app);
+                    }
+                }
                 id if id.starts_with("model:") => {
                     // model:<SlotDebug>:<profile-id>
                     let rest = id.trim_start_matches("model:");
@@ -263,6 +290,7 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                         let slot = match slot_str {
                             "Stt" => Some(SlotKind::Stt),
                             "Polish" => Some(SlotKind::Polish),
+                            "Decision" => Some(SlotKind::Decision),
                             "Translate" => Some(SlotKind::Translate),
                             "Assistant" => Some(SlotKind::Assistant),
                             _ => None,
@@ -271,12 +299,18 @@ pub fn setup<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                             let settings = app.state::<Arc<SettingsService>>();
                             let pid = profile_id.to_string();
                             let _ = settings.mutate(|s| {
-                                s.slots.insert(
-                                    slot,
-                                    crate::settings::schema::SlotConfig {
-                                        active_profile: Some(pid.clone()),
-                                    },
-                                );
+                                let compatible = s
+                                    .profiles
+                                    .iter()
+                                    .any(|p| p.id == pid && p.capability == slot.capability());
+                                if compatible {
+                                    s.slots.insert(
+                                        slot,
+                                        crate::settings::schema::SlotConfig {
+                                            active_profile: Some(pid.clone()),
+                                        },
+                                    );
+                                }
                             });
                             refresh(app);
                         }

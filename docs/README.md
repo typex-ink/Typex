@@ -8,7 +8,7 @@
 |---|---|
 | [01 产品概述](01-product-overview.md) | 定位、竞品、用户、产品原则 |
 | [02 功能规格](02-features.md) | 功能行为、状态、验收标准 |
-| [03 模型接入层](03-model-providers.md) | STT / LLM Provider 协议、配置 schema、提示词 |
+| [03 模型接入层](03-model-providers.md) | STT / LLM / Decision Provider 协议、配置 schema、提示词 |
 | [04 设计系统](04-design-system.md) | 品牌、图标、配色、字体、动效、组件规范 |
 | [05 UX 规格](05-ux-spec.md) | 窗口、流程、HUD、快捷键、错误文案 |
 | [06 代码架构](06-code-architecture.md) | 技术选型、模块边界、IPC、平台实现、性能预算 |

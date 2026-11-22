@@ -15,15 +15,21 @@ const props = withDefaults(defineProps<{
   alternatives?: ProviderProfile[];
   /** 副标题覆盖（本地档案显示引擎与模型状态；缺省显示 kind） */
   subtitle?: string;
+  /** 可选增强槽位（如「整理决策」）：支持一键停用，未启用时以次级按钮呈现 */
+  optional?: boolean;
+  unconfiguredTitle?: string;
+  unconfiguredHint?: string;
 }>(), {
   active: false,
   alternatives: () => [],
+  optional: false,
 });
 
 const emit = defineEmits<{
   edit: [];
   create: [];
   switch: [profileId: string];
+  clear: [];
 }>();
 
 const testing = ref(false);
@@ -32,12 +38,17 @@ const testDetails = ref<string | null>(null);
 const testError = ref(false);
 const switchOpen = ref(false);
 const testTooltipId = `provider-test-${Math.random().toString(36).slice(2)}`;
-const showSwitch = computed(() => props.alternatives.length > 0);
-const configureText = computed(() =>
-  showSwitch.value
+const showSwitch = computed(() => props.alternatives.length > 0 || (props.optional && !!props.profile));
+const configureText = computed(() => {
+  if (props.optional) {
+    return props.alternatives.length > 0
+      ? `${t("components.provider_card.enable_optional_select")} ${switchOpen.value ? "▴" : "▾"}`
+      : t("components.provider_card.enable_optional");
+  }
+  return props.alternatives.length > 0
     ? `${t("components.provider_card.configure_select")} ${switchOpen.value ? "▴" : "▾"}`
-    : t("components.provider_card.configure"),
-);
+    : t("components.provider_card.configure");
+});
 const testTooltipText = computed(() =>
   [testResult.value, testDetails.value].filter((part): part is string => !!part).join("\n\n"),
 );
@@ -76,8 +87,13 @@ function createProfile() {
   emit("create");
 }
 
+function clearSlot() {
+  switchOpen.value = false;
+  emit("clear");
+}
+
 function configureEmpty() {
-  if (showSwitch.value) {
+  if (props.alternatives.length > 0) {
     switchOpen.value = !switchOpen.value;
   } else {
     emit("create");
@@ -122,48 +138,94 @@ function configureEmpty() {
         </span>
       </span>
       <Button size="sm" @click="emit('edit')">{{ t("actions.edit") }}</Button>
-      <span v-if="showSwitch" class="switch-wrap">
-        <Button variant="ghost" size="sm" @click="switchOpen = !switchOpen">
+      <span v-if="showSwitch" class="switch-wrap" @keydown.esc.stop="switchOpen = false">
+        <Button
+          variant="ghost"
+          size="sm"
+          :aria-expanded="switchOpen"
+          aria-haspopup="menu"
+          @click="switchOpen = !switchOpen"
+        >
           {{ t("actions.switch") }} {{ switchOpen ? "▴" : "▾" }}
         </Button>
-        <div v-if="switchOpen" class="menu">
+        <div v-if="switchOpen" class="menu" role="menu">
           <div
             v-for="alt in alternatives"
             :key="alt.id"
             class="it"
             :class="{ cur: alt.id === profile.id }"
+            role="menuitemradio"
+            :aria-checked="alt.id === profile.id"
+            tabindex="0"
             @click="chooseProfile(alt.id)"
+            @keydown.enter.prevent="chooseProfile(alt.id)"
+            @keydown.space.prevent="chooseProfile(alt.id)"
           >
             <span>{{ alt.id === profile.id ? "✓ " : "　" }}{{ alt.label }}</span>
           </div>
+          <div
+            v-if="optional"
+            class="it"
+            role="menuitem"
+            tabindex="0"
+            @click="clearSlot"
+            @keydown.enter.prevent="clearSlot"
+            @keydown.space.prevent="clearSlot"
+          >
+            <span>　{{ t("components.provider_card.disable_optional") }}</span>
+          </div>
           <hr />
-          <div class="it" @click="createProfile">
+          <div
+            class="it"
+            role="menuitem"
+            tabindex="0"
+            @click="createProfile"
+            @keydown.enter.prevent="createProfile"
+            @keydown.space.prevent="createProfile"
+          >
             <span>{{ t("components.provider_card.new_config") }}</span>
           </div>
         </div>
       </span>
     </template>
     <template v-else>
-      <div class="logo empty">?</div>
+      <div class="logo empty">{{ optional ? "–" : "?" }}</div>
       <div class="meta">
-        <b class="unconfigured">{{ t("components.provider_card.unconfigured") }}</b><br />
-        <small>{{ t("components.provider_card.unconfigured_hint") }}</small>
+        <b class="unconfigured">{{ unconfiguredTitle ?? t("components.provider_card.unconfigured") }}</b><br />
+        <small>{{ unconfiguredHint ?? t("components.provider_card.unconfigured_hint") }}</small>
       </div>
-      <span class="switch-wrap">
-        <Button variant="primary" size="sm" @click="configureEmpty">
+      <span class="switch-wrap" @keydown.esc.stop="switchOpen = false">
+        <Button
+          :variant="optional ? 'secondary' : 'primary'"
+          size="sm"
+          :aria-expanded="alternatives.length > 0 ? switchOpen : undefined"
+          :aria-haspopup="alternatives.length > 0 ? 'menu' : undefined"
+          @click="configureEmpty"
+        >
           {{ configureText }}
         </Button>
-        <div v-if="showSwitch && switchOpen" class="menu">
+        <div v-if="alternatives.length > 0 && switchOpen" class="menu" role="menu">
           <div
             v-for="alt in alternatives"
             :key="alt.id"
             class="it"
+            role="menuitem"
+            tabindex="0"
             @click="chooseProfile(alt.id)"
+            @keydown.enter.prevent="chooseProfile(alt.id)"
+            @keydown.space.prevent="chooseProfile(alt.id)"
           >
             <span>　{{ alt.label }}</span>
           </div>
           <hr />
-          <div class="it" @click="createProfile">
+          <div
+            class="it"
+            role="menuitem"
+            tabindex="0"
+            @click="createProfile"
+            @keydown.enter.prevent="createProfile"
+            @keydown.space.prevent="createProfile"
+          >
             <span>{{ t("components.provider_card.new_config") }}</span>
           </div>
         </div>
@@ -306,6 +368,11 @@ function configureEmpty() {
   cursor: pointer;
 }
 .menu .it:hover {
+  background: var(--sel-bg);
+}
+.menu .it:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
   background: var(--sel-bg);
 }
 .menu .it.cur span {

@@ -1,0 +1,33 @@
+---
+source: tests/contract_snapshots.rs
+expression: captured
+---
+{
+  "body": {
+    "model": "jev-latest",
+    "questions": {
+      "needs_polish": {
+        "instructions": "判断该原始转写是否需要清理。",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "dictionary_terms": [
+        "Typex",
+        "Qwen3-ASR"
+      ],
+      "target_app": "Slack",
+      "transcript": "嗯今天下午三点开会"
+    }
+  },
+  "headers": [
+    "accept: */*",
+    "authorization: Bearer ts-test",
+    "content-length: <len>",
+    "content-type: application/json",
+    "host: <host>",
+    "x-org: typex"
+  ],
+  "method": "POST",
+  "path": "/v1/systemone"
+}

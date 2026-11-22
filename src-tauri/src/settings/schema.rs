@@ -8,12 +8,16 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SCHEMA_VERSION: u32 = 12;
 
 pub const VAD_ENERGY_THRESHOLD_MIN: f32 = 0.001;
 pub const VAD_ENERGY_THRESHOLD_MAX: f32 = 0.050;
 pub const VAD_NEURAL_THRESHOLD_MIN: f32 = 0.10;
 pub const VAD_NEURAL_THRESHOLD_MAX: f32 = 0.90;
+
+pub const POLISH_DECISION_THRESHOLD_MIN: f32 = 0.05;
+pub const POLISH_DECISION_THRESHOLD_MAX: f32 = 0.95;
+pub const POLISH_DECISION_THRESHOLD_DEFAULT: f32 = 0.50;
 
 pub const DICTIONARY_MAX_TERMS: usize = 100;
 pub const DICTIONARY_MAX_TERM_CHARS: usize = 50;
@@ -60,6 +64,9 @@ impl Default for Settings {
 impl Settings {
     pub fn normalize_for_save(&mut self) {
         self.schema_version = CURRENT_SCHEMA_VERSION;
+        for slot in SlotKind::ALL {
+            self.slots.entry(slot).or_default();
+        }
         self.dictionary.normalize();
         self.hotkeys.normalize();
     }
@@ -175,6 +182,10 @@ pub struct DictationSettings {
     pub polish_enabled: bool,
     /// 自定义整理 system prompt；空 = 用内置值（03 §3.4）
     pub polish_system_prompt: String,
+    /// 整理决策门限（0.05..=0.95，默认 0.50；Jev noul >= 该门限时执行文本整理）
+    pub polish_decision_threshold: f32,
+    /// 自定义整理决策判定指令；空 = 用内置值（03 §3.5）
+    pub polish_decision_prompt: String,
     pub inject_method: InjectMethod,
     /// 粘贴前延迟 ms（平台坑 7.2-4）
     pub paste_delay_ms: u64,
@@ -193,6 +204,8 @@ impl Default for DictationSettings {
         Self {
             polish_enabled: true,
             polish_system_prompt: String::new(),
+            polish_decision_threshold: POLISH_DECISION_THRESHOLD_DEFAULT,
+            polish_decision_prompt: String::new(),
             inject_method: InjectMethod::Auto,
             paste_delay_ms: 60,
             language: "auto".into(),
@@ -200,6 +213,14 @@ impl Default for DictationSettings {
             esc_cancels: true,
             vad: VadSettings::default(),
         }
+    }
+}
+
+impl DictationSettings {
+    pub fn is_decision_threshold_valid(&self) -> bool {
+        self.polish_decision_threshold.is_finite()
+            && (POLISH_DECISION_THRESHOLD_MIN..=POLISH_DECISION_THRESHOLD_MAX)
+                .contains(&self.polish_decision_threshold)
     }
 }
 
@@ -630,6 +651,25 @@ mod tests {
             },
         ] {
             assert!(!vad.is_valid());
+        }
+    }
+
+    #[test]
+    fn polish_decision_threshold_defaults_to_half_and_validates_bounds() {
+        let d = DictationSettings::default();
+        assert_eq!(
+            d.polish_decision_threshold,
+            POLISH_DECISION_THRESHOLD_DEFAULT
+        );
+        assert!(d.polish_decision_prompt.is_empty());
+        assert!(d.is_decision_threshold_valid());
+
+        for invalid in [f32::NAN, f32::INFINITY, 0.04, 0.96, -0.1] {
+            let bad = DictationSettings {
+                polish_decision_threshold: invalid,
+                ..DictationSettings::default()
+            };
+            assert!(!bad.is_decision_threshold_valid());
         }
     }
 }

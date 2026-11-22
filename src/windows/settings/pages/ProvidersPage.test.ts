@@ -12,6 +12,7 @@ vi.mock("@/ipc/bindings", () => ({
   commands: {
     getSettings: mockGetSettings,
     activateProfile: vi.fn(async () => ({ status: "ok" })),
+    deactivateSlot: vi.fn(async () => ({ status: "ok" })),
     listLocalModels: vi.fn(async () => ({ status: "ok", data: [] })),
   },
   events: {
@@ -133,5 +134,45 @@ describe("ProvidersPage", () => {
     await claude.trigger("click");
 
     expect(commands.activateProfile).toHaveBeenCalledWith("assistant", "llm-claude");
+  });
+
+  it("整理决策槽位默认呈现可选未启用状态，已启用时支持一键停用", async () => {
+    const settings = makeSettings();
+    expect(mountPage(settings).text()).toContain("未启用（可选）");
+
+    settings.profiles.push({
+      id: "jev-main",
+      capability: "decision",
+      kind: "jev",
+      label: "TypeSafe AI · Jev",
+      base_url: "https://api.typesafe.ai/v1",
+      model: "jev-latest",
+      credentials: {},
+      extra_headers: {},
+      extra_form: {},
+      timeout_ms: 60000,
+      options: {},
+    });
+    settings.slots.decision = { active_profile: "jev-main" };
+    const wrapper = mountPage(settings);
+
+    const switchButtons = wrapper
+      .findAll("button")
+      .filter((button) => button.text().includes("切换"));
+    // stt=0, polish=1, decision=2
+    await switchButtons[2]!.trigger("click");
+
+    const menu = wrapper.find(".menu");
+    expect(menu.text()).toContain("TypeSafe AI · Jev");
+    expect(menu.text()).toContain("停用（始终整理）");
+    expect(menu.text()).not.toContain("DeepSeek");
+
+    const disableItem = menu
+      .findAll(".it")
+      .find((item) => item.text().includes("停用（始终整理）"))!;
+    expect(disableItem.attributes("tabindex")).toBe("0");
+    await disableItem.trigger("keydown", { key: "Enter" });
+
+    expect(commands.deactivateSlot).toHaveBeenCalledWith("decision");
   });
 });

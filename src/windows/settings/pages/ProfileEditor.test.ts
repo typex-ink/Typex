@@ -409,4 +409,48 @@ describe("ProfileEditor", () => {
     expect(chips.map((c) => c.text())).toEqual(["gpt-5.4-mini", "gpt-5.4", "gpt-5.4-nano"]);
     expect(chips.every((c) => c.attributes("aria-pressed") === "false")).toBe(true);
   });
+
+  it("新建决策模型档案选择 TypeSafe AI · Jev 预设时自动填充且不渲染 LLM 专属控件", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const wrapper = mount(ProfileEditor, {
+      attachTo: host,
+      props: { capability: "decision", profile: null, assignTo: "decision" },
+      global: { plugins: [makeI18n("zh-CN")] },
+    });
+
+    expect(wrapper.text()).toContain("决策模型服务");
+    expect(wrapper.text()).not.toContain("接口格式");
+    expect(wrapper.text()).not.toContain("思考等级");
+
+    const presetTrigger = wrapper.findAll("button.select")[0]!;
+    await presetTrigger.trigger("click");
+    const jevOption = [...document.body.querySelectorAll<HTMLButtonElement>(".select-option")]
+      .find((option) => option.textContent?.includes("TypeSafe AI · Jev"))!;
+    expect(jevOption).toBeTruthy();
+    jevOption.click();
+    await flushPromises();
+
+    const baseUrlInput = wrapper.get('input[placeholder="https://api.example.com/v1"]');
+    const modelInput = wrapper.get('input[placeholder="模型名"]');
+    expect((baseUrlInput.element as HTMLInputElement).value).toBe("https://api.typesafe.ai/v1");
+    expect((modelInput.element as HTMLInputElement).value).toBe("jev-latest");
+
+    const chips = wrapper.findAll("button.model-chip");
+    expect(chips.map((c) => c.text())).toEqual(["jev-latest", "jev-1.14.0", "jev-preview"]);
+
+    await wrapper.find("input[type='password']").setValue("ts-secret-key");
+    const save = wrapper.findAll("button").find((button) => button.text().includes("保存"))!;
+    await save.trigger("click");
+    await flushPromises();
+
+    expect(mockUpsertProfile).toHaveBeenCalledOnce();
+    const saved = mockUpsertProfile.mock.calls[0]![0];
+    expect(saved.capability).toBe("decision");
+    expect(saved.kind).toBe("jev");
+    expect(saved.base_url).toBe("https://api.typesafe.ai/v1");
+    expect(saved.model).toBe("jev-latest");
+    expect(saved.options).toEqual({});
+    expect(mockActivateProfile).toHaveBeenCalledWith("decision", saved.id);
+  });
 });

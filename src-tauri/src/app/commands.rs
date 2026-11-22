@@ -120,6 +120,7 @@ fn profile_kind_matches_capability(profile: &ProviderProfile) -> bool {
             profile.kind,
             ProviderKind::ChatCompletions | ProviderKind::Responses | ProviderKind::Local
         ),
+        ProviderCapability::Decision => matches!(profile.kind, ProviderKind::Jev),
     }
 }
 
@@ -197,6 +198,34 @@ pub fn activate_profile(
             slot,
             SlotConfig {
                 active_profile: Some(profile_id.clone()),
+            },
+        );
+    })
+}
+
+fn ensure_slot_can_deactivate(slot: SlotKind) -> Result<(), TypexError> {
+    if !slot.is_optional() {
+        return Err(TypexError::new(
+            ErrorCode::InvalidRequest,
+            format!("{slot:?} 槽不支持停用"),
+        ));
+    }
+    Ok(())
+}
+
+/// 清空可选功能槽（如「整理决策」）的激活档案，保留池中档案并回退为不启用。
+#[tauri::command]
+#[specta::specta]
+pub fn deactivate_slot(
+    settings: SettingsState<'_>,
+    slot: SlotKind,
+) -> Result<Settings, TypexError> {
+    ensure_slot_can_deactivate(slot)?;
+    settings.mutate(|s| {
+        s.slots.insert(
+            slot,
+            SlotConfig {
+                active_profile: None,
             },
         );
     })
@@ -456,39 +485,55 @@ pub async fn test_profile(
         .find(|p| p.id == profile_id)
         .ok_or_else(|| TypexError::new(ErrorCode::InvalidRequest, "档案不存在"))?;
     let start = std::time::Instant::now();
-    let treat_as_stt = profile.capability == ProviderCapability::Stt;
-    if treat_as_stt {
-        let stt = registry.build_stt(profile)?;
-        // 2 秒 440Hz 正弦波样音（内容不重要，只测连通）
-        let samples: Vec<f32> = (0..32000)
-            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin() * 0.3)
-            .collect();
-        let wav = crate::audio::pipeline::to_wav_16k_mono(&samples, 16000)?;
-        stt.transcribe(
-            crate::providers::stt::AudioInput {
-                wav_16k_mono: wav,
-                duration_ms: 2000,
-            },
-            crate::providers::stt::SttOptions::default(),
-        )
-        .await
-        .map_err(ProfileTestError::from)?;
-    } else {
-        let llm = registry.build_llm(profile)?;
-        crate::providers::llm::collect_text(
-            llm.as_ref(),
-            crate::providers::llm::LlmRequest {
-                system: "回复 pong 一词即可".into(),
-                messages: vec![crate::providers::llm::Msg {
-                    role: "user".into(),
-                    content: "ping".into(),
-                }],
-                temperature: 0.0,
-                max_tokens: Some(8),
-            },
-        )
-        .await
-        .map_err(ProfileTestError::from)?;
+    match profile.capability {
+        ProviderCapability::Stt => {
+            let stt = registry.build_stt(profile)?;
+            // 2 秒 440Hz 正弦波样音（内容不重要，只测连通）
+            let samples: Vec<f32> = (0..32000)
+                .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 16000.0).sin() * 0.3)
+                .collect();
+            let wav = crate::audio::pipeline::to_wav_16k_mono(&samples, 16000)?;
+            stt.transcribe(
+                crate::providers::stt::AudioInput {
+                    wav_16k_mono: wav,
+                    duration_ms: 2000,
+                },
+                crate::providers::stt::SttOptions::default(),
+            )
+            .await
+            .map_err(ProfileTestError::from)?;
+        }
+        ProviderCapability::Llm => {
+            let llm = registry.build_llm(profile)?;
+            crate::providers::llm::collect_text(
+                llm.as_ref(),
+                crate::providers::llm::LlmRequest {
+                    system: "回复 pong 一词即可".into(),
+                    messages: vec![crate::providers::llm::Msg {
+                        role: "user".into(),
+                        content: "ping".into(),
+                    }],
+                    temperature: 0.0,
+                    max_tokens: Some(8),
+                },
+            )
+            .await
+            .map_err(ProfileTestError::from)?;
+        }
+        ProviderCapability::Decision => {
+            let decision = registry.build_decision(profile)?;
+            decision
+                .decide(crate::providers::decision::DecisionRequest {
+                    state: crate::providers::decision::DecisionState {
+                        transcript: "你好，Typex".into(),
+                        target_app: None,
+                        dictionary_terms: Vec::new(),
+                    },
+                    instructions: crate::providers::decision::POLISH_DECISION_INSTRUCTIONS.into(),
+                })
+                .await
+                .map_err(ProfileTestError::from)?;
+        }
     }
     Ok(start.elapsed().as_millis() as u32)
 }
@@ -1091,9 +1136,21 @@ mod tests {
             ProviderCapability::Llm,
             ProviderKind::Responses,
         )));
+        assert!(profile_kind_matches_capability(&profile(
+            ProviderCapability::Decision,
+            ProviderKind::Jev,
+        )));
         assert!(!profile_kind_matches_capability(&profile(
             ProviderCapability::Stt,
             ProviderKind::ChatCompletions,
+        )));
+        assert!(!profile_kind_matches_capability(&profile(
+            ProviderCapability::Decision,
+            ProviderKind::ChatCompletions,
+        )));
+        assert!(!profile_kind_matches_capability(&profile(
+            ProviderCapability::Llm,
+            ProviderKind::Jev,
         )));
     }
 
@@ -1111,7 +1168,13 @@ mod tests {
     #[test]
     fn slot_activation_requires_matching_capability() {
         let llm = profile(ProviderCapability::Llm, ProviderKind::ChatCompletions);
+        let jev = profile(ProviderCapability::Decision, ProviderKind::Jev);
         assert!(ensure_profile_compatible(SlotKind::Translate, &llm).is_ok());
         assert!(ensure_profile_compatible(SlotKind::Stt, &llm).is_err());
+        assert!(ensure_profile_compatible(SlotKind::Decision, &jev).is_ok());
+        assert!(ensure_profile_compatible(SlotKind::Decision, &llm).is_err());
+        assert!(ensure_slot_can_deactivate(SlotKind::Decision).is_ok());
+        assert!(ensure_slot_can_deactivate(SlotKind::Polish).is_err());
+        assert!(ensure_slot_can_deactivate(SlotKind::Stt).is_err());
     }
 }

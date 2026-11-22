@@ -6,20 +6,23 @@ use std::collections::HashMap;
 
 pub const DEFAULT_PROVIDER_TIMEOUT_MS: u64 = 60_000;
 
-/// 四个模型槽位（02 F-4）。
+/// 五个模型槽位（02 F-4 / ADR-30）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SlotKind {
     Stt,
     Polish,
+    /// F-9 前置整理决策（可选门控，默认不启用）
+    Decision,
     Translate,
     Assistant,
 }
 
 impl SlotKind {
-    pub const ALL: [SlotKind; 4] = [
+    pub const ALL: [SlotKind; 5] = [
         SlotKind::Stt,
         SlotKind::Polish,
+        SlotKind::Decision,
         SlotKind::Translate,
         SlotKind::Assistant,
     ];
@@ -27,17 +30,24 @@ impl SlotKind {
     pub fn capability(self) -> ProviderCapability {
         match self {
             SlotKind::Stt => ProviderCapability::Stt,
+            SlotKind::Decision => ProviderCapability::Decision,
             SlotKind::Polish | SlotKind::Translate | SlotKind::Assistant => ProviderCapability::Llm,
         }
     }
+
+    /// 是否允许通过 `deactivate_slot` 清空激活档案（回退为不启用）。
+    pub fn is_optional(self) -> bool {
+        matches!(self, SlotKind::Decision)
+    }
 }
 
-/// 服务配置能力：语音转文字或文本模型（02 F-4）。
+/// 服务配置能力：语音转文字、文本模型或结构化决策模型（02 F-4）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderCapability {
     Stt,
     Llm,
+    Decision,
 }
 
 /// adapter 走向（03 §1）。`local` 表示本地推理 adapter。
@@ -54,6 +64,8 @@ pub enum ProviderKind {
     ChatCompletions,
     /// LLM：OpenAI Responses
     Responses,
+    /// Decision：TypeSafe AI System One（POST {base_url}/systemone）
+    Jev,
     /// 本地推理（ADR-20；无 base_url/凭据，model = 模型库 id）
     Local,
 }

@@ -73,6 +73,7 @@ const importValid = computed(() => importName.value.trim() && importFiles.value.
 const SLOT_LABEL_KEY: Record<SlotKind, string> = {
   stt: "settings.providers.slot_stt",
   polish: "settings.providers.slot_polish",
+  decision: "settings.providers.slot_decision",
   translate: "settings.providers.slot_translate",
   assistant: "settings.providers.slot_assistant",
 };

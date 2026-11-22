@@ -212,7 +212,9 @@ fn json_error_message(value: &serde_json::Value) -> Option<String> {
         .and_then(|x| x.as_str())
         .or_else(|| value.pointer("/error/message").and_then(|x| x.as_str()))
         .or_else(|| value.pointer("/message").and_then(|x| x.as_str()))
+        .or_else(|| value.pointer("/detail").and_then(|x| x.as_str()))
         .or_else(|| value.pointer("/error").and_then(|x| x.as_str()))
+        .or_else(|| value.pointer("/error_type").and_then(|x| x.as_str()))
         .and_then(concise_text)
 }
 

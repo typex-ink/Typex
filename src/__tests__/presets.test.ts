@@ -70,5 +70,17 @@ describe("模型预设", () => {
       models: ["mimo-v2.6-flash", "mimo-v2.6-pro"],
       for: "llm",
     });
+
+    const decisionPresets = presetsForSlot("decision");
+    expect(decisionPresets.at(-1)?.id).toBe("custom-decision");
+    expect(decisionPresets.map((p) => p.kind)).toEqual(["jev", "jev"]);
+    expect(decisionPresets.find((p) => p.id === "typesafe-jev")).toEqual({
+      id: "typesafe-jev",
+      label: "TypeSafe AI · Jev",
+      kind: "jev",
+      base_url: "https://api.typesafe.ai/v1",
+      models: ["jev-latest", "jev-1.14.0", "jev-preview"],
+      for: "decision",
+    });
   });
 });

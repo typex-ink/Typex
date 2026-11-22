@@ -185,3 +185,12 @@
   - **F-9 / F-2 `<output>` 信封提取**：非流式收集后按“首开标签 + 末闭标签”提取，过滤前言、后记与代码围栏并保护正文内嵌同名标签；若模型未输出协议标签则安全回退原始输出并记录非敏感 debug 日志。
   - **外层信封语义**：所有协议标签均为外层边界信封而非严格 XML DOM，明示模型不对正文中的 `<`、`>`、`&` 做实体转义，完整保护代码、URL 与 Markdown/HTML。
 - **影响**：[02 功能规格](02-features.md)（F-2 / F-3 / F-9）、[03 模型接入层](03-model-providers.md)（§3.4 / §4）、[05 UX 规格](05-ux-spec.md)（§4.3）、[07 测试规范](07-testing.md) 与 `docs/fixtures/` 同步更新；ADR-23 保持历史记录，路由信号以当前 03 §3.4 为准。
+
+### ADR-30 · 引入 Jev（System One）作为可选的整理前置决策槽位（2026-11-22）
+
+- **背景**：开启 F-9「文本整理」后，所有语音转写都会串行调用一次生成式 LLM。日常高频场景（如只说「好的」「收到」或本身通顺无语气词的短句）其实无需整理，但仍要承担自回归生成的首 token 与解码耗时。单纯用字符长度硬切会漏掉短句中的口语填充词（「嗯好的」）、口述改口（「三点不对四点」）或个人词典同音错字（「type x」→「Typex」）。TypeSafe AI 的 Jev（`POST /v1/systemone`）是专用非自回归决策模型（System One），单次前向传递即可针对状态返回校准概率（`noul`），无生成开销与解析风险。
+- **决策**：
+  - **独立能力与可选槽位**：新增 `DecisionProvider` trait、`ProviderCapability::Decision`、`ProviderKind::Jev` 及第 5 个功能槽位 `SlotKind::Decision`（「整理决策」）。该槽位为纯可选增强，默认未分配（`active_profile = null`）且不做本地模型兜底，不增加首次引导步骤；提供 `deactivate_slot` 命令支持在设置页与托盘一键停用（保留池中档案，回退为始终整理）。
+  - **共享预处理门控**：在 `orchestrator/pipeline.rs::prepare_transcript` 统一前置决策判断，使听写、翻译预整理与助手指令预整理共同受益；原样模式（`polish_enabled = false`）直接跳过决策与整理。请求 `state` 同时传入 `transcript` 及可选 `target_app`、`dictionary_terms`，使用 `noul` 原语对比 `dictation.polish_decision_threshold`（`0.05..=0.95`，默认 `0.50`）并开放可选自定义判定指令。
+  - **状态与失败回退语义**：`noul < threshold` 判为无需整理时直接返回原文且 `degraded = false`（HUD 不显示「未整理」警告）；Jev 调用超时、鉴权/网络报错或响应异常时，记录脱敏元数据并**回退至正常调用「文本整理」LLM**，保证任何决策层故障既不中断主流程，也不让杂乱长句未经整理直接上屏。
+- **影响**：`schema_version` 升至 `12`；[02 功能规格](02-features.md)（F-4 / F-6 / F-9）、[03 模型接入层](03-model-providers.md)（§1 / §3.5 / §5 / §6 / §7）、[05 UX 规格](05-ux-spec.md)（§2 / §5.1 / §5.2）、[06 代码架构](06-code-architecture.md)（§4 / §5.1 / §10.1）与 [07 测试规范](07-testing.md) 同步更新。

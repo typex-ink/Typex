@@ -11,7 +11,7 @@ export interface Preset {
   /** 建议模型（可改） */
   models: string[];
   /** 适用槽位类别 */
-  for: "stt" | "llm";
+  for: ProviderCapability;
 }
 
 export const PRESETS: Preset[] = [
@@ -36,6 +36,9 @@ export const PRESETS: Preset[] = [
   { id: "openrouter", label: "OpenRouter", kind: "chat_completions", base_url: "https://openrouter.ai/api/v1", models: [], for: "llm" },
   { id: "ollama", label: "Ollama / 自建", labelKey: "settings.profile.preset_self_hosted", kind: "chat_completions", base_url: "http://localhost:11434/v1", models: [], for: "llm" },
   { id: "custom-llm", label: "自定义", labelKey: "settings.profile.preset_custom", kind: "chat_completions", base_url: "", models: [], for: "llm" },
+  // Decision（整理前置决策，03 §3.5 / ADR-30）
+  { id: "typesafe-jev", label: "TypeSafe AI · Jev", kind: "jev", base_url: "https://api.typesafe.ai/v1", models: ["jev-latest", "jev-1.14.0", "jev-preview"], for: "decision" },
+  { id: "custom-decision", label: "自定义", labelKey: "settings.profile.preset_custom", kind: "jev", base_url: "", models: [], for: "decision" },
 ];
 
 export function presetsForCapability(capability: ProviderCapability): Preset[] {
@@ -43,5 +46,7 @@ export function presetsForCapability(capability: ProviderCapability): Preset[] {
 }
 
 export function presetsForSlot(slot: SlotKind): Preset[] {
-  return presetsForCapability(slot === "stt" ? "stt" : "llm");
+  if (slot === "stt") return presetsForCapability("stt");
+  if (slot === "decision") return presetsForCapability("decision");
+  return presetsForCapability("llm");
 }

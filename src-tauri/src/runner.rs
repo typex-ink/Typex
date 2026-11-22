@@ -126,6 +126,7 @@ pub fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::upsert_profile,
             commands::delete_profile,
             commands::activate_profile,
+            commands::deactivate_slot,
             commands::set_profile_secret,
             commands::test_profile,
             commands::cycle_translation_target,

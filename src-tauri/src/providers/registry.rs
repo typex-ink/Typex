@@ -4,6 +4,9 @@
 //! - 密钥从 profile.credentials 读取；日志与诊断导出必须脱敏
 
 use crate::error::{ErrorCode, Result, TypexError};
+use crate::providers::decision::{
+    DecisionProvider, TimedDecisionProvider, jev::JevDecisionProvider,
+};
 use crate::providers::http;
 use crate::providers::llm::{
     LlmProvider, TimedLlmProvider, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
@@ -22,6 +25,7 @@ pub struct ProviderRegistry {
     /// profile-id → 已构建实例
     stt_cache: Mutex<HashMap<String, Arc<dyn SttProvider>>>,
     llm_cache: Mutex<HashMap<String, Arc<dyn LlmProvider>>>,
+    decision_cache: Mutex<HashMap<String, Arc<dyn DecisionProvider>>>,
     /// 当前配置快照（settings watch 更新）
     settings: Mutex<Settings>,
     /// 本地模型存储根（app_data_dir；local-models）
@@ -98,6 +102,7 @@ impl ProviderRegistry {
         Self {
             stt_cache: Mutex::new(HashMap::new()),
             llm_cache: Mutex::new(HashMap::new()),
+            decision_cache: Mutex::new(HashMap::new()),
             settings: Mutex::new(settings),
             models_data_dir: Mutex::new(None),
         }
@@ -125,9 +130,11 @@ impl ProviderRegistry {
         {
             let mut stt = self.stt_cache.lock().unwrap();
             let mut llm = self.llm_cache.lock().unwrap();
+            let mut decision = self.decision_cache.lock().unwrap();
             for id in &changed {
                 stt.remove(id);
                 llm.remove(id);
+                decision.remove(id);
             }
         }
         *self.settings.lock().unwrap() = new;
@@ -163,10 +170,10 @@ impl ProviderRegistry {
     #[cfg(feature = "local-models")]
     fn local_fallback_profile(&self, slot: SlotKind) -> Result<ProviderProfile> {
         use crate::local::{download, manifest};
-        if slot == SlotKind::Assistant {
+        if matches!(slot, SlotKind::Assistant | SlotKind::Decision) {
             return Err(TypexError::new(
                 ErrorCode::NotConfigured,
-                "Assistant 槽未配置（问答槽无本地兜底，ADR-20）",
+                format!("{slot:?} 槽未配置（无本地兜底，ADR-20/ADR-30）"),
             ));
         }
         let dir = self
@@ -269,6 +276,71 @@ impl ProviderRegistry {
             .unwrap()
             .insert(profile.id.clone(), provider.clone());
         Ok(provider)
+    }
+
+    /// 取可选槽位的 Decision provider；槽位未启用（`active_profile = None`）时返回 `Ok(None)`。
+    pub fn decision_for(&self, slot: SlotKind) -> Result<Option<Arc<dyn DecisionProvider>>> {
+        let active = self
+            .settings
+            .lock()
+            .unwrap()
+            .slots
+            .get(&slot)
+            .and_then(|c| c.active_profile.clone());
+        let Some(_) = active else {
+            return Ok(None);
+        };
+        let profile = self.profile_for_slot(slot)?;
+        if let Some(p) = self.decision_cache.lock().unwrap().get(&profile.id) {
+            return Ok(Some(p.clone()));
+        }
+        let provider = self.build_decision(&profile)?;
+        self.decision_cache
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), provider.clone());
+        Ok(Some(provider))
+    }
+
+    /// 由 profile 直接构建决策模型实例（测试连接与缓存构建共用）。
+    pub fn build_decision(&self, profile: &ProviderProfile) -> Result<Arc<dyn DecisionProvider>> {
+        if profile.capability != ProviderCapability::Decision {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 不是决策模型服务配置", profile.label),
+            ));
+        }
+        if profile.timeout_ms == 0 {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} 的调用超时必须大于 0", profile.label),
+            ));
+        }
+        let provider: Arc<dyn DecisionProvider> = match profile.kind {
+            ProviderKind::Jev => {
+                let key = self.resolve_secret(profile, "api_key")?;
+                let client = self.http_client();
+                Arc::new(
+                    JevDecisionProvider::new(
+                        client,
+                        profile.base_url.clone(),
+                        key,
+                        profile.model.clone(),
+                    )
+                    .with_headers(profile.extra_headers.clone()),
+                )
+            }
+            _ => {
+                return Err(TypexError::new(
+                    ErrorCode::InvalidRequest,
+                    format!("{:?} 不是决策模型类型", profile.kind),
+                ));
+            }
+        };
+        Ok(Arc::new(TimedDecisionProvider::new(
+            provider,
+            Duration::from_millis(profile.timeout_ms),
+        )))
     }
 
     /// 由 profile 直接构建（测试连接用——不走 slot 指针）。
@@ -922,5 +994,66 @@ mod tests {
             reg.build_llm(&llm_profile)
                 .unwrap_or_else(|e| panic!("应能构建本地 LLM {model_id}: {e:?}"));
         }
+    }
+
+    #[test]
+    fn decision_slot_returns_none_when_unassigned_and_caches_when_assigned() {
+        let mut settings = Settings::default();
+        let reg = ProviderRegistry::new(settings.clone());
+        assert!(reg.decision_for(SlotKind::Decision).unwrap().is_none());
+
+        let mut jev = ProviderProfile {
+            id: "jev-1".into(),
+            capability: ProviderCapability::Decision,
+            kind: ProviderKind::Jev,
+            label: "TypeSafe AI · Jev".into(),
+            base_url: "https://api.typesafe.ai/v1".into(),
+            model: "jev-latest".into(),
+            credentials: [("api_key".to_string(), "ts-secret".to_string())].into(),
+            extra_headers: HashMap::new(),
+            extra_form: HashMap::new(),
+            timeout_ms: 60_000,
+            options: HashMap::new(),
+        };
+        settings.profiles.push(jev.clone());
+        settings.slots.insert(
+            SlotKind::Decision,
+            SlotConfig {
+                active_profile: Some("jev-1".into()),
+            },
+        );
+        reg.on_settings_changed(settings.clone());
+
+        let first = reg.decision_for(SlotKind::Decision).unwrap().unwrap();
+        let second = reg.decision_for(SlotKind::Decision).unwrap().unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+
+        jev.model = "jev-1.14.0".into();
+        settings.profiles[0] = jev;
+        reg.on_settings_changed(settings);
+        let third = reg.decision_for(SlotKind::Decision).unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&first, &third));
+    }
+
+    #[test]
+    fn decision_build_validates_capability_and_secret() {
+        let reg = ProviderRegistry::new(Settings::default());
+        let missing_key = ProviderProfile {
+            id: "jev".into(),
+            capability: ProviderCapability::Decision,
+            kind: ProviderKind::Jev,
+            label: "Jev".into(),
+            base_url: "https://api.typesafe.ai/v1".into(),
+            model: "jev-latest".into(),
+            credentials: HashMap::new(),
+            extra_headers: HashMap::new(),
+            extra_form: HashMap::new(),
+            timeout_ms: 60_000,
+            options: HashMap::new(),
+        };
+        assert_eq!(
+            reg.build_decision(&missing_key).err().map(|e| e.code),
+            Some(ErrorCode::NotConfigured)
+        );
     }
 }

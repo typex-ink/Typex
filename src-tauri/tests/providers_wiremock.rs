@@ -1053,3 +1053,315 @@ async fn volc_custom_resource_id_header() {
         .unwrap();
     assert_eq!(t.text, "ok");
 }
+
+// ── Jev Decision（03 §3.5 / ADR-30）──
+
+use typex_lib::providers::decision::{
+    DecisionProvider, DecisionRequest, DecisionState, POLISH_DECISION_INSTRUCTIONS,
+    TimedDecisionProvider, jev::JevDecisionProvider,
+};
+
+#[tokio::test]
+async fn jev_request_shape_optional_state_and_response_parse() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(wiremock::matchers::path("/v1/systemone"))
+        .and(header("Authorization", "Bearer ts-secret"))
+        .and(header("X-Custom-Gate", "1"))
+        .respond_with(move |req: &Request| {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["model"], "jev-latest");
+            assert_eq!(body["state"]["transcript"], "好的");
+            assert!(body["state"].get("target_app").is_none());
+            assert!(body["state"].get("dictionary_terms").is_none());
+            assert_eq!(body["questions"]["needs_polish"]["type"], "noul");
+            assert_eq!(
+                body["questions"]["needs_polish"]["instructions"],
+                POLISH_DECISION_INSTRUCTIONS
+            );
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "jev-1.14.0",
+                "answers": {
+                    "needs_polish": {
+                        "type": "noul",
+                        "noul": 0.04
+                    }
+                },
+                "usage": { "input_tokens": 120, "output_tokens": 0 }
+            }))
+        })
+        .mount(&server)
+        .await;
+
+    // 显式传入带 `/systemone/` 尾缀的 base_url 也不能拼出双重路径
+    let provider = JevDecisionProvider::new(
+        client(),
+        format!("{}/v1/systemone/", server.uri()),
+        "ts-secret",
+        "jev-latest",
+    )
+    .with_headers([("X-Custom-Gate".to_string(), "1".to_string())].into());
+
+    let res = provider
+        .decide(DecisionRequest {
+            state: DecisionState {
+                transcript: "好的".into(),
+                target_app: None,
+                dictionary_terms: Vec::new(),
+            },
+            instructions: POLISH_DECISION_INSTRUCTIONS.into(),
+        })
+        .await
+        .unwrap();
+    assert!((res.probability - 0.04).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn jev_401_and_422_do_not_retry_and_preserve_details() {
+    for (status, expected_code, err_body) in [
+        (
+            401,
+            ErrorCode::AuthError,
+            r#"{"detail":"Invalid API key","request_id":"req-jev-401"}"#,
+        ),
+        (
+            422,
+            ErrorCode::InvalidRequest,
+            r#"{"detail":"Missing criteria field","request_id":"req-jev-422"}"#,
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(status).set_body_string(err_body))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = JevDecisionProvider::new(
+            client(),
+            format!("{}/v1", server.uri()),
+            "ts-bad",
+            "jev-latest",
+        );
+        let err = provider
+            .decide(DecisionRequest {
+                state: DecisionState {
+                    transcript: "测试".into(),
+                    target_app: None,
+                    dictionary_terms: Vec::new(),
+                },
+                instructions: "rule".into(),
+            })
+            .await
+            .unwrap_err();
+        let test_err: ProfileTestError = err.into();
+        assert_eq!(test_err.code, expected_code);
+        assert_eq!(test_err.details.as_deref(), Some(err_body));
+    }
+}
+
+#[tokio::test]
+async fn jev_529_overloaded_retries_twice_and_respects_profile_timeout() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(529).set_body_string(r#"{"detail":"overloaded"}"#))
+        .expect(3)
+        .mount(&server)
+        .await;
+
+    let provider = JevDecisionProvider::new(
+        client(),
+        format!("{}/v1", server.uri()),
+        "ts-ok",
+        "jev-latest",
+    );
+    let err = provider
+        .decide(DecisionRequest {
+            state: DecisionState {
+                transcript: "测试".into(),
+                target_app: None,
+                dictionary_terms: Vec::new(),
+            },
+            instructions: "rule".into(),
+        })
+        .await
+        .unwrap_err();
+    let test_err: ProfileTestError = err.into();
+    assert_eq!(test_err.code, ErrorCode::ServerError);
+
+    let slow_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(std::time::Duration::from_millis(250))
+                .set_body_json(serde_json::json!({
+                    "answers": { "needs_polish": { "type": "noul", "noul": 0.2 } }
+                })),
+        )
+        .mount(&slow_server)
+        .await;
+    let timed = TimedDecisionProvider::new(
+        std::sync::Arc::new(JevDecisionProvider::new(
+            client(),
+            format!("{}/v1", slow_server.uri()),
+            "ts-ok",
+            "jev-latest",
+        )),
+        std::time::Duration::from_millis(60),
+    );
+    let timeout_err = timed
+        .decide(DecisionRequest {
+            state: DecisionState {
+                transcript: "测试".into(),
+                target_app: None,
+                dictionary_terms: Vec::new(),
+            },
+            instructions: "rule".into(),
+        })
+        .await
+        .unwrap_err();
+    let timeout_test: ProfileTestError = timeout_err.into();
+    assert_eq!(timeout_test.code, ErrorCode::Timeout);
+}
+
+#[tokio::test]
+async fn pipeline_jev_gate_end_to_end_skips_polish_when_clean_and_never_calls_jev_if_polish_unconfigured()
+ {
+    use typex_lib::orchestrator::pipeline::{PromptContext, prepare_transcript, process};
+    use typex_lib::settings::schema::{Settings, SlotConfig};
+
+    let jev_server = MockServer::start().await;
+    let polish_server = MockServer::start().await;
+    let translate_server = MockServer::start().await;
+
+    // 1) Polish 槽未配置时，即使 Decision 槽已配置，也绝不能白白调用 Jev
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "answers": { "needs_polish": { "type": "noul", "noul": 0.05 } }
+        })))
+        .expect(0)
+        .mount(&jev_server)
+        .await;
+
+    let mut unconfigured_polish = Settings::default();
+    unconfigured_polish.profiles.push(ProviderProfile {
+        id: "jev".into(),
+        capability: ProviderCapability::Decision,
+        kind: ProviderKind::Jev,
+        label: "Jev".into(),
+        base_url: format!("{}/v1", jev_server.uri()),
+        model: "jev-latest".into(),
+        credentials: [("api_key".to_string(), "ts-key".to_string())].into(),
+        extra_headers: Default::default(),
+        extra_form: Default::default(),
+        timeout_ms: 5_000,
+        options: Default::default(),
+    });
+    unconfigured_polish.slots.insert(
+        SlotKind::Decision,
+        SlotConfig {
+            active_profile: Some("jev".into()),
+        },
+    );
+    let reg_unconfigured = std::sync::Arc::new(ProviderRegistry::new(unconfigured_polish.clone()));
+    let degraded = prepare_transcript(
+        "好的".into(),
+        &unconfigured_polish,
+        &reg_unconfigured,
+        &PromptContext::default(),
+    )
+    .await;
+    assert!(degraded.degraded);
+    assert_eq!(degraded.text, "好的");
+    jev_server.verify().await;
+
+    // 2) Polish 与 Translate 均已配置，Jev 返回低概率（0.08 < 0.50）：
+    //    翻译流水线跳过 Polish HTTP 请求，直接把原文送入 Translate
+    jev_server.reset().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "answers": { "needs_polish": { "type": "noul", "noul": 0.08 } }
+        })))
+        .expect(1)
+        .mount(&jev_server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"<output>不应该调用整理</output>\"}}]}\n\ndata: [DONE]\n\n",
+                ),
+        )
+        .expect(0)
+        .mount(&polish_server)
+        .await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"<output>Got it.</output>\"}}]}\n\ndata: [DONE]\n\n",
+                ),
+        )
+        .expect(1)
+        .mount(&translate_server)
+        .await;
+
+    let mut full_settings = unconfigured_polish;
+    full_settings.general.proxy_mode = typex_lib::settings::schema::ProxyMode::Direct;
+    full_settings.profiles.push(ProviderProfile {
+        id: "polish-llm".into(),
+        capability: ProviderCapability::Llm,
+        kind: ProviderKind::ChatCompletions,
+        label: "Polish".into(),
+        base_url: format!("{}/v1", polish_server.uri()),
+        model: "qwen-flash".into(),
+        credentials: [("api_key".to_string(), "sk-polish".to_string())].into(),
+        extra_headers: Default::default(),
+        extra_form: Default::default(),
+        timeout_ms: 5_000,
+        options: Default::default(),
+    });
+    full_settings.profiles.push(ProviderProfile {
+        id: "translate-llm".into(),
+        capability: ProviderCapability::Llm,
+        kind: ProviderKind::ChatCompletions,
+        label: "Translate".into(),
+        base_url: format!("{}/v1", translate_server.uri()),
+        model: "qwen-plus".into(),
+        credentials: [("api_key".to_string(), "sk-translate".to_string())].into(),
+        extra_headers: Default::default(),
+        extra_form: Default::default(),
+        timeout_ms: 5_000,
+        options: Default::default(),
+    });
+    full_settings.slots.insert(
+        SlotKind::Polish,
+        SlotConfig {
+            active_profile: Some("polish-llm".into()),
+        },
+    );
+    full_settings.slots.insert(
+        SlotKind::Translate,
+        SlotConfig {
+            active_profile: Some("translate-llm".into()),
+        },
+    );
+    let reg_full = std::sync::Arc::new(ProviderRegistry::new(full_settings.clone()));
+    let outcome = process(
+        SessionMode::Translation,
+        "收到".into(),
+        &full_settings,
+        &reg_full,
+        &PromptContext::default(),
+    )
+    .await;
+    assert!(matches!(
+        outcome,
+        typex_lib::orchestrator::pipeline::ProcessOutcome::Done(text) if text == "Got it."
+    ));
+    jev_server.verify().await;
+    polish_server.verify().await;
+    translate_server.verify().await;
+}

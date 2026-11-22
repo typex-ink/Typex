@@ -68,6 +68,12 @@ impl SettingsService {
                 "VAD 门限必须是有限值且位于允许范围内",
             ));
         }
+        if !new.dictation.is_decision_threshold_valid() {
+            return Err(TypexError::new(
+                ErrorCode::InvalidRequest,
+                "整理决策门限必须是有限值且位于 0.05..=0.95 范围内",
+            ));
+        }
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| {
                 TypexError::new(ErrorCode::Internal, format!("创建配置目录失败: {e}"))
@@ -423,6 +429,24 @@ mod tests {
         assert!(!settings.general.autostart);
         assert!(!settings.dictation.polish_enabled);
         assert_eq!(settings.dictation.vad, schema::VadSettings::default());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_rejects_invalid_decision_threshold_without_changing_current_settings() {
+        let dir = std::env::temp_dir().join(format!(
+            "typex-test-invalid-decision-threshold-update-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let service = SettingsService::load(dir.clone());
+        let before = service.get();
+        let mut invalid = before.clone();
+        invalid.dictation.polish_decision_threshold = 0.99;
+
+        let error = service.update(invalid).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert_eq!(service.get(), before);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

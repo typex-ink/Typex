@@ -19,13 +19,26 @@ import {
 const { t } = useI18n();
 const store = useSettingsStore();
 
-const SLOTS: { slot: SlotKind; key: string }[] = [
+const SLOTS: {
+  slot: SlotKind;
+  key: string;
+  optional?: boolean;
+  optionalTitleKey?: string;
+  optionalHintKey?: string;
+}[] = [
   { slot: "stt", key: "settings.providers.slot_stt" },
   { slot: "polish", key: "settings.providers.slot_polish" },
+  {
+    slot: "decision",
+    key: "settings.providers.slot_decision",
+    optional: true,
+    optionalTitleKey: "settings.providers.slot_decision_optional_title",
+    optionalHintKey: "settings.providers.slot_decision_optional_hint",
+  },
   { slot: "translate", key: "settings.providers.slot_translate" },
   { slot: "assistant", key: "settings.providers.slot_assistant" },
 ];
-const CAPABILITIES: ProviderCapability[] = ["stt", "llm"];
+const CAPABILITIES: ProviderCapability[] = ["stt", "llm", "decision"];
 
 // 子页状态（05 §5.1：同一内容区内切换，顶部 ← 返回）
 const editing = ref<{
@@ -48,7 +61,9 @@ function activeProfileOf(slot: SlotKind): ProviderProfile | null {
 }
 
 function capabilityOf(slot: SlotKind): ProviderCapability {
-  return slot === "stt" ? "stt" : "llm";
+  if (slot === "stt") return "stt";
+  if (slot === "decision") return "decision";
+  return "llm";
 }
 
 function alternativesOf(slot: SlotKind): ProviderProfile[] {
@@ -109,7 +124,9 @@ function activeInAnySlot(profileId: string): boolean {
 }
 
 function poolLabel(capability: ProviderCapability): string {
-  return t(capability === "stt" ? "settings.providers.service_stt" : "settings.providers.service_llm");
+  if (capability === "stt") return t("settings.providers.service_stt");
+  if (capability === "decision") return t("settings.providers.service_decision");
+  return t("settings.providers.service_llm");
 }
 
 function profilesOf(capability: ProviderCapability): ProviderProfile[] {
@@ -131,15 +148,24 @@ function editSlotProfile(slot: SlotKind) {
 }
 
 function emptyHint(capability: ProviderCapability): string {
-  return t(capability === "stt" ? "settings.providers.pool_empty_stt" : "settings.providers.pool_empty_llm");
+  if (capability === "stt") return t("settings.providers.pool_empty_stt");
+  if (capability === "decision") return t("settings.providers.pool_empty_decision");
+  return t("settings.providers.pool_empty_llm");
 }
 
 function newButtonLabel(capability: ProviderCapability): string {
-  return t(capability === "stt" ? "settings.providers.new_stt_service" : "settings.providers.new_llm_service");
+  if (capability === "stt") return t("settings.providers.new_stt_service");
+  if (capability === "decision") return t("settings.providers.new_decision_service");
+  return t("settings.providers.new_llm_service");
 }
 
 async function switchProfile(slot: SlotKind, id: string) {
   await commands.activateProfile(slot, id);
+  await store.load();
+}
+
+async function clearSlot(slot: SlotKind) {
+  await commands.deactivateSlot(slot);
   await store.load();
 }
 
@@ -170,7 +196,7 @@ onMounted(loadLocalModels);
   <div v-else>
     <h5 class="page-title">{{ t("settings.nav_providers") }}</h5>
     <div class="section-head">{{ t("settings.providers.assignments_title") }}</div>
-    <template v-for="{ slot, key } in SLOTS" :key="slot">
+    <template v-for="{ slot, key, optional, optionalTitleKey, optionalHintKey } in SLOTS" :key="slot">
       <div class="slot-h">
         <span>{{ t(key) }}</span>
       </div>
@@ -179,9 +205,13 @@ onMounted(loadLocalModels);
         :active="!!activeProfileOf(slot)"
         :alternatives="alternativesOf(slot)"
         :subtitle="subtitleOf(slot)"
+        :optional="optional"
+        :unconfigured-title="optionalTitleKey ? t(optionalTitleKey) : undefined"
+        :unconfigured-hint="optionalHintKey ? t(optionalHintKey) : undefined"
         @edit="editSlotProfile(slot)"
         @create="createForSlot(slot)"
         @switch="(id) => switchProfile(slot, id)"
+        @clear="clearSlot(slot)"
       />
     </template>
     <!-- 底部摘要行（05 §5.1）：已下载模型 + 「管理…」入口；feature 未启用时隐藏 -->
@@ -200,6 +230,7 @@ onMounted(loadLocalModels);
       <span class="pool-actions">
         <Button size="sm" @click="createProfile('stt')">{{ newButtonLabel("stt") }}</Button>
         <Button size="sm" @click="createProfile('llm')">{{ newButtonLabel("llm") }}</Button>
+        <Button size="sm" @click="createProfile('decision')">{{ newButtonLabel("decision") }}</Button>
       </span>
     </div>
     <template v-for="capability in CAPABILITIES" :key="capability">

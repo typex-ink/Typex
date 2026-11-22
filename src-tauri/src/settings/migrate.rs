@@ -2,7 +2,8 @@
 
 use crate::{
     settings::schema::{
-        CURRENT_SCHEMA_VERSION, VAD_ENERGY_THRESHOLD_MAX, VAD_ENERGY_THRESHOLD_MIN,
+        CURRENT_SCHEMA_VERSION, POLISH_DECISION_THRESHOLD_DEFAULT, POLISH_DECISION_THRESHOLD_MAX,
+        POLISH_DECISION_THRESHOLD_MIN, VAD_ENERGY_THRESHOLD_MAX, VAD_ENERGY_THRESHOLD_MIN,
         VAD_NEURAL_THRESHOLD_MAX, VAD_NEURAL_THRESHOLD_MIN,
     },
     types::{DEFAULT_PROVIDER_TIMEOUT_MS, derive_translation_chord, normalize_hotkey_chord},
@@ -33,6 +34,11 @@ pub fn migrate(mut value: Value) -> Value {
     if version < 11 {
         migrate_v10_to_v11(&mut value);
     }
+    if version < 12 {
+        migrate_v11_to_v12(&mut value);
+    } else {
+        sanitize_v12_decision_threshold(&mut value);
+    }
     normalize_hotkey_ids(&mut value, version < 8);
     drop_legacy_keyring_credentials(&mut value);
     if let Some(obj) = value.as_object_mut() {
@@ -57,6 +63,58 @@ fn migrate_v10_to_v11(value: &mut Value) {
             .entry("trigger_mode")
             .or_insert_with(|| Value::String("hold".into()));
     }
+}
+
+fn default_decision_threshold_value() -> Value {
+    serde_json::json!(POLISH_DECISION_THRESHOLD_DEFAULT)
+}
+
+fn migrate_v11_to_v12(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let dictation = root
+        .entry("dictation")
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(dictation) = dictation.as_object_mut() {
+        dictation
+            .entry("polish_decision_threshold")
+            .or_insert_with(default_decision_threshold_value);
+        dictation
+            .entry("polish_decision_prompt")
+            .or_insert_with(|| Value::String(String::new()));
+    }
+    if let Some(slots) = root.get_mut("slots").and_then(Value::as_object_mut) {
+        slots
+            .entry("decision")
+            .or_insert_with(|| serde_json::json!({ "active_profile": null }));
+    }
+}
+
+fn sanitize_v12_decision_threshold(value: &mut Value) {
+    let Some(dictation) = value.get_mut("dictation").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let valid = dictation
+        .get("polish_decision_threshold")
+        .is_none_or(valid_decision_threshold_value);
+    if !valid {
+        tracing::warn!("检测到无效整理决策门限，已仅恢复门限默认值");
+        dictation.insert(
+            "polish_decision_threshold".into(),
+            default_decision_threshold_value(),
+        );
+    }
+}
+
+fn valid_decision_threshold_value(value: &Value) -> bool {
+    value.as_f64().is_some_and(|threshold| {
+        let as_f32 = threshold as f32;
+        threshold.is_finite()
+            && as_f32.is_finite()
+            && (0.05..=0.95).contains(&threshold)
+            && (POLISH_DECISION_THRESHOLD_MIN..=POLISH_DECISION_THRESHOLD_MAX).contains(&as_f32)
+    })
 }
 
 fn migrate_v9_to_v10(value: &mut Value) {
@@ -567,5 +625,57 @@ mod tests {
         }));
 
         assert_eq!(migrated["profiles"][0]["timeout_ms"], 30_000);
+    }
+
+    #[test]
+    fn v11_migrates_to_v12_with_decision_slot_and_defaults() {
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 11,
+            "dictation": { "polish_enabled": true },
+            "slots": {
+                "stt": { "active_profile": "groq" },
+                "polish": { "active_profile": "deepseek" },
+                "translate": { "active_profile": "deepseek" },
+                "assistant": { "active_profile": null }
+            }
+        }));
+
+        assert_eq!(migrated["schema_version"], CURRENT_SCHEMA_VERSION);
+        assert_eq!(migrated["dictation"]["polish_decision_threshold"], 0.5);
+        assert_eq!(migrated["dictation"]["polish_decision_prompt"], "");
+        assert_eq!(
+            migrated["slots"]["decision"],
+            serde_json::json!({ "active_profile": null })
+        );
+        assert_eq!(migrated["slots"]["stt"]["active_profile"], "groq");
+    }
+
+    #[test]
+    fn invalid_v12_decision_threshold_only_restores_threshold_default() {
+        for boundary in [0.05, 0.95] {
+            let valid = migrate(serde_json::json!({
+                "schema_version": 12,
+                "dictation": { "polish_decision_threshold": boundary }
+            }));
+            assert_eq!(valid["dictation"]["polish_decision_threshold"], boundary);
+        }
+
+        let migrated = migrate(serde_json::json!({
+            "schema_version": 12,
+            "general": { "autostart": false },
+            "dictation": {
+                "polish_enabled": false,
+                "polish_decision_threshold": 1.25,
+                "polish_decision_prompt": "custom rule"
+            }
+        }));
+
+        assert_eq!(migrated["general"]["autostart"], false);
+        assert_eq!(migrated["dictation"]["polish_enabled"], false);
+        assert_eq!(
+            migrated["dictation"]["polish_decision_prompt"],
+            "custom rule"
+        );
+        assert_eq!(migrated["dictation"]["polish_decision_threshold"], 0.5);
     }
 }

@@ -7,6 +7,9 @@
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
+use crate::providers::decision::{
+    DecisionProvider, DecisionRequest, DecisionState, resolve_decision_instructions,
+};
 use crate::providers::llm::{LlmProvider, collect_text, output_protocol, prompt};
 use crate::settings::schema::Settings;
 use crate::types::{SessionMode, SlotKind};
@@ -57,10 +60,11 @@ pub async fn process(
     }
 }
 
-/// 按听写的文本整理开关和 system prompt 预处理 STT 文本。
+/// 按听写的文本整理开关、可选整理决策模型和 system prompt 预处理 STT 文本。
 ///
 /// 用于听写最终正文，也用于翻译文本和助手语音指令。关闭「文本整理」时不处理；
-/// 开启但整理槽不可用/超时/报错/空输出时直通原文，不阻断下游功能。
+/// 若启用了「整理决策」槽且判定概率低于门限，则直接放行原始转写（`degraded = false`）；
+/// 决策槽异常时回退至常规文本整理；整理槽不可用/超时/报错/空输出时直通原文，不阻断下游功能。
 pub async fn prepare_transcript(
     transcript: String,
     settings: &Settings,
@@ -73,6 +77,8 @@ pub async fn prepare_transcript(
             degraded: false,
         };
     }
+    // 先确认整理槽可用（纯内存缓存查询/轻量构造，零网络开销）：
+    // 若整理槽本身未配置，绝不白白发起远端决策请求，且保持 degraded=true（「未整理」提示）。
     let llm = match registry.llm_for(SlotKind::Polish) {
         Ok(llm) => llm,
         Err(e) => {
@@ -83,8 +89,96 @@ pub async fn prepare_transcript(
             };
         }
     };
+    let decision = match registry.decision_for(SlotKind::Decision) {
+        Ok(provider) => provider,
+        Err(e) => {
+            tracing::warn!(
+                error_code = ?e.code,
+                "整理决策槽配置不可用，回退至常规文本整理"
+            );
+            None
+        }
+    };
+    if let Some(decision) = decision.as_deref()
+        && !should_polish_transcript(&transcript, settings, decision, prompt_context).await
+    {
+        return PreparedTranscript {
+            text: transcript,
+            degraded: false,
+        };
+    }
 
     prepare_transcript_with_llm(transcript, settings, llm.as_ref(), prompt_context).await
+}
+
+fn normalized_threshold_f64(threshold: f32) -> f64 {
+    (f64::from(threshold) * 1_000_000.0).round() / 1_000_000.0
+}
+
+async fn should_polish_transcript(
+    transcript: &str,
+    settings: &Settings,
+    decision: &dyn DecisionProvider,
+    prompt_context: &PromptContext,
+) -> bool {
+    let req = DecisionRequest {
+        state: DecisionState {
+            transcript: transcript.to_string(),
+            target_app: prompt_context.target_app.clone(),
+            dictionary_terms: settings.dictionary.normalized_terms(),
+        },
+        instructions: resolve_decision_instructions(&settings.dictation.polish_decision_prompt)
+            .to_string(),
+    };
+    let threshold = normalized_threshold_f64(settings.dictation.polish_decision_threshold);
+    match decision.decide(req).await {
+        Ok(result) => {
+            let needs_polish = result.probability >= threshold;
+            tracing::debug!(
+                stage = "polish_decision",
+                needs_polish,
+                probability = result.probability,
+                threshold,
+                transcript_len = transcript.len(),
+                "整理决策完成"
+            );
+            needs_polish
+        }
+        Err(e) => {
+            tracing::warn!(
+                error_code = ?e.error_code(),
+                http_status = ?e.http_status(),
+                response_body_len = e.response_body_len(),
+                "整理决策调用失败，回退至常规文本整理"
+            );
+            true
+        }
+    }
+}
+
+#[cfg(test)]
+async fn prepare_transcript_with_providers(
+    transcript: String,
+    settings: &Settings,
+    decision: Option<&dyn DecisionProvider>,
+    llm: &dyn LlmProvider,
+    prompt_context: &PromptContext,
+) -> PreparedTranscript {
+    if !settings.dictation.polish_enabled {
+        return PreparedTranscript {
+            text: transcript,
+            degraded: false,
+        };
+    }
+    if let Some(decision) = decision
+        && !should_polish_transcript(&transcript, settings, decision, prompt_context).await
+    {
+        return PreparedTranscript {
+            text: transcript,
+            degraded: false,
+        };
+    }
+    prepare_transcript_with_llm(transcript, settings, llm, prompt_context).await
 }
 
 async fn prepare_transcript_with_llm(
@@ -354,5 +448,144 @@ mod tests {
             translate_with_llm("你好".into(), &settings, &llm, &PromptContext::default()).await;
 
         assert!(matches!(out, ProcessOutcome::Failed(err) if err.code == ErrorCode::ServerError));
+    }
+
+    struct StubDecision {
+        outcome: std::result::Result<f64, ProviderError>,
+        calls: std::sync::atomic::AtomicUsize,
+        last_request: Mutex<Option<DecisionRequest>>,
+    }
+
+    impl StubDecision {
+        fn ok(probability: f64) -> Self {
+            Self {
+                outcome: Ok(probability),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                last_request: Mutex::new(None),
+            }
+        }
+
+        fn err(error: ProviderError) -> Self {
+            Self {
+                outcome: Err(error),
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                last_request: Mutex::new(None),
+            }
+        }
+
+        fn call_count(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DecisionProvider for StubDecision {
+        async fn decide(
+            &self,
+            req: DecisionRequest,
+        ) -> std::result::Result<crate::providers::decision::DecisionResult, ProviderError>
+        {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.last_request.lock().unwrap() = Some(req);
+            self.outcome
+                .clone()
+                .map(|probability| crate::providers::decision::DecisionResult { probability })
+        }
+    }
+
+    #[tokio::test]
+    async fn decision_below_threshold_skips_polish_llm_without_degraded_flag() {
+        let mut settings = Settings::default();
+        settings.dictation.polish_decision_threshold = 0.50;
+        settings.dictionary.terms = vec!["Typex".into()];
+        let decision = StubDecision::ok(0.12);
+        let llm = StubLlm::new("<output>不应被调用</output>");
+
+        let prepared = prepare_transcript_with_providers(
+            "好的".into(),
+            &settings,
+            Some(&decision),
+            &llm,
+            &PromptContext::new(Some("Slack".into())),
+        )
+        .await;
+
+        assert!(!prepared.degraded);
+        assert_eq!(prepared.text, "好的");
+        assert_eq!(decision.call_count(), 1);
+        assert!(llm.last_request.lock().unwrap().is_none());
+        let captured = decision.last_request.lock().unwrap().clone().unwrap();
+        assert_eq!(captured.state.transcript, "好的");
+        assert_eq!(captured.state.target_app.as_deref(), Some("Slack"));
+        assert_eq!(captured.state.dictionary_terms, vec!["Typex"]);
+    }
+
+    #[tokio::test]
+    async fn decision_at_or_above_threshold_invokes_polish_llm() {
+        let mut settings = Settings::default();
+        settings.dictation.polish_decision_threshold = 0.30;
+        settings.dictation.polish_decision_prompt = "自定义判定指令".into();
+        let decision = StubDecision::ok(0.30);
+        let llm = StubLlm::new("<output>今天下午四点开会。</output>");
+
+        let prepared = prepare_transcript_with_providers(
+            "嗯今天下午三点不对四点开会".into(),
+            &settings,
+            Some(&decision),
+            &llm,
+            &PromptContext::default(),
+        )
+        .await;
+
+        assert!(!prepared.degraded);
+        assert_eq!(prepared.text, "今天下午四点开会。");
+        assert_eq!(decision.call_count(), 1);
+        assert!(llm.last_request.lock().unwrap().is_some());
+        assert_eq!(
+            decision
+                .last_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .instructions,
+            "自定义判定指令"
+        );
+    }
+
+    #[tokio::test]
+    async fn decision_error_falls_back_to_polish_llm_and_verbatim_skips_both() {
+        let mut settings = Settings::default();
+        let failing_decision = StubDecision::err(ProviderError::Timeout);
+        let llm = StubLlm::new("<output>整理完成。</output>");
+
+        let prepared = prepare_transcript_with_providers(
+            "嗯整理完成".into(),
+            &settings,
+            Some(&failing_decision),
+            &llm,
+            &PromptContext::default(),
+        )
+        .await;
+        assert!(!prepared.degraded);
+        assert_eq!(prepared.text, "整理完成。");
+        assert_eq!(failing_decision.call_count(), 1);
+        assert!(llm.last_request.lock().unwrap().is_some());
+
+        settings.dictation.polish_enabled = false;
+        let skipped_decision = StubDecision::ok(0.99);
+        let untouched_llm = StubLlm::new("<output>不会调用</output>");
+        let verbatim = prepare_transcript_with_providers(
+            "原样直出".into(),
+            &settings,
+            Some(&skipped_decision),
+            &untouched_llm,
+            &PromptContext::default(),
+        )
+        .await;
+        assert!(!verbatim.degraded);
+        assert_eq!(verbatim.text, "原样直出");
+        assert_eq!(skipped_decision.call_count(), 0);
+        assert!(untouched_llm.last_request.lock().unwrap().is_none());
     }
 }

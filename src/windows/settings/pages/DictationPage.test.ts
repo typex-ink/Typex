@@ -21,6 +21,8 @@ function makeSettings(microphone: string): Settings {
     dictation: {
       polish_enabled: true,
       polish_system_prompt: "",
+      polish_decision_threshold: 0.5,
+      polish_decision_prompt: "",
       inject_method: "auto",
       paste_delay_ms: 60,
       language: "auto",
@@ -180,5 +182,51 @@ describe("DictationPage VAD settings", () => {
     const savedThreshold = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
     expect(savedThreshold?.dictation.vad.energy_threshold).toBe(0.025);
     expect(savedThreshold?.dictation.vad.neural_threshold).toBe(0.5);
+  });
+});
+
+describe("DictationPage cleanup decision controls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listAudioDevices.mockResolvedValue({ status: "ok", data: [] });
+    updateSettings.mockImplementation(async (settings: Settings) => ({
+      status: "ok",
+      data: settings,
+    }));
+  });
+
+  it("updates the cleanup decision threshold and saves custom/restored decision instructions", async () => {
+    const wrapper = mountPage("");
+    await flushPromises();
+
+    const threshold = wrapper.get('[data-testid="polish-decision-threshold"]');
+    expect(threshold.attributes()).toMatchObject({ min: "0.05", max: "0.95", step: "0.05" });
+    await threshold.setValue("0.35");
+    await flushPromises();
+
+    const savedThreshold = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(savedThreshold?.dictation.polish_decision_threshold).toBe(0.35);
+
+    await wrapper.get('[data-testid="expand-decision-prompt"]').trigger("click");
+    const textarea = wrapper.get('[data-testid="decision-prompt-textarea"]');
+    expect((textarea.element as HTMLTextAreaElement).value).toContain("state.transcript");
+    expect((textarea.element as HTMLTextAreaElement).value).toContain("state.dictionary_terms");
+
+    await textarea.setValue("Custom Jev decision instructions.");
+    await wrapper.get('[data-testid="save-decision-prompt"]').trigger("click");
+    await flushPromises();
+
+    const savedCustom = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(savedCustom?.dictation.polish_decision_prompt).toBe(
+      "Custom Jev decision instructions.",
+    );
+
+    await wrapper.get('[data-testid="expand-decision-prompt"]').trigger("click");
+    await wrapper.get('[data-testid="restore-decision-prompt"]').trigger("click");
+    await wrapper.get('[data-testid="save-decision-prompt"]').trigger("click");
+    await flushPromises();
+
+    const savedRestored = vi.mocked(commands.updateSettings).mock.calls.at(-1)?.[0];
+    expect(savedRestored?.dictation.polish_decision_prompt).toBe("");
   });
 });

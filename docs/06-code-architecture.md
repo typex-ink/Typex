@@ -141,6 +141,9 @@ typex/
 │       │   │   ├── chat_completions.rs
 │       │   │   ├── responses.rs
 │       │   │   └── local.rs      # llama.cpp + Qwen 系列（整理/翻译/问答槽，feature "local-models"）
+│       │   ├── decision/
+│       │   │   ├── mod.rs        # trait DecisionProvider + TimedDecisionProvider + 内置整理决策判定指令
+│       │   │   └── jev.rs        # TypeSafe AI System One（POST {base_url}/systemone）
 │       │   └── models/
 │       │       └── mod.rs        # 模型库清单 + 下载管理器 + 硬件分档探测（[03 §8]）
 │       ├── settings/
@@ -177,7 +180,7 @@ typex/
 - `main.rs` 手工装配（不引依赖注入框架）：构造 `SettingsService` → 据配置构造 `ProviderRegistry`、`AudioService`、`InjectorChain`、`SelectionReader`、`HotkeyService` → 全部交给 `Orchestrator` → `Orchestrator` 与 `SettingsService` 放入 Tauri `State`（`Arc<...>`）。
 - 服务句柄一律 `Arc<Service>`，内部可变性用 `tokio::sync::Mutex/RwLock`（跨 await）或 `parking_lot`（纯同步、短临界区）；**禁止**在持锁状态下 await 网络调用。
 - 配置热更新：`SettingsService` 变更后广播 `watch::channel`；`ProviderRegistry` 订阅并按 profile-id 惰性重建 provider 实例，其他服务各自订阅所需字段（如快捷键改绑）。
-- STT / LLM 调用时限由 `ProviderRegistry` 按 profile 的 `timeout_ms` 统一包装，覆盖远端与本地实现以及完整调用生命周期；orchestrator 不得为转写、整理、翻译或助手叠加功能专用总时限/idle timeout。
+- STT / LLM / Decision 调用时限由 `ProviderRegistry` 按 profile 的 `timeout_ms` 统一包装，覆盖远端与本地实现以及完整调用生命周期；orchestrator 不得为转写、整理决策、整理、翻译或助手叠加功能专用总时限/idle timeout。
 - 本地 STT 的模型加载与原生推理必须进入 blocking pool，不得占用 Tokio worker。同一 provider 实例同时只允许一个原生转写任务；调用方超时或取消后，在原生库无法安全中断当前推理时，在途许可必须保留到该任务实际返回，后续重试仅异步等待许可，不得继续创建或阻塞新的运行时工作线程。
 
 ### 5.2 会话状态机（orchestrator 的核心）
@@ -384,7 +387,7 @@ trait Injector { fn inject(&self, text: &str, target: &FocusInfo) -> Result<()>;
 | 会话 | `cancel_session` / `retry_session` / `dismiss_session` | HUD 按钮；toggle 录音的开始/停止走快捷键，不提供 command（避免两套触发路径） |
 | 配置 | `get_settings` / `update_settings(patch)` | patch 语义，返回完整新配置；F-10 词典作为 `Settings.dictionary.terms[]` 随设置同步 |
 | 音频 | `list_audio_devices` | 返回 `Result<AudioInputDevice[]>`；每项为 `{ id, label }`，设置界面展示 label、保存 id，枚举失败不得伪装为空列表 |
-| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM 能力兼容；密钥字段由 `set_profile_secret` 写入 profile credentials |
+| Profile | `list_profiles` / `upsert_profile` / `delete_profile` / `activate_profile { slot, id }` / `deactivate_slot { slot }` / `set_profile_secret` / `test_profile { id }` | `profiles[]` 是全局服务配置池；`activate_profile` 只改功能槽位指针并校验 STT/LLM/Decision 能力兼容；`deactivate_slot` 仅允许清空可选槽位（`decision`）指针；密钥字段由 `set_profile_secret` 写入 profile credentials |
 | 本地模型 | `list_local_models` / `download_local_model { model_id, source? }` / `cancel_local_download { model_id }` / `delete_local_model { model_id, force }` / `get_hardware_tier` | `source` 为空时使用 settings.general.model_download_source；固定源只在模型管理页底部配置 |
 | 窗口 | `complete_onboarding` / `open_onboarding_window` / `set_hud_size { width, height }` | `complete_onboarding` 先创建/显示并聚焦主页，再关闭 onboarding；任一步失败返回错误并保留可重试的引导页。HUD 仅上报内容逻辑尺寸，由 Rust 在目标屏工作区以单次原生 frame 更新原子缩放并重新居中 |
 | 助手窗口 | `assistant_window_ready` | assistant WebView 注册完 `assistant://*` 监听器后上报；后端首次创建窗口时等待它，避免首轮 `assistant://started` 丢事件 |

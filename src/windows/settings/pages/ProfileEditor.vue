@@ -33,6 +33,7 @@ const { t } = useI18n();
 const CAPABILITY_LABEL_KEY: Record<ProviderCapability, string> = {
   stt: "settings.providers.service_stt",
   llm: "settings.providers.service_llm",
+  decision: "settings.providers.service_decision",
 };
 const ERROR_KEYS: Record<string, string> = {
   auth_error: "settings.profile.err_auth_error",
@@ -71,7 +72,9 @@ function resolveInitialPresetId(profile: ProviderProfile | null): string {
   if (profile.kind === "volcengine") {
     return presets.find((p) => p.kind === "volcengine")?.id ?? customId;
   }
-  const normalizedBaseUrl = (profile.base_url ?? "").trim().replace(/\/+$/, "");
+  const rawBaseUrl = (profile.base_url ?? "").trim().replace(/\/+$/, "");
+  const normalizedBaseUrl =
+    profile.kind === "jev" ? rawBaseUrl.replace(/\/systemone$/, "") : rawBaseUrl;
   if (!normalizedBaseUrl) return customId;
   return (
     presets.find(
@@ -80,11 +83,17 @@ function resolveInitialPresetId(profile: ProviderProfile | null): string {
   );
 }
 
+function defaultKindForCapability(capability: ProviderCapability) {
+  if (capability === "stt") return "openai_compat" as const;
+  if (capability === "decision") return "jev" as const;
+  return "chat_completions" as const;
+}
+
 const presetId = ref<string>(resolveInitialPresetId(props.profile));
 const label = ref(props.profile?.label ?? "");
 const baseUrl = ref(props.profile?.base_url ?? "");
 const model = ref(props.profile?.model ?? "");
-const kind = ref(props.profile?.kind ?? (props.capability === "stt" ? "openai_compat" : "chat_completions"));
+const kind = ref(props.profile?.kind ?? defaultKindForCapability(props.capability));
 const timeoutSeconds = ref<string | number>((props.profile?.timeout_ms ?? DEFAULT_TIMEOUT_MS) / 1000);
 const apiKey = ref("");
 // volcengine 双凭据（03 §2.2）
@@ -110,14 +119,14 @@ const showModelSuggestions = computed(() => {
     suggestedModels.value.length === 1 && model.value.trim() !== suggestedModels.value[0]
   );
 });
-const timeoutHintKey = computed(() =>
-  props.capability === "stt"
-    ? "settings.profile.timeout_hint_stt"
-    : "settings.profile.timeout_hint_llm",
-);
+const timeoutHintKey = computed(() => {
+  if (props.capability === "stt") return "settings.profile.timeout_hint_stt";
+  if (props.capability === "decision") return "settings.profile.timeout_hint_decision";
+  return "settings.profile.timeout_hint_llm";
+});
 const canConfigureReasoning = computed(
   () =>
-    props.capability !== "stt" &&
+    props.capability === "llm" &&
     (kind.value === "chat_completions" || kind.value === "responses" || kind.value === "local"),
 );
 const reasoningOptions = computed(() => [
@@ -156,10 +165,10 @@ const reasoningEffort = ref(initialReasoningEffort(props.profile));
 const downloadPct = ref<number | null>(null);
 let unlistenProgress: (() => void) | null = null;
 
-const slotPurpose = props.capability;
+const slotPurpose = props.capability === "decision" ? null : props.capability;
 const localOptions = computed(() =>
   localModels.value
-    .filter((m) => m.purpose === slotPurpose)
+    .filter((m) => slotPurpose !== null && m.purpose === slotPurpose)
     .map((m) => ({
       value: m.id,
       label: `${m.display_name}${m.origin === "imported" ? ` · ${t("settings.models.origin_imported")}` : ""}（${
@@ -177,7 +186,7 @@ async function loadLocalModels() {
   const r = await commands.listLocalModels();
   if (r.status === "ok") {
     localModels.value = r.data;
-    if (isLocal.value && !model.value) {
+    if (isLocal.value && !model.value && slotPurpose !== null) {
       model.value = localModels.value.find((m) => m.purpose === slotPurpose)?.id ?? "";
     }
   }
@@ -227,7 +236,10 @@ function applyPreset(id: string) {
   kind.value = p.kind;
   if (p.kind === "local") {
     baseUrl.value = "";
-    model.value = localModels.value.find((m) => m.purpose === slotPurpose)?.id ?? "";
+    model.value =
+      slotPurpose !== null
+        ? (localModels.value.find((m) => m.purpose === slotPurpose)?.id ?? "")
+        : "";
     void loadLocalModels();
   } else if (p.models[0]) {
     model.value = p.models[0];
@@ -458,7 +470,7 @@ onUnmounted(() => unlistenProgress?.());
           </span>
         </span>
       </FormRow>
-      <FormRow v-if="capability !== 'stt'" :label="t('settings.profile.api_format')">
+      <FormRow v-if="capability === 'llm'" :label="t('settings.profile.api_format')">
         <Select
           v-model="kind"
           :options="[

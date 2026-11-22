@@ -46,7 +46,7 @@
 - 录音失败：Recording 中收到启动失败或运行时设备拔出 → `Failed(Recording)`，Effect 含 `CancelRecording` + 错误反馈；Retry → 同一模式重新 `StartRecording`，不得进入 STT/Injecting。
 - **session_id 竞态**：携带旧 session_id 的 SttResult/LlmDelta 到达 → 被丢弃，状态零变化（这是防「上一句注入到下一句」的核心测试）。
 - 整理层降级：听写中 Polish 收到 profile 全局调用超时/报错 → 注入原始转写 + `EmitUi(unpolished)`；不得存在独立的整理总时限。
-- 共享预整理：翻译/助手在 `polish_enabled=true` 时先使用文本整理 system prompt + 固定 XML user message；`polish_enabled=false` 时跳过；整理收到 profile 全局调用超时/报错/未配置时直通原始转写继续下游。
+- 共享预整理与前置整理决策：翻译/助手在 `polish_enabled=true` 时共享前置决策与文本整理（system prompt + 固定 XML user message）；`polish_enabled=false` 时同时跳过决策与整理；已配置 `decision` 槽且 `noul < polish_decision_threshold` 时跳过整理 LLM 且 `degraded=false`；`noul >= threshold`、未配置 `decision` 槽，或决策调用超时/报错时进入（回退至）文本整理 LLM；整理收到 profile 全局调用超时/报错/未配置时直通原始转写继续下游。
 - 翻译降级：STT 成功翻译失败 → Failed 且提供「注入原文」Effect。
 - 取消后迟到的回调：Cancel 后 RecordingFinished/SttResult/ProcessResult/AssistantHandedOff/InjectDone 到达 → 丢弃，且不得启动下游、弹窗或写历史。
 - 助手分流（F-3 / ADR-23）：Processing 中 `ProcessResult`（改写型）→ Injecting（直接替换选区）；`AssistantHandedOff(Some(answer))`（完整成功回答）→ Idle + 释放音频并写助手历史；`AssistantHandedOff(None)`（弹窗终态错误）不写历史；`ProcessFailed` → Failed（HUD 可重试/复制原文）。
@@ -62,7 +62,7 @@
 | Windows 坐标与完整性纯逻辑 | mixed-DPI、负坐标与 work area 转换；目标完整性高于 Typex 时判定 UIPI 降级，不触发自动提权 |
 | VAD 与切片（`audio/vad.rs` / `audio/pipeline.rs`） | schema v7 迁移与门限校验；能量/神经网络两条路径；Silero 初始化/推理失败降级；弱声连续 90 ms 保底与纯静音拒绝；首部 300 ms/尾部 150 ms 非对称 padding；长录音切片沿用录音快照；短音频不切、超长无静音音频强制切片 |
 | 重采样 | 44.1k/48k → 16k 的输出长度与频谱 sanity（正弦波频率不漂移） |
-| `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言，含 v7→v8 按旧规则生成翻译 chord、v8 三组独立持久化、v8→v9 丢弃四个旧自定义模板并初始化四个 system prompt 字段、v9→v10 把旧 UI 默认的 30 秒 profile 时限提升为 60 秒且保留其他显式值；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
+| `settings/migrate.rs` / `settings/schema.rs` | 每个历史 schema_version 的样本 JSON（存 `tests/fixtures/settings/`）→ 迁移到最新版逐字段断言，含 v7→v8 按旧规则生成翻译 chord、v8 三组独立持久化、v8→v9 丢弃四个旧自定义模板并初始化四个 system prompt 字段、v9→v10 把旧 UI 默认的 30 秒 profile 时限提升为 60 秒且保留其他显式值、v11→v12 初始化 `slots.decision` 与 `polish_decision_threshold=0.50` / `polish_decision_prompt=""` 且对单独越界决策门限仅局部恢复默认值；未知字段保留；损坏 JSON → 回退默认并保留原文件为 `.bak`；更新通道默认值覆盖 prerelease → nightly、纯 SemVer → stable，显式反序列化值不被默认值覆盖 |
 | `providers/error.rs` / `settings/migrate.rs` | HTTP 状态码 → ErrorCode 分类表；旧版 `keyring://` credentials 迁移清理 |
 | 本地模型清单/导入 | 内置清单 + 用户清单合并；导入 LLM GGUF / llama ASR GGUF+mmproj / sherpa ONNX+tokens，拒绝未开放导入的 Whisper/Transducer 运行时；导入模型删除同步清理用户清单；零配置兜底只选内置已下载模型；内置清单包含可选/高配手动模型（Whisper large-v3 / large-v3-turbo、Parakeet v3、Granite 4.0、Gemma 4、Qwen3.6 27B/35B-A3B、Qwen3.8 27B、Qwen3 14B/30B-A3B/32B）且不进入自动硬件分档；Qwen3.6、Granite 4.0 与 Gemma 4 条目的文件名、精确字节数、SHA-256 与双下载源固定，Whisper-turbo 与 Parakeet-v3 固定精确元数据与 Hugging Face 源，Qwen3.8 固定精确元数据及不可变 Hugging Face 提交且不包含字节不一致的 ModelScope 镜像；Parakeet 识别器预校验缺失文件与 `<blk>` 词表返回 `InvalidRequest`；本地 LLM 正确构造 Gemma 4 `<|turn>` 模板、收敛 `/think` 控制词注入范围，且 `ThinkingFilter` 同时剥离 `<think>...</think>` 与 `<|channel>thought...<channel|>` 跨分片思考块 |
 | 本地 llama GPU→CPU fallback | load mode；CPU 模型 `n_gpu_layers=0` 且 devices 为空、context 的 K/Q/V 与 op offload 关闭、ASR mtmd `use_gpu=false`；仅 GPU runtime 错误且 LLM 首个可见 delta 前重试一次；输入错误、CPU mode、已输出与第二次错误不重试；ASR 非流式整次重试；并发请求由 inference lease 串行且只加载一个共享 CPU 条目、fallback 前释放失败 GPU 条目、CPU 加载不持缓存锁、显式 unload 后 detached fallback 不回填、`UnloadAfterUse` 只清自己的缓存代际 |
@@ -75,10 +75,10 @@
 
 ### 4.1 Provider × wiremock（每个 adapter 一个测试文件）
 
-对 `openai_compat` / `mimo` / `volcengine` / `chat_completions` / `responses` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
+对 `openai_compat` / `mimo` / `volcengine` / `chat_completions` / `responses` / `jev` 各建 wiremock 服务端，断言**请求构造**与**响应解析**两个方向：
 
-- 请求：URL 拼接（base_url 带/不带尾斜杠）、鉴权头（Bearer vs 火山四件套 header）、OpenAI multipart 字段完整性、MiMo JSON 中完整 WAV data URL 与语言参数、自定义 extra_headers/extra_form 透传。
-- 响应：正常 JSON；MiMo `choices[0].message.content` 缺失/类型错误且长响应体不被截断；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Chat Completions 的 `event: error` / `data.error`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射；HTTP、业务状态与 SSE 错误同时保留简短摘要和包含未知嵌套字段 / request ID 的完整响应详情。
+- 请求：URL 拼接（base_url 带/不带尾斜杠，以及 `jev` 尾部重复 `/systemone` 自动去重）、鉴权头（Bearer vs 火山四件套 header）、OpenAI multipart 字段完整性、MiMo JSON 中完整 WAV data URL 与语言参数、Jev `state` 可选字段（`target_app` / `dictionary_terms`）按需包含与 `questions.needs_polish` `noul` 结构、自定义 extra_headers/extra_form 透传。
+- 响应：正常 JSON；MiMo `choices[0].message.content` 缺失/类型错误且长响应体不被截断；Jev `answers.needs_polish.noul` 概率解析与缺失/越界/类型错误校验；SSE 流式（含 delta 分片跨 chunk 边界、`[DONE]`、Chat Completions 的 `event: error` / `data.error`、Responses 的 `response.output_text.delta`/`response.failed` 事件）；火山 `X-Api-Status-Code` 非 20000000 的错误映射；HTTP、业务状态与 SSE 错误同时保留简短摘要和包含未知嵌套字段 / request ID 的完整响应详情。
 - 错误与重试：401 → `auth_error` 且**不重试**；429/503 → 退避重试 2 次后放弃；请求体在重试间不被消耗（multipart body 可重放）。
 - 日志：用带唯一哨兵的上游响应触发重试日志，断言只出现错误分类、状态和长度等元数据，哨兵、摘要与响应体均不出现。
 - 慢响应：STT / LLM profile 的单一 `timeout_ms` 对连接测试及所有使用该档案的功能统一生效；本地/远端调用延迟 > timeout → `timeout` 分类，LLM 持续输出 delta 也不得重置总时限。该契约由 Provider 包装层测试，不由 HTTP adapter 的 reqwest 超时模拟代替。
@@ -126,11 +126,11 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --test win
 | 首次启动引导 | 第 4 步可分别录制听写/助手/翻译快捷键；修改任一项只持久化该完整 chord 并同步练习提示；空值、听写/助手互含或翻译与另两项完全相同时阻止保存并显示校验提示，翻译与另两项存在严格子集关系时允许保存 |
 | 首次启动完成 | `onboarding_done` 与自启选择必须先保存，再调用 `complete_onboarding`；提交中不可重复触发；主页切换失败时保留引导页并显示可重试错误 |
 | 模型管理 | `hardware_ok=false && downloadable=true` 时显示低于建议但下载按钮可用并调用下载；`downloadable=false` 时仍禁用 |
-| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据）；切换云端预设自动填充首个建议模型并展示候选胶囊，点击胶囊切换模型且编辑已有档案时不覆盖自定义模型名；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误）；编辑页和卡片浮层完整展示格式化 JSON / 原样文本详情，并在下一次测试或成功后清除旧详情 |
+| ProviderCard 表单 | 按 kind 动态渲染字段（openai_compat vs volcengine 双凭据 vs jev 无接口格式/思考等级）；可选槽位支持「停用（始终整理）」调用 `deactivate_slot`；切换云端预设自动填充首个建议模型并展示候选胶囊，点击胶囊切换模型且编辑已有档案时不覆盖自定义模型名；密钥字段不回显明文；「测试」按钮三态（loading/成功延迟/分类错误）；编辑页和卡片浮层完整展示格式化 JSON / 原样文本详情，并在下一次测试或成功后清除旧详情 |
 | 回答弹窗 | `started` 重置内容 + 指令回显；流式 delta 追加渲染；`done` 固化完整回答；Markdown sanitize（`<script>`、raw HTML 注入被清洗——LLM 输出是不可信输入，**这是安全测试**）；生成中 Esc/关闭/失焦发送取消并隐藏，完成后关闭不取消；各状态面板保持不透明 |
 | 主页历史 | 助手记录展开标签为「语音指令 / 助手结果」，复制完整 `result`；统计数据不因助手回答字数改变 |
 | stores | settings patch 乐观更新与回滚；session store 严格镜像 event（不自行推导状态） |
-| 听写设置 | VAD 分段控件键盘切换；只渲染当前模式门限；两组范围/步长/显示精度；切换模式保留两组独立值并持久化 |
+| 听写设置 | VAD 分段控件键盘切换；只渲染当前模式门限；两组范围/步长/显示精度；切换模式保留两组独立值并持久化；整理决策阈值滑杆读写与整理决策判定指令折叠编辑/恢复默认 |
 | shared/ 工具 | 常规单测 |
 
 ### 5.3 视觉与主题

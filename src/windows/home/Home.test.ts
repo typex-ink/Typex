@@ -31,7 +31,7 @@ vi.mock("@/ipc/bindings", () => ({
 
 function makeSettings(): Settings {
   return {
-    schema_version: 11,
+    schema_version: 12,
     general: {
       theme: "system",
       language: "zh_cn",
@@ -47,6 +47,8 @@ function makeSettings(): Settings {
     dictation: {
       polish_enabled: true,
       polish_system_prompt: "",
+      polish_decision_threshold: 0.5,
+      polish_decision_prompt: "",
       inject_method: "auto",
       paste_delay_ms: 40,
       language: "auto",

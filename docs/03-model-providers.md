@@ -7,14 +7,15 @@
 
 ## 1. 总体设计
 
-两类 Provider，各自一个 Rust trait；云端实现**只依赖 HTTP(S)，不携带厂商 SDK**，本地实现（`local`）为进程内推理：
+三类 Provider，各自一个 Rust trait；云端实现**只依赖 HTTP(S)，不携带厂商 SDK**，本地实现（`local`）为进程内推理：
 
 ```
-SttProvider ── 音频 → 文本                    （F-1/2/3 共用）
-LlmProvider ── 文本 → 文本（单次调用，流式）   （F-9 整理、F-2 翻译、F-3 处理/问答 三个槽位共用）
+SttProvider      ── 音频 → 文本                    （F-1/2/3 共用）
+LlmProvider      ── 文本 → 文本（单次调用，流式）   （F-9 整理、F-2 翻译、F-3 处理/问答 三个槽位共用）
+DecisionProvider ── 文本状态 → 结构化概率决策       （F-9 可选前置门控「整理决策」槽位专用，ADR-30）
 ```
 
-> 当前没有 AgentProvider：F-3 已定为单轮问答/单次文本处理（[ADR-1](08-decisions.md)），一次 LLM 调用即可，无工具循环。四个模型槽位（STT / 整理 / 翻译 / 问答）在实现上只对应这两个 trait——后三个槽只是 LlmProvider 的不同配置 + 不同内置提示词。
+> 当前没有 AgentProvider：F-3 已定为单轮问答/单次文本处理（[ADR-1](08-decisions.md)），一次 LLM 调用即可，无工具循环。五个模型槽位（STT / 整理 / 整理决策 / 翻译 / 问答）在实现上对应这三个 trait——整理、翻译、问答只是 LlmProvider 的不同配置 + 不同内置提示词，整理决策为可选的非自回归概率门控。
 
 设计原则：
 
@@ -210,7 +211,7 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 
 可选的 `<target_app>` 与 `<dictionary>` 无值时省略；其他字段始终存在。请求只包含这一条 user message，不携带历史消息。设置页只编辑行为 system prompt，不暴露内部 XML 协议细节，也不显示占位符校验；「恢复默认」回到内置 system prompt。
 
-运行时先后关系：F-10 词典先进入 STT 选项，随后 F-9「文本整理」作为 STT 后的共享预处理层。`settings.dictation.polish_enabled=true`（默认）时，听写、翻译、助手都会先用「文本整理」槽处理 STT 转写，并在固定 XML user message 中附带 `<dictionary>`；关闭时三者都直通原始转写，下游请求不接收词典。翻译和助手 system prompt 不再承担 ASR 修复职责，只处理翻译、改写/回答等下游任务。整理槽不可用、超时、空输出或报错时，翻译/助手继续使用原始转写，不阻断主流程。`<target_app>` 在录音开始时采样并按需写入四类 XML 请求，只作为风格/术语上下文，不改变状态机语义。
+运行时先后关系：F-10 词典先进入 STT 选项，随后 F-9「文本整理」作为 STT 后的共享预处理层。`settings.dictation.polish_enabled=true`（默认）时，若可选槽位「整理决策」已启用，先经 `DecisionProvider`（见 §3.5）评估原始转写是否需要清理，`noul < polish_decision_threshold` 直接放行原始转写；若需要整理（或未配置/调用失败回退），听写、翻译、助手都会用「文本整理」槽处理 STT 转写，并在固定 XML user message 中附带 `<dictionary>`；关闭文本整理时三者都直通原始转写（不调决策模型也不调整理 LLM），下游请求不接收词典。翻译和助手 system prompt 不再承担 ASR 修复职责，只处理翻译、改写/回答等下游任务。整理槽不可用、超时、空输出或报错时，翻译/助手继续使用原始转写，不阻断主流程。`<target_app>` 在录音开始时采样并按需写入四类 XML 请求与整理决策状态，只作为风格/术语上下文，不改变状态机语义。
 
 **文本整理（F-9，「文本整理」槽）**：
 
@@ -406,6 +407,73 @@ SSE 事件流：处理 `response.output_text.delta`（增量文本）、`respons
 </question_request>
 ```
 
+### 3.5 DecisionProvider（整理前置决策门控，[ADR-30](08-decisions.md)）
+
+用于「整理决策」可选槽位（`capability = "decision"`），在单次前向推理中直接返回原始转写需要整理的校准概率，不生成自由文本：
+
+```rust
+#[async_trait::async_trait]
+pub trait DecisionProvider: Send + Sync {
+    async fn decide(&self, req: DecisionRequest) -> Result<DecisionResult, ProviderError>;
+}
+
+pub struct DecisionRequest {
+    pub state: DecisionState,
+    pub instructions: String,
+}
+
+pub struct DecisionState {
+    pub transcript: String,
+    pub target_app: Option<String>,
+    pub dictionary_terms: Vec<String>,
+}
+
+pub struct DecisionResult {
+    pub probability: f64, // 0.0..=1.0
+}
+```
+
+#### 内置实现：`jev`（TypeSafe AI System One）
+
+走 TypeSafe AI 官方 `/v1/systemone` 协议（默认 `base_url = https://api.typesafe.ai/v1`，默认模型 `jev-latest`；若用户填入的 `base_url` 已带尾部 `/systemone`，自动去重避免双重拼接）：
+
+```text
+POST {base_url}/systemone
+Authorization: Bearer {api_key}
+Content-Type: application/json
+
+{
+  "model": "jev-latest",
+  "state": {
+    "transcript": "嗯今天下午三点开会",
+    "target_app": "Slack",
+    "dictionary_terms": ["Typex", "Qwen3-ASR"]
+  },
+  "questions": {
+    "needs_polish": {
+      "type": "noul",
+      "instructions": "<判定指令>"
+    }
+  }
+}
+```
+
+- `target_app` 无值时省略；`dictionary_terms` 为空时省略，非空时传入规范化后的个人词典数组，以便模型识别短句中疑似专有名词的同音误转写。支持透传 `extra_headers`。
+- 成功响应解析 `answers.needs_polish.noul`，要求其为有限浮点数且位于 `[0.0, 1.0]`；缺失、类型错误或越界返回 `ProviderError::invalid_response` 并完整保留原始响应体供连接测试诊断。
+- HTTP 错误经统一 `ProviderError::from_status` 分类（401/403 → `auth_error` 不重试；400/422 → `invalid_request` 不重试；429 → `rate_limited`、5xx/529 → `server_error` 经 `http::with_retry` 指数退避重试 2 次）。`TimedDecisionProvider` 在外层统一施加 `profile.timeout_ms` 全局调用时限。
+- **内置默认判定指令**（`settings.dictation.polish_decision_prompt` 为空时使用，可在听写设置展开编辑或恢复默认）：
+
+```text
+判断 state.transcript 这段语音转写原始文本是否需要经过文本整理模型清理后再输出。当存在以下任一情况时应判定为需要整理（是）：
+1. 含有口语填充词、犹豫词、口吃或无意义重复（如“嗯”“啊”“呃”“那个”“就是”、um、uh、like 等）；
+2. 含有中途改口、自我纠正或重新起头（如“不对”“我是说”“算了”“应该是”、wait no、I mean 等）；
+3. 含有口述标点或排版指令（如“句号”“逗号”“换行”“另起一段”“列成清单”等）；
+4. 存在明显的同音错字、语义不通、多句长文缺少必要标点断句、需要规范化的复杂口述日期/数字/金额，或疑似把 state.dictionary_terms 中的专有名词误识别成了近音词。
+若文本只是简短词句、问候、确认语，或本身已通顺自然、标点合理、无填充词与改口、无明显识别错误，可直接原样输出，则判定为不需要整理（否）。
+```
+
+- **门限与失败回退**：先确认「文本整理」槽可用后才发起决策请求（整理槽本身未配置时不白发决策请求）；`noul < settings.dictation.polish_decision_threshold`（范围 `0.05..=0.95`，步长 `0.05`，默认 `0.50`）时跳过文本整理直通原文且 `degraded = false`；`>=` 门限时进入「文本整理」LLM；任何调用错误或超时均记录脱敏元数据并回退至「文本整理」LLM。
+
 ## 4. F-3 的实现说明（无 Agent 层）
 
 F-3 不引入新的 Provider 类型：
@@ -422,25 +490,26 @@ F-3 不引入新的 Provider 类型：
 ## 5. 配置槽位与 Provider 的关系
 
 ```
-功能槽位             服务池能力         实现走向
-────────────────────────────────────────────────────────────
-语音转文字   ──▶  stt profile   ──▶  SttProvider（openai_compat | mimo | volcengine | local）
-文本整理     ──▶  llm profile   ──▶  LlmProvider + 整理 system/XML（推荐轻量快模型；可用 local）
-翻译模型     ──▶  llm profile   ──▶  LlmProvider + 翻译 system/XML（可用 local）
-问答模型     ──▶  llm profile   ──▶  LlmProvider + 处理/问答 system/XML（推荐强模型；可手动选择 local）
+功能槽位             服务池能力             实现走向
+────────────────────────────────────────────────────────────────────
+语音转文字   ──▶  stt profile       ──▶  SttProvider（openai_compat | mimo | volcengine | local）
+文本整理     ──▶  llm profile       ──▶  LlmProvider + 整理 system/XML（推荐轻量快模型；可用 local）
+整理决策     ──▶  decision profile  ──▶  DecisionProvider（可选门控：jev；未启用时直接走文本整理）
+翻译模型     ──▶  llm profile       ──▶  LlmProvider + 翻译 system/XML（可用 local）
+问答模型     ──▶  llm profile       ──▶  LlmProvider + 处理/问答 system/XML（推荐强模型；可手动选择 local）
 ```
 
-共用规则：设置中维护一个全局 `profiles[]` 服务配置池；`slots.*.active_profile` 只是功能槽位指针。同一个 LLM profile 可以同时被文本整理、翻译和问答三个功能选择，因此远端 LLM 的 base_url / model / 密钥只需配置一次。onboarding 只需配置 STT + 一个 LLM 连接即全功能可用。
+共用规则：设置中维护一个全局 `profiles[]` 服务配置池；`slots.*.active_profile` 只是功能槽位指针。同一个 LLM profile 可以同时被文本整理、翻译和问答三个功能选择，因此远端 LLM 的 base_url / model / 密钥只需配置一次。「整理决策」为可选增强槽位，默认 `active_profile = null`，支持通过 `deactivate_slot` 在设置页或托盘一键停用而不删除档案。onboarding 只需配置 STT + 一个 LLM 连接即全功能可用。
 
-**多配置档案（[ADR-21](08-decisions.md)）**：`profiles[]` 支持保存多个 STT / LLM 服务配置；切换 = 改某个功能槽位的指针，不删档案。切换入口：设置页功能分配卡片「切换 ▾」与托盘「模型 ▸」子菜单（听写/文本整理/翻译/问答 四组），即时生效。
+**多配置档案（[ADR-21](08-decisions.md)）**：`profiles[]` 支持保存多个 STT / LLM / Decision 服务配置；切换 = 改某个功能槽位的指针，不删档案。切换入口：设置页功能分配卡片「切换 ▾」与托盘「模型 ▸」子菜单（听写/文本整理/整理决策/翻译/问答 五组），即时生效。
 
-**零配置兜底（[ADR-20](08-decisions.md)）**：STT / 整理 / 翻译功能在用户未配置任何服务时默认指向 `local` 服务配置（模型已下载的前提下）；问答槽无兜底，未配置时助手功能显示配置引导。本地与云端可功能级混搭（如 STT 本地 + 翻译云端）。
+**零配置兜底（[ADR-20](08-decisions.md)）**：STT / 整理 / 翻译功能在用户未配置任何服务时默认指向 `local` 服务配置（模型已下载的前提下）；问答槽与整理决策槽无本地兜底（问答未配置时显示配置引导，整理决策未配置时直接跳过门控执行整理）。本地与云端可功能级混搭（如 STT 本地 + 整理决策 Jev + 整理本地/云端）。
 
 ## 6. 配置 Schema（settings.json 中的形态）
 
 ```jsonc
 {
-  "schema_version": 11,
+  "schema_version": 12,
   "dictionary": {
     "terms": ["Typex", "OpenAI", "Qwen3-ASR"]
   },
@@ -450,7 +519,9 @@ F-3 不引入新的 Provider 类型：
     "update_channel": "nightly" // 首次默认随构建版本：prerelease = nightly，纯 SemVer = stable；之后保存用户选择
   },
   "dictation": {
-    "polish_system_prompt": "",    // 空 = 使用内置 system prompt
+    "polish_system_prompt": "",          // 空 = 使用内置 system prompt
+    "polish_decision_threshold": 0.50,   // 0.05..0.95，步长 0.05；Jev noul >= 该门限时执行文本整理
+    "polish_decision_prompt": "",        // 空 = 使用内置整理决策判定指令
     "vad": {
       "mode": "neural",              // neural | energy；v7 默认 neural
       "energy_threshold": 0.010,      // 0.001..0.050，步长 0.001
@@ -473,6 +544,7 @@ F-3 不引入新的 Provider 类型：
   "slots": {
     "stt":       { "active_profile": "groq-fast" },
     "polish":    { "active_profile": "deepseek" },   // 文本整理
+    "decision":  { "active_profile": "typesafe-jev" }, // 可选整理决策（null = 停用门控）
     "translate": { "active_profile": "deepseek" },   // 与整理共用连接，仅提示词不同
     "assistant": { "active_profile": "openai-gpt" }  // 问答
   },
@@ -519,6 +591,12 @@ F-3 不引入新的 Provider 类型：
       "credentials": { "api_key": "sk-..." }
     },
     {
+      "id": "typesafe-jev", "capability": "decision", "kind": "jev",
+      "label": "TypeSafe AI · Jev",
+      "base_url": "https://api.typesafe.ai/v1", "model": "jev-latest", "timeout_ms": 60000,
+      "credentials": { "api_key": "ts-..." }
+    },
+    {
       "id": "local-qwen-asr", "capability": "stt", "kind": "local",
       "label": "本地 · Qwen3-ASR-0.6B",
       "model": "qwen3-asr-0.6b-q8",           // 指向模型库中的条目，无 base_url、无凭据
@@ -536,16 +614,17 @@ F-3 不引入新的 Provider 类型：
 
 要点：
 
-- `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值随 profile 存在 `settings.json`，与其他配置项一致。诊断包、导出配置与日志必须剔除或脱敏 credentials；旧版 `keyring://` 引用会在迁移时清除，运行时也视为未配置，用户需重新保存密钥。
+- `capability` 决定服务配置可被哪些功能槽位选择：`stt` 只能用于语音转文字，`llm` 可用于文本整理 / 翻译 / 问答，`decision` 只能用于整理决策；`kind` 决定 adapter；`credentials` 是 **map 结构**（为火山双凭据这类情况设计），值随 profile 存在 `settings.json`，与其他配置项一致。诊断包、导出配置与日志必须剔除或脱敏 credentials；旧版 `keyring://` 引用会在迁移时清除，运行时也视为未配置，用户需重新保存密钥。
 - schema v7 为 `dictation.vad` 增加双路径配置。所有旧版本统一迁移为 `mode: neural`，两个门限独立保存；后端拒绝非有限值或越界值。磁盘中只有 VAD 子配置无效时，仅恢复 `dictation.vad` 默认值，其他设置必须保留。
 - schema v8 将 `hotkeys.translation` 从派生值改为独立完整 chord。v7 及更旧配置升级时仍按旧规则把听写与助手 chord 有序去重合并为翻译 chord，保持当前行为；v8 起三组 chord 分别归一化和持久化，修改任一项不再重算另外两项。
 - schema v9 以四个 `*_system_prompt` 字段替换旧的 `polish_prompt` / `translate_prompt` / `process_prompt` / `ask_prompt` 模板字段。应用尚未发布，不兼容旧自定义模板：v8 及更旧配置升级时删除旧字段并把新字段置空，直接使用当前内置 system prompt。固定 XML user message 不进入配置 schema。
 - schema v10 将 profile 调用超时默认值从 30 秒提高到 60 秒；迁移时把旧版 UI 自动写入的 `timeout_ms=30000` 更新为 `60000`，其他显式值保持不变。
 - schema v11 以 `hotkeys.trigger_mode`（`hold` / `toggle`）替换 `hold_threshold_ms`。旧配置迁移为 `hold` 以保持原先主推的按住说话行为；触发方式在会话开始时快照，后端不再按按住时长推断语义。
-- profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`。STT 覆盖从转写调用开始到完整文本返回，LLM 覆盖连接、请求发送、首 token 等待与完整流式响应接收；本地与远端实现使用相同语义。同一 profile 被多个功能或连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
+- schema v12 新增可选槽位 `slots.decision`（默认 `active_profile: null`）以及 `dictation.polish_decision_threshold`（`0.05..=0.95`，默认 `0.50`）与 `dictation.polish_decision_prompt`（默认空字符串）。后端拒绝越界或非有限的决策门限；磁盘中只有 `polish_decision_threshold` 无效时仅恢复该门限默认值，保留其他设置。
+- profile 的 `timeout_ms` 是该模型服务的唯一全局调用时限，默认 `60000`。STT 覆盖从转写调用开始到完整文本返回，LLM 覆盖连接、请求发送、首 token 等待与完整流式响应接收，Decision 覆盖请求发送与重试直至返回概率结果；本地与远端实现使用相同语义。同一 profile 被多个功能或连接测试复用时统一生效，功能层不得另设总时限或 idle timeout。
 - LLM `options.reasoning_effort` 控制思考等级，允许 `none` / `minimal` / `low` / `medium` / `high` / `xhigh`；设置 UI 默认保存 `none`，缺省仅表示旧配置或手写配置“不指定”。Responses 发送 `reasoning.effort`，普通 OpenAI 兼容 Chat Completions 发送顶层 `reasoning_effort`。Qwen 兼容端点与本地模型只支持开关语义，使用兼容字段 `options.enable_thinking` / `/think` / `/no_think`，其中 `none` 视为关闭，其他等级视为开启。
-- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / Mistral / 火山·豆包 / DeepSeek / 阿里百炼 · DashScope / OpenRouter / Ollama —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥；当预设附带多个建议模型时，编辑表单提供快捷候选胶囊供一键点选。
-- 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求；成功展示延迟，失败展示分类后的错误摘要与完整 Provider 响应详情。HTTP 错误、流式错误以及成功 HTTP 响应的协议解析错误都必须把短摘要与未截断响应体分开保存；远端 JSON 响应在前端格式化后展示，非 JSON 文本原样展示。响应详情不进入日志或持久化，正常听写 / 翻译 / 助手错误仍只携带简短摘要。
+- **预设模板**（前端内置数据，非后端逻辑）：OpenAI / Groq / SiliconFlow / Xiaomi MiMo / Mistral / 火山·豆包 / DeepSeek / 阿里百炼 · DashScope / OpenRouter / Ollama / TypeSafe AI · Jev —— 选中即预填 `kind/base_url/model` 与凭据字段表单，用户只贴密钥；当预设附带多个建议模型时，编辑表单提供快捷候选胶囊供一键点选。
+- 「测试连接」：STT 槽发内置 2 秒样音（assets 内置，中文「你好，Typex」），LLM 槽发 `ping` 单词请求，Decision 槽发内置短句决策探针（`transcript = "你好，Typex"`）；成功展示延迟，失败展示分类后的错误摘要与完整 Provider 响应详情。HTTP 错误、流式错误以及成功 HTTP 响应的协议解析错误都必须把短摘要与未截断响应体分开保存；远端 JSON 响应在前端格式化后展示，非 JSON 文本原样展示。响应详情不进入日志或持久化，正常听写 / 翻译 / 助手错误仍只携带简短摘要。
 
 ## 7. 各厂商兼容性速查（配置预设的依据）
 
@@ -561,6 +640,7 @@ F-3 不引入新的 Provider 类型：
 | 阿里百炼 · DashScope | 扩展候选（chat-completions 变体传音频） | chat_completions 兼容端点（`qwen-flash` / `qwen-plus`） | LLM 内置预设并默认管理 `enable_thinking`；STT 格式特殊暂不做 |
 | OpenRouter | — | chat_completions / responses | 聚合网关 |
 | Ollama / 自建 | openai_compat（如 speaches） | chat_completions | 本地/内网 |
+| TypeSafe AI · Jev | — | —（**jev decision adapter**，`/v1/systemone`） | 仅用于「整理决策」可选槽位（`jev-latest` / `jev-1.14.0`） |
 | **本地 · 离线** | **local**（Qwen3-ASR GGUF / SenseVoice / Whisper large-v3 & turbo / Parakeet v3·sherpa-onnx） | **local**（llama.cpp + Qwen3.5/3.6/3.8/3、Granite 4.0、Gemma 4 GGUF，整理/翻译/问答槽可手动选择） | 零配置兜底仅用分档小组合；其余模型手动下载，[ADR-20](08-decisions.md)/[ADR-22](08-decisions.md) |
 | Deepgram / ElevenLabs | 扩展候选薄 adapter | — | 非 OpenAI 格式但协议简单 |
 

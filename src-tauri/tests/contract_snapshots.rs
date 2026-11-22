@@ -5,6 +5,9 @@
 //! HTTP 客户端默认 user-agent 不是 Provider 协议契约，且不同环境可能缺省不同。
 
 use futures_util::StreamExt;
+use typex_lib::providers::decision::{
+    DecisionProvider, DecisionRequest, DecisionState, jev::JevDecisionProvider,
+};
 use typex_lib::providers::llm::{
     LlmProvider, LlmRequest, Msg, chat_completions::ChatCompletionsLlm, responses::ResponsesLlm,
 };
@@ -219,4 +222,38 @@ async fn snapshot_responses_request() {
     while stream.next().await.is_some() {}
     let captured = slot.lock().unwrap().clone().unwrap();
     insta::assert_json_snapshot!("responses_request", captured);
+}
+
+#[tokio::test]
+async fn snapshot_jev_decision_request() {
+    let (server, slot) =
+        capture_server(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "model": "jev-1.14.0",
+            "answers": {
+                "needs_polish": {
+                    "type": "noul",
+                    "noul": 0.08
+                }
+            }
+        })))
+        .await;
+    let jev = JevDecisionProvider::new(
+        client(),
+        format!("{}/v1", server.uri()),
+        "ts-test",
+        "jev-latest",
+    )
+    .with_headers([("X-Org".to_string(), "typex".to_string())].into());
+    jev.decide(DecisionRequest {
+        state: DecisionState {
+            transcript: "嗯今天下午三点开会".into(),
+            target_app: Some("Slack".into()),
+            dictionary_terms: vec!["Typex".into(), "Qwen3-ASR".into()],
+        },
+        instructions: "判断该原始转写是否需要清理。".into(),
+    })
+    .await
+    .unwrap();
+    let captured = slot.lock().unwrap().clone().unwrap();
+    insta::assert_json_snapshot!("jev_decision_request", captured);
 }
