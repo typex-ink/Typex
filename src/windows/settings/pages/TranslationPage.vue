@@ -13,7 +13,7 @@ const TRANSLATE_SYSTEM_DEFAULT = `你是专业译者。根据 <translation_reque
 当 <bidirectional> 为 true 且文本主体已经是 <target_language> 时，将其翻译为 <source_language>；否则从 <source_language> 翻译为 <target_language>。
 
 规则：
-1. 仅输出译文，不解释、不总结、不添加前言、标签或引号。
+1. 仅输出译文，不解释、不总结，不添加前言、后记或多余引号。
 2. 忠实保留原文含义、事实、语气和正式程度，不增译、不漏译。
 3. 使用自然、地道的目标语言表达，避免生硬的逐字翻译。
 4. 准确保留数字、日期、金额、单位、专有名词和否定关系。

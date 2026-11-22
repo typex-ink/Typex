@@ -7,7 +7,7 @@
 
 use crate::error::{ErrorCode, TypexError};
 use crate::providers::ProviderRegistry;
-use crate::providers::llm::{collect_text, prompt};
+use crate::providers::llm::{LlmProvider, collect_text, output_protocol, prompt};
 use crate::settings::schema::Settings;
 use crate::types::{SessionMode, SlotKind};
 use std::sync::Arc;
@@ -84,6 +84,15 @@ pub async fn prepare_transcript(
         }
     };
 
+    prepare_transcript_with_llm(transcript, settings, llm.as_ref(), prompt_context).await
+}
+
+async fn prepare_transcript_with_llm(
+    transcript: String,
+    settings: &Settings,
+    llm: &dyn LlmProvider,
+    prompt_context: &PromptContext,
+) -> PreparedTranscript {
     let dictionary = settings.dictionary.llm_context();
     let content = prompt::dictation_cleanup_request(
         &transcript,
@@ -91,21 +100,36 @@ pub async fn prepare_transcript(
         dictionary.as_deref(),
     );
 
-    let req = prompt::single_turn_request(
+    let req = prompt::single_turn_request_with_protocol(
         &settings.dictation.polish_system_prompt,
         prompt::POLISH_SYSTEM_PROMPT,
+        Some(prompt::POLISH_OUTPUT_PROTOCOL),
         content,
         0.2,
     );
-    match collect_text(llm.as_ref(), req).await {
-        Ok(text) if !text.trim().is_empty() => PreparedTranscript {
-            text: text.trim().to_string(),
-            degraded: false,
-        },
-        Ok(_) => PreparedTranscript {
-            text: transcript,
-            degraded: true,
-        },
+    match collect_text(llm, req).await {
+        Ok(raw) => {
+            let extracted = output_protocol::extract_tagged_output(&raw, prompt::OUTPUT_TAG);
+            if !extracted.tag_matched {
+                tracing::debug!(
+                    stage = "polish",
+                    protocol_tag_present = false,
+                    raw_len = raw.len(),
+                    "整理输出未包含协议标签，回退原始文本"
+                );
+            }
+            if !extracted.text.is_empty() {
+                PreparedTranscript {
+                    text: extracted.text,
+                    degraded: false,
+                }
+            } else {
+                PreparedTranscript {
+                    text: transcript,
+                    degraded: true,
+                }
+            }
+        }
         Err(e) => {
             tracing::warn!(
                 error_code = ?e.error_code(),
@@ -150,6 +174,15 @@ async fn translate(
     let transcript = prepare_transcript(transcript, settings, registry, prompt_context)
         .await
         .text;
+    translate_with_llm(transcript, settings, llm.as_ref(), prompt_context).await
+}
+
+async fn translate_with_llm(
+    transcript: String,
+    settings: &Settings,
+    llm: &dyn LlmProvider,
+    prompt_context: &PromptContext,
+) -> ProcessOutcome {
     let content = prompt::translation_request(
         &transcript,
         &settings.translation.source_language,
@@ -158,15 +191,168 @@ async fn translate(
         prompt_context.target_app.as_deref(),
     );
 
-    let req = prompt::single_turn_request(
+    let req = prompt::single_turn_request_with_protocol(
         &settings.translation.translate_system_prompt,
         prompt::TRANSLATE_SYSTEM_PROMPT,
+        Some(prompt::TRANSLATE_OUTPUT_PROTOCOL),
         content,
         0.3,
     );
-    match collect_text(llm.as_ref(), req).await {
-        Ok(text) if !text.trim().is_empty() => ProcessOutcome::Done(text.trim().to_string()),
-        Ok(_) => ProcessOutcome::Failed(TypexError::new(ErrorCode::ServerError, "翻译结果为空")),
+    match collect_text(llm, req).await {
+        Ok(raw) => {
+            let extracted = output_protocol::extract_tagged_output(&raw, prompt::OUTPUT_TAG);
+            if !extracted.tag_matched {
+                tracing::debug!(
+                    stage = "translate",
+                    protocol_tag_present = false,
+                    raw_len = raw.len(),
+                    "翻译输出未包含协议标签，回退原始文本"
+                );
+            }
+            if !extracted.text.is_empty() {
+                ProcessOutcome::Done(extracted.text)
+            } else {
+                ProcessOutcome::Failed(TypexError::new(ErrorCode::ServerError, "翻译结果为空"))
+            }
+        }
         Err(e) => ProcessOutcome::Failed(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::ProviderError;
+    use crate::providers::llm::{LlmCapabilities, LlmDelta, LlmRequest};
+    use futures_util::StreamExt;
+    use futures_util::stream::{self, BoxStream};
+    use std::sync::Mutex;
+
+    struct StubLlm {
+        response: String,
+        last_request: Mutex<Option<LlmRequest>>,
+    }
+
+    impl StubLlm {
+        fn new(response: impl Into<String>) -> Self {
+            Self {
+                response: response.into(),
+                last_request: Mutex::new(None),
+            }
+        }
+
+        fn last_system(&self) -> String {
+            self.last_request
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .system
+                .clone()
+        }
+    }
+
+    impl LlmProvider for StubLlm {
+        fn complete(
+            &self,
+            req: LlmRequest,
+        ) -> BoxStream<'static, std::result::Result<LlmDelta, ProviderError>> {
+            *self.last_request.lock().unwrap() = Some(req);
+            let text = self.response.clone();
+            stream::iter([Ok(LlmDelta { text })]).boxed()
+        }
+
+        fn capabilities(&self) -> LlmCapabilities {
+            LlmCapabilities { streaming: true }
+        }
+    }
+
+    #[tokio::test]
+    async fn polish_extracts_output_envelope_and_appends_protocol_to_custom_prompt() {
+        let mut settings = Settings::default();
+        settings.dictation.polish_system_prompt = "只整理文本。".into();
+        let llm = StubLlm::new("好的，整理如下：\n<output>今天下午三点开会。</output>\n请查收");
+
+        let prepared = prepare_transcript_with_llm(
+            "嗯今天下午三点开会".into(),
+            &settings,
+            &llm,
+            &PromptContext::default(),
+        )
+        .await;
+
+        assert!(!prepared.degraded);
+        assert_eq!(prepared.text, "今天下午三点开会。");
+        let system = llm.last_system();
+        assert!(system.starts_with("只整理文本。"));
+        assert!(system.ends_with(prompt::POLISH_OUTPUT_PROTOCOL));
+    }
+
+    #[tokio::test]
+    async fn polish_empty_output_tag_degrades_to_original_transcript() {
+        let settings = Settings::default();
+        let llm = StubLlm::new("<output>   </output>");
+
+        let prepared =
+            prepare_transcript_with_llm("嗯……".into(), &settings, &llm, &PromptContext::default())
+                .await;
+
+        assert!(prepared.degraded);
+        assert_eq!(prepared.text, "嗯……");
+    }
+
+    #[tokio::test]
+    async fn polish_without_protocol_tag_falls_back_to_raw_text() {
+        let settings = Settings::default();
+        let llm = StubLlm::new("  整理后的纯文本  ");
+
+        let prepared = prepare_transcript_with_llm(
+            "嗯整理后的纯文本".into(),
+            &settings,
+            &llm,
+            &PromptContext::default(),
+        )
+        .await;
+
+        assert!(!prepared.degraded);
+        assert_eq!(prepared.text, "整理后的纯文本");
+    }
+
+    #[tokio::test]
+    async fn translate_extracts_output_envelope_and_preserves_html() {
+        let mut settings = Settings::default();
+        settings.translation.translate_system_prompt = "忠实翻译。".into();
+        let llm = StubLlm::new(
+            "Here is the translation:\n<output><strong>Important</strong>: port must be 8080.</output>\nDone.",
+        );
+
+        let out = translate_with_llm(
+            "<strong>重要</strong>：端口必须是 8080。".into(),
+            &settings,
+            &llm,
+            &PromptContext::default(),
+        )
+        .await;
+
+        match out {
+            ProcessOutcome::Done(text) => {
+                assert_eq!(text, "<strong>Important</strong>: port must be 8080.");
+            }
+            _ => panic!("expected ProcessOutcome::Done"),
+        }
+        let system = llm.last_system();
+        assert!(system.starts_with("忠实翻译。"));
+        assert!(system.ends_with(prompt::TRANSLATE_OUTPUT_PROTOCOL));
+    }
+
+    #[tokio::test]
+    async fn translate_empty_output_tag_returns_failed() {
+        let settings = Settings::default();
+        let llm = StubLlm::new("<output></output>");
+
+        let out =
+            translate_with_llm("你好".into(), &settings, &llm, &PromptContext::default()).await;
+
+        assert!(matches!(out, ProcessOutcome::Failed(err) if err.code == ErrorCode::ServerError));
     }
 }

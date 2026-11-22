@@ -175,3 +175,13 @@
 - **背景**：ADR-26 的 `currentUser` 与 `%LOCALAPPDATA%\Programs\Typex` 默认路径能让绝大多数 Windows 安装和更新免 UAC，但历史安装或用户显式选择的路径可能位于 `C:\` 根目录等受保护位置。Tauri updater 以普通 `open` 动词启动 `currentUser` NSIS；该安装器清单不会自行提权，因而下载与验签成功后仍会在覆盖文件时失败。macOS updater 已具备普通替换失败后再认证的路径，平台行为需要统一为最小权限语义。
 - **决策**：保留 NSIS `currentUser` 和稳定原位升级，不改为每次启动就弹 UAC 的 `perMachine` / `both`。所有平台 updater 先用当前权限；仅在目标不可写时申请平台原生管理员权限。Windows 固定 `passive` 更新模式，在 installer hook 已确定最终 `$INSTDIR` 后创建并删除临时文件作写权限探测；失败时以 `runas` 重启同一个已通过 Tauri 签名校验的安装器，完整保留 updater 参数并把最终 `/D=$INSTDIR` 放在命令行末尾。提升后的重入仍不可写则直接失败，禁止循环。macOS 延续 `PermissionDenied` 后 Apple 管理员认证；Linux 后端正式支持 updater 时必须采用等价策略。
 - **安全与体验边界**：按需提权只属于短生命周期安装器，不改变 Typex 应用清单、注入权限或 UIPI 降级策略。可写目录不得出现 UAC；提升安装完成后通过 Tauri NSIS `RunAsUser` 以普通用户重启应用。拒绝 UAC、认证失败或提升后仍不可写时不得留下半更新版本，旧版本必须仍可启动。此决策仅收窄 ADR-26 “免 UAC”的表述，不改变默认目录和不迁移历史路径的决定。
+
+### ADR-29 · LLM 输出协议与用户提示词解耦（XML 边界信封与 F-3a 双标签 Fail-safe）（2026-11-22）
+
+- **背景**：原设计中 F-3a 选区处理采用单边 `ANSWER:` 前缀协议（无前缀即视为改写并直接替换选区），且输出格式指令直接写在用户可编辑的系统提示词内；整理（F-9）与翻译（F-2）也缺少输出边界过滤。实践中存在三类风险：① 模型漏写或写偏 `ANSWER:`（如全角冒号、Markdown 加粗）会导致解释误覆盖用户选区（Fail-open）；② 用户自定义 `*_system_prompt` 容易误删内部协议导致路由静默失效；③ 弱模型或本地小模型在整理/翻译时易夹带寒暄前言、后记或代码围栏。同时，Typex 作为 BYOK + 本地 GGUF 客户端，不能强依赖跨厂商兼容不一且带来流式 JSON 反转义成本的 `json_schema` / `tool_calls`。
+- **决策**：
+  - **协议解耦**：用户可编辑的 `*_system_prompt` 只负责角色、风格与内容规则；Typex 在运行时为整理、翻译、选区处理自动在 `LlmRequest.system` 末尾追加只读的系统输出协议，无选区问答（F-3b）保持纯文本流式直出。不升级 `settings.json` schema。
+  - **F-3a 双显式 XML 标签 + Fail-safe**：选区处理统一采用 `<rewrite>...</rewrite>` 与 `<answer>...</answer>`，由流首部状态机判定。**仅明确命中 `<rewrite>` 时才静默收集并替换选区**；命中 `<answer>`（收到首个非空白正文）或任何非协议输出均立即 Fail-safe 呼出回答弹窗流式展示，绝不误覆盖选区。对老用户自定义提示词可能残留的旧版 `ANSWER:` 前缀在 Fallback 分支温和剥离。
+  - **F-9 / F-2 `<output>` 信封提取**：非流式收集后按“首开标签 + 末闭标签”提取，过滤前言、后记与代码围栏并保护正文内嵌同名标签；若模型未输出协议标签则安全回退原始输出并记录非敏感 debug 日志。
+  - **外层信封语义**：所有协议标签均为外层边界信封而非严格 XML DOM，明示模型不对正文中的 `<`、`>`、`&` 做实体转义，完整保护代码、URL 与 Markdown/HTML。
+- **影响**：[02 功能规格](02-features.md)（F-2 / F-3 / F-9）、[03 模型接入层](03-model-providers.md)（§3.4 / §4）、[05 UX 规格](05-ux-spec.md)（§4.3）、[07 测试规范](07-testing.md) 与 `docs/fixtures/` 同步更新；ADR-23 保持历史记录，路由信号以当前 03 §3.4 为准。

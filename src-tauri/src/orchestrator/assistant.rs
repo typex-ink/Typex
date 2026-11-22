@@ -1,15 +1,19 @@
 //! 助手服务（F-3）：单次 LLM 调用（03 §4：无 Agent 层）。
 //!
-//! ADR-23 分流：
+//! ADR-23 / ADR-29 分流：
 //! - 语音指令先按听写文本整理开关走 F-9 预整理（关闭则直通）
-//! - F-3a 选中文本 + 改写指令 → 静默收全文 → `Rewrite`（orchestrator 注入替换选区，不弹窗）
-//! - F-3a 选中文本 + 提问（`ANSWER:` 前缀，流首部嗅探）→ 呼出回答弹窗流式展示 → `HandedOff`
-//! - F-3b 无选区提问 → 必为回答型，弹窗立即呼出流式展示 → `HandedOff`
+//! - F-3a 选中文本 + 改写指令（`<rewrite>...</rewrite>`）→ 静默收全文 → `Rewrite`（orchestrator 注入替换选区，不弹窗）
+//! - F-3a 选中文本 + 提问（`<answer>...</answer>` 或未命中 `<rewrite>` 的 Fail-safe）→ 呼出回答弹窗流式展示 → `HandedOff`
+//! - F-3b 无选区提问 → 必为纯文本流式回答型，弹窗立即呼出流式展示 → `HandedOff`
 
 use crate::error::{ErrorCode, Result, TypexError};
 use crate::providers::ProviderError;
 use crate::providers::ProviderRegistry;
-use crate::providers::llm::{LlmDelta, prompt};
+use crate::providers::llm::{
+    LlmDelta,
+    output_protocol::{SelectionFinish, SelectionStreamParser},
+    prompt,
+};
 use crate::settings::SettingsService;
 use crate::types::SlotKind;
 use futures_util::StreamExt;
@@ -101,12 +105,13 @@ impl AssistantService {
                 .await
                 .text;
 
-        // 有选区 = F-3a 处理协议；无选区 = F-3b 问答协议。
-        let (custom_system, built_in_system, content) =
+        // 有选区 = F-3a 处理协议（追加只读双标签输出协议）；无选区 = F-3b 纯文本问答协议。
+        let (custom_system, built_in_system, output_protocol, content) =
             if let Some(selection) = selection.as_deref() {
                 (
                     s.assistant.process_system_prompt.as_str(),
                     prompt::PROCESS_SYSTEM_PROMPT,
+                    Some(prompt::PROCESS_OUTPUT_PROTOCOL),
                     prompt::selection_processing_request(
                         selection,
                         &instruction,
@@ -117,11 +122,18 @@ impl AssistantService {
                 (
                     s.assistant.ask_system_prompt.as_str(),
                     prompt::ASK_SYSTEM_PROMPT,
+                    None,
                     prompt::question_request(&instruction, prompt_context.target_app.as_deref()),
                 )
             };
 
-        let req = prompt::single_turn_request(custom_system, built_in_system, content, 0.3);
+        let req = prompt::single_turn_request_with_protocol(
+            custom_system,
+            built_in_system,
+            output_protocol,
+            content,
+            0.3,
+        );
 
         let ctx = RunCtx {
             request_id,
@@ -160,23 +172,20 @@ impl RunCtx<'_> {
     }
 }
 
-/// 流式分流核心（ADR-23）：
-/// - 无选区：立即呼出弹窗，全程流式；
-/// - 有选区：缓冲流首部直到能判定 `ANSWER:` 前缀——回答型转弹窗流式，改写型静默收全文。
+/// 流式分流核心（ADR-23 / ADR-29）：
+/// - 无选区：立即呼出弹窗，全程纯文本流式；
+/// - 有选区：由 `SelectionStreamParser` 在流首部嗅探 `<rewrite>` / `<answer>`：
+///   仅明确命中 `<rewrite>` 才静默收全文替换选区；其余（`<answer>` 或 Fail-safe）转弹窗流式。
 async fn drive(
     mut stream: BoxStream<'static, std::result::Result<LlmDelta, ProviderError>>,
     ctx: RunCtx<'_>,
 ) -> Result<AssistantOutcome> {
-    let prefix = prompt::ANSWER_PREFIX;
-    let mut full = String::new();
-    // 面板是否已呼出；有选区时延迟到前缀判定完成
-    let mut panel_open = false;
     if !ctx.had_selection {
-        ctx.open_panel().await;
-        panel_open = true;
+        return drive_unselected_question(stream, ctx).await;
     }
-    // 有选区时的判定结论：None = 仍在嗅探
-    let mut is_rewrite: Option<bool> = if ctx.had_selection { None } else { Some(false) };
+
+    let mut parser = SelectionStreamParser::new();
+    let mut panel_open = false;
 
     while let Some(item) = stream.next().await {
         let delta = match item {
@@ -193,73 +202,104 @@ async fn drive(
                 return Err(e.into());
             }
         };
-        full.push_str(&delta.text);
 
-        if is_rewrite.is_none() {
-            // 嗅探：首个非空白片段凑满前缀长度即可判定
-            let lead = full.trim_start();
-            if lead.len() >= prefix.len() {
-                is_rewrite = Some(!lead.starts_with(prefix));
-            } else if !prefix.starts_with(lead) {
-                // 已有内容不再可能凑出前缀 → 提前判定为改写
-                is_rewrite = Some(true);
-            }
-            if is_rewrite == Some(false) && !panel_open {
-                // 回答型确认：呼出弹窗 + 释放缓冲（剥掉前缀）
-                ctx.open_panel().await;
-                panel_open = true;
-                let buffered = full.trim_start();
-                let buffered = buffered.strip_prefix(prefix).unwrap_or(buffered);
-                if !buffered.is_empty() {
-                    (ctx.sink)(AssistantEvent::Delta {
-                        request_id: ctx.request_id,
-                        text: buffered.trim_start().to_string(),
-                    });
-                }
-            }
-            continue;
+        let step = parser.push(&delta.text);
+        if let Some(route) = step.decided_route {
+            tracing::debug!(route = ?route, "选区处理路由已判定");
         }
-
-        if panel_open {
+        if step.open_panel && !panel_open {
+            ctx.open_panel().await;
+            panel_open = true;
+        }
+        if let Some(text) = step.delta
+            && panel_open
+        {
             (ctx.sink)(AssistantEvent::Delta {
                 request_id: ctx.request_id,
-                text: delta.text,
+                text,
             });
         }
     }
 
-    if full.trim().is_empty() {
-        let err = TypexError::new(ErrorCode::ServerError, "回答为空");
-        if panel_open {
-            (ctx.sink)(AssistantEvent::Error {
-                request_id: ctx.request_id,
-                error: err,
-            });
-            return Ok(AssistantOutcome::HandedOff(None));
-        }
-        return Err(err);
-    }
-
-    match is_rewrite {
-        Some(true) => Ok(AssistantOutcome::Rewrite(full.trim().to_string())),
-        _ => {
-            // 回答型（含流结束仍未凑满前缀长度的超短输出——按回答展示，宁可不替换也不误替换）
-            let display = full.trim();
-            let display = display.strip_prefix(prefix).unwrap_or(display).trim();
-            if !panel_open {
+    match parser.finish() {
+        SelectionFinish::Rewrite(text) => Ok(AssistantOutcome::Rewrite(text)),
+        SelectionFinish::Answer {
+            open_panel,
+            tail_delta,
+            full_text,
+        } => {
+            if open_panel && !panel_open {
                 ctx.open_panel().await;
+                panel_open = true;
+            }
+            if let Some(text) = tail_delta
+                && panel_open
+            {
                 (ctx.sink)(AssistantEvent::Delta {
                     request_id: ctx.request_id,
-                    text: display.to_string(),
+                    text,
                 });
             }
             (ctx.sink)(AssistantEvent::Done {
                 request_id: ctx.request_id,
-                full_text: display.to_string(),
+                full_text: full_text.clone(),
             });
-            Ok(AssistantOutcome::HandedOff(Some(display.to_string())))
+            Ok(AssistantOutcome::HandedOff(Some(full_text)))
+        }
+        SelectionFinish::Empty => {
+            let err = TypexError::new(ErrorCode::ServerError, "回答为空");
+            if panel_open {
+                (ctx.sink)(AssistantEvent::Error {
+                    request_id: ctx.request_id,
+                    error: err,
+                });
+                return Ok(AssistantOutcome::HandedOff(None));
+            }
+            Err(err)
         }
     }
+}
+
+/// F-3b 无选区问答：立即呼出弹窗，全程纯文本流式展示。
+async fn drive_unselected_question(
+    mut stream: BoxStream<'static, std::result::Result<LlmDelta, ProviderError>>,
+    ctx: RunCtx<'_>,
+) -> Result<AssistantOutcome> {
+    ctx.open_panel().await;
+    let mut full = String::new();
+    while let Some(item) = stream.next().await {
+        let delta = match item {
+            Ok(d) => d,
+            Err(e) => {
+                (ctx.sink)(AssistantEvent::Error {
+                    request_id: ctx.request_id,
+                    error: e.into(),
+                });
+                return Ok(AssistantOutcome::HandedOff(None));
+            }
+        };
+        full.push_str(&delta.text);
+        (ctx.sink)(AssistantEvent::Delta {
+            request_id: ctx.request_id,
+            text: delta.text,
+        });
+    }
+
+    let display = full.trim().to_string();
+    if display.is_empty() {
+        let err = TypexError::new(ErrorCode::ServerError, "回答为空");
+        (ctx.sink)(AssistantEvent::Error {
+            request_id: ctx.request_id,
+            error: err,
+        });
+        return Ok(AssistantOutcome::HandedOff(None));
+    }
+
+    (ctx.sink)(AssistantEvent::Done {
+        request_id: ctx.request_id,
+        full_text: display.clone(),
+    });
+    Ok(AssistantOutcome::HandedOff(Some(display)))
 }
 
 #[cfg(test)]
@@ -345,19 +385,35 @@ mod tests {
     }
 
     #[test]
-    fn rewrite_collects_silently_without_panel() {
+    fn rewrite_tag_collects_silently_without_panel_and_strips_noise() {
         let h = Harness::new();
-        let out = h.run(vec![Ok("改写后的"), Ok("正式文本。")], true).unwrap();
+        let out = h
+            .run(
+                vec![
+                    Ok("```xml\n<rew"),
+                    Ok("rite>\n改写后的"),
+                    Ok("正式文本。</rewrite>\n```\n尾部解释"),
+                ],
+                true,
+            )
+            .unwrap();
         assert_eq!(out, AssistantOutcome::Rewrite("改写后的正式文本。".into()));
         assert_eq!(h.panel_count(), 0, "改写型全程不弹窗");
         assert!(h.events().is_empty());
     }
 
     #[test]
-    fn answer_prefix_opens_panel_and_streams() {
+    fn answer_tag_opens_panel_streams_and_strips_closing_tag_and_trailing_noise() {
         let h = Harness::new();
         let out = h
-            .run(vec![Ok("ANSWER: 原因"), Ok("是超时。")], true)
+            .run(
+                vec![
+                    Ok("<answer> 原因"),
+                    Ok("是超时。</ans"),
+                    Ok("wer>\n希望对你有帮助"),
+                ],
+                true,
+            )
             .unwrap();
         assert_eq!(
             out,
@@ -376,24 +432,53 @@ mod tests {
     }
 
     #[test]
-    fn answer_prefix_split_across_chunks_is_detected() {
+    fn answer_tag_split_across_chunks_with_leading_whitespace_is_detected() {
         let h = Harness::new();
         let out = h
-            .run(vec![Ok("ANS"), Ok("WER:"), Ok(" 回答体")], true)
+            .run(
+                vec![Ok("  <ANS"), Ok("WER>\n  "), Ok("回答体</answer>")],
+                true,
+            )
             .unwrap();
         assert_eq!(out, AssistantOutcome::HandedOff(Some("回答体".into())));
+        assert_eq!(h.panel_count(), 1);
         assert_eq!(h.events().last().unwrap(), "done:回答体");
     }
 
     #[test]
-    fn leading_whitespace_before_prefix_still_answer() {
+    fn untagged_selection_output_fails_safe_to_answer_panel_instead_of_rewriting() {
         let h = Harness::new();
-        let out = h.run(vec![Ok("  ANSWER: 前导空格也算")], true).unwrap();
+        let out = h
+            .run(vec![Ok("这段文本可能"), Ok("表示超时错误。")], true)
+            .unwrap();
         assert_eq!(
             out,
-            AssistantOutcome::HandedOff(Some("前导空格也算".into()))
+            AssistantOutcome::HandedOff(Some("这段文本可能表示超时错误。".into()))
         );
-        assert_eq!(h.events().last().unwrap(), "done:前导空格也算");
+        assert_eq!(h.panel_count(), 1);
+        assert_eq!(
+            h.events(),
+            vec![
+                "started:指令",
+                "delta:这段文本可能",
+                "delta:表示超时错误。",
+                "done:这段文本可能表示超时错误。"
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_answer_prefix_fails_safe_to_panel_and_strips_prefix() {
+        let h = Harness::new();
+        let out = h
+            .run(vec![Ok("ANSWER: 原因"), Ok("是超时。")], true)
+            .unwrap();
+        assert_eq!(
+            out,
+            AssistantOutcome::HandedOff(Some("原因是超时。".into()))
+        );
+        assert_eq!(h.panel_count(), 1);
+        assert_eq!(h.events().last().unwrap(), "done:原因是超时。");
     }
 
     #[test]
@@ -407,13 +492,13 @@ mod tests {
     }
 
     #[test]
-    fn short_output_shorter_than_prefix_shown_as_answer() {
-        // 宁可不替换也不误替换：凑不满前缀长度的超短输出按回答展示
+    fn short_partial_tag_output_fails_safe_as_answer() {
+        // 宁可不替换也不误替换：未凑齐完整开标签的超短输出按回答展示
         let h = Harness::new();
-        let out = h.run(vec![Ok("AN")], true).unwrap();
-        assert_eq!(out, AssistantOutcome::HandedOff(Some("AN".into())));
+        let out = h.run(vec![Ok("<re")], true).unwrap();
+        assert_eq!(out, AssistantOutcome::HandedOff(Some("<re".into())));
         assert_eq!(h.panel_count(), 1);
-        assert_eq!(h.events().last().unwrap(), "done:AN");
+        assert_eq!(h.events().last().unwrap(), "done:<re");
     }
 
     #[test]
@@ -428,17 +513,45 @@ mod tests {
     fn error_after_panel_shown_in_panel() {
         let h = Harness::new();
         let out = h
-            .run(vec![Ok("ANSWER: 部分"), Err(ProviderError::Timeout)], true)
+            .run(vec![Ok("<answer>部分"), Err(ProviderError::Timeout)], true)
             .unwrap();
         assert_eq!(out, AssistantOutcome::HandedOff(None));
         assert!(h.events().last().unwrap().starts_with("error:"));
     }
 
     #[test]
-    fn empty_output_with_selection_is_err() {
+    fn empty_or_empty_tag_output_with_selection_is_err() {
+        for chunks in [
+            vec![Ok("   ")],
+            vec![Ok("<rewrite>   </rewrite>")],
+            vec![Ok("<answer>   </answer>")],
+            vec![Ok("ANSWER:   ")],
+        ] {
+            let h = Harness::new();
+            let r = h.run(chunks, true);
+            assert!(r.is_err());
+            assert_eq!(h.panel_count(), 0);
+        }
+    }
+
+    #[test]
+    fn single_long_chunk_rewrite_does_not_fall_back_to_panel() {
         let h = Harness::new();
-        let r = h.run(vec![Ok("   ")], true);
-        assert!(r.is_err());
+        let out = h
+            .run(
+                vec![Ok(
+                    "<rewrite>这是一段超过二十四个字节的单块改写结果，必须静默替换选区且不弹出回答窗。</rewrite>",
+                )],
+                true,
+            )
+            .unwrap();
+        assert_eq!(
+            out,
+            AssistantOutcome::Rewrite(
+                "这是一段超过二十四个字节的单块改写结果，必须静默替换选区且不弹出回答窗。".into()
+            )
+        );
         assert_eq!(h.panel_count(), 0);
+        assert!(h.events().is_empty());
     }
 }

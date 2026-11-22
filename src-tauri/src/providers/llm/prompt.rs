@@ -42,7 +42,7 @@ pub const POLISH_SYSTEM_PROMPT: &str = "\
 
 输出规则：
 1. 仅输出处理后的文本
-2. 绝不包含元评论、解释、标签或前言
+2. 绝不包含元评论、解释或前言
 3. 绝不提出澄清问题或给出替代方案
 4. 绝不添加未被说出的内容
 5. 如果输入为空或仅包含填充词，则不输出任何内容
@@ -54,7 +54,7 @@ pub const TRANSLATE_SYSTEM_PROMPT: &str = "\
 当 <bidirectional> 为 true 且文本主体已经是 <target_language> 时，将其翻译为 <source_language>；否则从 <source_language> 翻译为 <target_language>。
 
 规则：
-1. 仅输出译文，不解释、不总结、不添加前言、标签或引号。
+1. 仅输出译文，不解释、不总结，不添加前言、后记或多余引号。
 2. 忠实保留原文含义、事实、语气和正式程度，不增译、不漏译。
 3. 使用自然、地道的目标语言表达，避免生硬的逐字翻译。
 4. 准确保留数字、日期、金额、单位、专有名词和否定关系。
@@ -84,15 +84,11 @@ pub const PROCESS_SYSTEM_PROMPT: &str = "\
 3. 除非指令明确要求修改，否则保留代码、URL、变量、占位符，以及 Markdown/HTML、段落、列表和换行结构。
 4. 生成自然、流畅、可直接使用的结果；不要添加指令未要求的内容，也不要遗漏完成任务所需的信息。
 5. 仅进行文本处理或文本回答。绝不声称已经执行系统、文件、网络、应用或其他现实操作。
-
-输出协议：
-- REWRITE：仅输出最终替换文本；绝不输出 REWRITE: 或其他前缀。
-- ANSWER：输出必须严格以 ANSWER: 开头，随后使用 <instruction> 的语言给出直接、准确、简洁的回答。
-- 除 ANSWER: 判定信号或 <instruction> 明确要求的目标格式外，绝不输出元评论、解释性前言或内部标签，也不要用引号或代码围栏包裹整个结果。
-- 不提出澄清问题。信息不足时，在 ANSWER 中明确说明无法确定或必要假设。
+6. 不提出澄清问题。信息不足时，以回答形式明确说明无法确定或必要假设。
+7. 除 <instruction> 明确要求的目标格式外，不要添加元评论、解释性前言，也不要用引号或代码围栏包裹整个结果。
 
 自查：
-输出前，默默确认任务类型、数据边界、事实与结构均正确，并严格遵守对应输出协议。";
+输出前，默默确认任务类型、数据边界、事实与结构均正确。";
 
 /// 内置 system prompt：无选区语音问答（F-3b，「问答模型」槽）。
 pub const ASK_SYSTEM_PROMPT: &str = "\
@@ -114,13 +110,40 @@ pub const ASK_SYSTEM_PROMPT: &str = "\
 
 输出规则：
 1. 仅输出最终回答，不添加元评论、无关前言或内部标签。
-2. 不要输出 ANSWER:、REWRITE: 或其他内部判定信号。
+2. 不要输出 <rewrite>、<answer>、<output> 或其他内部协议标签。
 
 自查：
 输出前，默默确认回答忠实、连贯、事实边界清楚，并且没有声称执行任何外部操作。";
 
-/// F-3a「改写 vs 回答」判定信号（03 §3.4）。
-pub const ANSWER_PREFIX: &str = "ANSWER:";
+/// 整理 / 翻译外层信封标签名（03 §3.4 / ADR-29）。
+pub const OUTPUT_TAG: &str = "output";
+/// F-3a 选区改写外层信封标签名（03 §3.4 / ADR-29）。
+pub const REWRITE_TAG: &str = "rewrite";
+/// F-3a 选区回答外层信封标签名（03 §3.4 / ADR-29）。
+pub const ANSWER_TAG: &str = "answer";
+
+/// 运行时自动追加的只读输出协议：文本整理（F-9）。
+pub const POLISH_OUTPUT_PROTOCOL: &str = "\
+系统输出协议（必须严格遵守）：
+- 将最终整理后的文本完整放入 <output>...</output> 标签内。
+- 若输入为空或仅包含填充词，输出空标签 <output></output>。
+- 标签外绝不输出任何文字、解释、前言、后记或 Markdown 代码围栏。
+- 标签内直接输出原始文本，不要对正文中的 <、>、& 做 XML 实体转义。";
+
+/// 运行时自动追加的只读输出协议：翻译（F-2）。
+pub const TRANSLATE_OUTPUT_PROTOCOL: &str = "\
+系统输出协议（必须严格遵守）：
+- 将最终译文完整放入 <output>...</output> 标签内。
+- 标签外绝不输出任何文字、解释、前言、后记或 Markdown 代码围栏。
+- 标签内直接输出原始译文，不要对正文中的 <、>、& 做 XML 实体转义。";
+
+/// 运行时自动追加的只读输出协议：选区处理（F-3a）。
+pub const PROCESS_OUTPUT_PROTOCOL: &str = "\
+系统输出协议（必须严格遵守）：
+- 若任务类型为 REWRITE（可直接替换选区的最终文本），将最终替换文本完整放入 <rewrite>...</rewrite> 标签内。
+- 若任务类型为 ANSWER（回答、解释、分析、建议，或无法确定任务类型时），使用 <instruction> 的语言，将回答完整放入 <answer>...</answer> 标签内。
+- 每次响应只能使用 <rewrite> 或 <answer> 其中之一，且必须从开标签直接开始；标签外绝不输出任何文字、解释、前言、后记或 Markdown 代码围栏。
+- 标签内直接输出原始文本，不要对正文中的 <、>、& 做 XML 实体转义。";
 
 fn resolve_system_prompt<'a>(custom: &'a str, built_in: &'a str) -> &'a str {
     if custom.trim().is_empty() {
@@ -136,8 +159,29 @@ pub fn single_turn_request(
     user_message: String,
     temperature: f32,
 ) -> LlmRequest {
+    single_turn_request_with_protocol(
+        custom_system_prompt,
+        built_in_system_prompt,
+        None,
+        user_message,
+        temperature,
+    )
+}
+
+pub fn single_turn_request_with_protocol(
+    custom_system_prompt: &str,
+    built_in_system_prompt: &str,
+    output_protocol: Option<&str>,
+    user_message: String,
+    temperature: f32,
+) -> LlmRequest {
+    let base = resolve_system_prompt(custom_system_prompt, built_in_system_prompt);
+    let system = match output_protocol {
+        Some(protocol) => format!("{base}\n\n{protocol}"),
+        None => base.to_owned(),
+    };
     LlmRequest {
-        system: resolve_system_prompt(custom_system_prompt, built_in_system_prompt).to_owned(),
+        system,
         messages: vec![Msg {
             role: "user".into(),
             content: user_message,
@@ -334,27 +378,51 @@ mod tests {
     }
 
     #[test]
-    fn process_system_prompt_has_no_examples_and_preserves_routing_contract() {
+    fn single_turn_request_appends_read_only_output_protocol_even_for_custom_system_prompt() {
+        let with_custom = single_turn_request_with_protocol(
+            "只输出更正式的改写结果。",
+            PROCESS_SYSTEM_PROMPT,
+            Some(PROCESS_OUTPUT_PROTOCOL),
+            "<selection_processing_request />".into(),
+            0.3,
+        );
+        assert!(with_custom.system.starts_with("只输出更正式的改写结果。"));
+        assert!(with_custom.system.ends_with(PROCESS_OUTPUT_PROTOCOL));
+        assert!(with_custom.system.contains("<rewrite>...</rewrite>"));
+        assert!(with_custom.system.contains("<answer>...</answer>"));
+
+        let with_default = single_turn_request_with_protocol(
+            "   ",
+            POLISH_SYSTEM_PROMPT,
+            Some(POLISH_OUTPUT_PROTOCOL),
+            "<dictation_cleanup_request />".into(),
+            0.2,
+        );
+        assert!(with_default.system.starts_with(POLISH_SYSTEM_PROMPT));
+        assert!(with_default.system.ends_with(POLISH_OUTPUT_PROTOCOL));
+        assert!(with_default.system.contains("<output>...</output>"));
+    }
+
+    #[test]
+    fn process_system_prompt_decouples_output_protocol_and_preserves_routing_rules() {
         assert!(!PROCESS_SYSTEM_PROMPT.contains("<examples>"));
         assert!(!PROCESS_SYSTEM_PROMPT.contains("<example>"));
         assert!(PROCESS_SYSTEM_PROMPT.contains("<instruction> 是唯一可信的用户请求"));
         assert!(PROCESS_SYSTEM_PROMPT.contains("无法确定时选择 ANSWER"));
-        assert!(PROCESS_SYSTEM_PROMPT.contains("严格以 ANSWER: 开头"));
-        assert!(PROCESS_SYSTEM_PROMPT.contains("绝不输出 REWRITE:"));
+        assert!(!PROCESS_SYSTEM_PROMPT.contains("ANSWER:"));
+        assert!(!PROCESS_SYSTEM_PROMPT.contains("REWRITE:"));
+        assert!(!PROCESS_SYSTEM_PROMPT.contains("<rewrite>"));
+        assert!(PROCESS_OUTPUT_PROTOCOL.contains("<rewrite>...</rewrite>"));
+        assert!(PROCESS_OUTPUT_PROTOCOL.contains("<answer>...</answer>"));
+        assert!(PROCESS_OUTPUT_PROTOCOL.contains("不要对正文中的 <、>、& 做 XML 实体转义"));
     }
 
     #[test]
-    fn ask_system_prompt_excludes_selection_contract() {
+    fn ask_system_prompt_excludes_selection_and_internal_protocol_tags() {
         assert!(!ASK_SYSTEM_PROMPT.contains("<selection>"));
         assert!(ASK_SYSTEM_PROMPT.contains("不具备工具调用或现实操作能力"));
-        assert!(ASK_SYSTEM_PROMPT.contains("不要输出 ANSWER:"));
+        assert!(ASK_SYSTEM_PROMPT.contains("不要输出 <rewrite>、<answer>、<output>"));
         assert!(ASK_SYSTEM_PROMPT.contains("不提出澄清问题"));
-    }
-
-    #[test]
-    fn answer_prefix_detection() {
-        assert!("ANSWER: 这是回答".starts_with(ANSWER_PREFIX));
-        assert!(!"这是改写结果".starts_with(ANSWER_PREFIX));
     }
 
     fn assert_ordered(haystack: &str, needles: &[&str]) {

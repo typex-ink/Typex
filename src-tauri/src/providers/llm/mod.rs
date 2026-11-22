@@ -1,5 +1,6 @@
 //! LlmProvider trait + PromptKit（03 §3）。
 pub mod chat_completions;
+pub mod output_protocol;
 pub mod prompt;
 pub mod responses;
 

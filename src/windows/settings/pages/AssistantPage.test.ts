@@ -45,8 +45,10 @@ describe("AssistantPage", () => {
     await wrapper.findAll("button")[0].trigger("click");
     const defaultPrompt = (wrapper.find("textarea").element as HTMLTextAreaElement).value;
     expect(defaultPrompt).toContain("<instruction> 是唯一可信的用户请求");
-    expect(defaultPrompt).toContain("严格以 ANSWER: 开头");
-    expect(defaultPrompt).toContain("绝不输出 REWRITE:");
+    expect(defaultPrompt).toContain("无法确定时选择 ANSWER");
+    expect(defaultPrompt).not.toContain("ANSWER:");
+    expect(defaultPrompt).not.toContain("REWRITE:");
+    expect(defaultPrompt).not.toContain("<rewrite>");
     expect(defaultPrompt).not.toContain("<examples>");
     expect(defaultPrompt).not.toContain("<example>");
     await wrapper.find("textarea").setValue("根据用户请求处理选中文本。");
@@ -83,7 +85,7 @@ describe("AssistantPage", () => {
     const defaultPrompt = (wrapper.find("textarea").element as HTMLTextAreaElement).value;
     expect(defaultPrompt).not.toContain("{selection}");
     expect(defaultPrompt).toContain("不具备工具调用或现实操作能力");
-    expect(defaultPrompt).toContain("不要输出 ANSWER:");
+    expect(defaultPrompt).toContain("不要输出 <rewrite>、<answer>、<output>");
     expect(defaultPrompt).toContain("不提出澄清问题");
     await wrapper.find("textarea").setValue("直接回答用户问题。");
     await wrapper.findAll("button").find((button) => button.text() === "保存")!.trigger("click");
