@@ -1,0 +1,2 @@
+# Preserve exact upstream byte checksums for pinned Windows runtime license files across platforms.
+src-tauri/windows-runtime-notices/upstream/*.txt -text

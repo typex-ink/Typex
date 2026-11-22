@@ -325,36 +325,33 @@ $manifestFiles.Add([ordered]@{
     sha256 = Get-Sha256 $vulkanDestination
 })
 
+$upstreamNoticesDir = Join-Path $tauriDir "windows-runtime-notices\upstream"
 $notices = @(
     [ordered]@{
         name = "onnxruntime-LICENSE.txt"
-        uri = "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.17.1/LICENSE"
         sha256 = "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
         version = "ONNX Runtime 1.17.1"
     },
     [ordered]@{
         name = "onnxruntime-ThirdPartyNotices.txt"
-        uri = "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.17.1/ThirdPartyNotices.txt"
         sha256 = "4f9e2bb7b4b407d710a68168615bbc6f70e3d7cc8ba9410fb6c65d92fa71accf"
         version = "ONNX Runtime 1.17.1"
     },
     [ordered]@{
         name = "sherpa-rs-LICENSE.txt"
-        uri = "https://raw.githubusercontent.com/thewh1teagle/sherpa-rs/199263d22c32f7a9242d5d9f489f6c4432e0e9f2/LICENSE"
         sha256 = "6abe39d7066d08bf8335a2782b13bd99966498d89bb8fc730fd8900f18b82c9f"
         version = "sherpa-rs-sys 0.6.8"
     },
     [ordered]@{
         name = "vulkan-loader-LICENSE.txt"
-        uri = "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/vulkan-sdk-1.3.296.0/LICENSE.txt"
         sha256 = "43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
         version = "Vulkan Loader / Apache-2.0"
     }
 )
 foreach ($notice in $notices) {
-    $cached = Join-Path $CacheDir $notice.name
-    Get-VerifiedDownload $notice.uri $cached $notice.sha256
-    Add-StagedFile $cached $notice.name "pinned-upstream-license" $notice.version
+    $source = Join-Path $upstreamNoticesDir $notice.name
+    Assert-Sha256 $source $notice.sha256
+    Add-StagedFile $source $notice.name "pinned-upstream-license" $notice.version
 }
 
 $appVersion = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot "package.json") | ConvertFrom-Json).version
